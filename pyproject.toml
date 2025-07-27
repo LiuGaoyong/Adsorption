@@ -13,8 +13,11 @@ authors = [
 requires-python = ">=3.9"
 dependencies = [
     "ase>=3.24",
+    "numpy>=1.24",
     "pygfn0>=0.0.2",
     "pygfnff>=0.0.2",
+    "scipy>=1.13",
+    "typing-extensions>=4.14.1",
 ]
 [dependency-groups]
 dev = [
