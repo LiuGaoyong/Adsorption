@@ -5,6 +5,8 @@ from ase.build import molecule
 from ase.calculators.calculator import Calculator
 from ase.data import chemical_symbols as SYMBOLS
 from numpy import typing as npt
+from scipy.optimize import OptimizeResult, minimize
+from scipy.spatial.distance import cdist
 
 from adsorption.calculator import get_calculator
 from adsorption.rotation import Rot, rotate
@@ -70,9 +72,53 @@ def add_adsorbate_and_optimize(
     core = [core] if isinstance(core, int) else core
     core = np.asarray(core, dtype=int)
 
-    raise NotImplementedError("Not implemented yet.")
+    ads_idx = list(range(len(atoms), len(atoms) + len(ads)))
+    core_and_ads = np.append(core, ads_idx).astype(int)
 
-    return Atoms()
+    def _fun(x) -> Atoms:
+        x = np.asarray(x, dtype=float).flatten()
+        assert x.ndim == 1 and x.shape == (9,)
+        d, x0, y0, z0, w0, x1, y1, z1, w1 = x
+        return add_adsorbate(
+            atoms=atoms,
+            adsorbate=ads,
+            core=core,
+            distance=d,
+            rotation0=Rot.from_quat([x0, y0, z0, w0], scalar_first=False),
+            rotation1=Rot.from_quat([x1, y1, z1, w1], scalar_first=False),
+        )
+
+    def fun(x) -> float:
+        new_atoms: Atoms = _fun(x)
+        pos = new_atoms.positions
+        d = cdist(pos[core_and_ads], pos)
+        mask = np.sum(d < 8, axis=0).astype(bool)
+        assert mask.ndim == 1 and mask.shape == (len(new_atoms),)
+        calc_atoms = Atoms(new_atoms[mask], calculator=calculator)
+        return calc_atoms.get_potential_energy()
+
+    x0 = np.array([3])  # initial distance between COM of core and ads
+    x0 = np.append(x0, Rot.random().as_quat(canonical=True, scalar_first=False))
+    x0 = np.append(x0, Rot.random().as_quat(canonical=True, scalar_first=False))
+    result: OptimizeResult = minimize(
+        fun=fun,
+        x0=x0,
+        bounds=[
+            (2, 5),
+            (-1.0, 1.0),
+            (-1.0, 1.0),
+            (-1.0, 1.0),
+            (-1.0, 1.0),
+            (-1.0, 1.0),
+            (-1.0, 1.0),
+            (-1.0, 1.0),
+            (-1.0, 1.0),
+        ],
+    )
+    if result.success:
+        return _fun(result.x)
+    else:
+        raise RuntimeError("Optimization is not successfully.")
 
 
 def add_adsorbate(

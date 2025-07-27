@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 import pytest
@@ -77,10 +78,25 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
     calculator: str,
     name: str,
 ) -> None:  # noqa: D103
-    result = add_adsorbate_and_optimize(
-        atoms=atoms,
-        adsorbate=molecule(adsorbate),
-        calculator=calculator,
-        core=core,
-    )
-    result.write(f"{name}_{calculator}.xyz", format="extxyz")
+    print()
+    k = f"{adsorbate}_{name}_{calculator}"
+    t0 = perf_counter()
+    try:
+        result = add_adsorbate_and_optimize(
+            atoms=atoms,
+            adsorbate=molecule(adsorbate),
+            calculator=calculator,
+            core=core,
+        )
+        result.write(f"{k}.xyz", format="extxyz")
+        print(f"  Write: {Path(__file__).parent / f'{k}.xyz'}")
+    except RuntimeError:
+        msg = (
+            f"  No success: name={name},"
+            f"calculator={calculator},"
+            f"adsorbate={adsorbate}."
+        )
+        with open(f"{k}.error", "w") as f:
+            f.write(msg)
+        print(msg)
+    print(f"  Time({k}) = {perf_counter() - t0:.4f} s")
