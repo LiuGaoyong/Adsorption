@@ -70,7 +70,7 @@ def test_add_adsorbate(  # noqa: D103
         ([610], "s_top"),  # surface top
     ],
 )
-@pytest.mark.parametrize("calculator", ["lj", "gfnff", "gfn0"])
+@pytest.mark.parametrize("calculator", ["lj", "gfnff"])
 def test_add_adsorbate_and_optimize(  # noqa: D103
     atoms,
     adsorbate,

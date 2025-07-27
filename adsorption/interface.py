@@ -17,6 +17,7 @@ def add_adsorbate_and_optimize(
     adsorbate: Atoms | Atom | str,
     calculator: Calculator | str = "gfnff",
     core: npt.ArrayLike | list[int] | int = 0,
+    initial_random_rotation: bool = False,
 ) -> Atoms:
     """Add an adsorbate to a surface or cluster & Optimizition.
 
@@ -39,6 +40,9 @@ def add_adsorbate_and_optimize(
         core (npt.ArrayLike | list[int] | int, optional):
             The central atoms (core) which will place at.
             Defaults to the first atom, i.e. the 0-th atom.
+        initial_random_rotation (bool, optional):
+            If True, The rotation will be randomly set.
+            If False, They will be the identity rotations.
 
     Returns:
         Atoms: The surface or cluster with adsorbate after optimization.
@@ -98,8 +102,12 @@ def add_adsorbate_and_optimize(
         return calc_atoms.get_potential_energy()
 
     x0 = np.array([3])  # initial distance between COM of core and ads
-    x0 = np.append(x0, Rot.random().as_quat(canonical=True, scalar_first=False))
-    x0 = np.append(x0, Rot.random().as_quat(canonical=True, scalar_first=False))
+    if initial_random_rotation:
+        r0, r1 = Rot.random(), Rot.random()
+    else:
+        r0, r1 = Rot.identity(), Rot.identity()
+    x0 = np.append(x0, r0.as_quat(canonical=True, scalar_first=False))
+    x0 = np.append(x0, r1.as_quat(canonical=True, scalar_first=False))
     result: OptimizeResult = minimize(
         fun=fun,
         x0=x0,
