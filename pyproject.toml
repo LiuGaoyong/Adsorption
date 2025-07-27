@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adsorption"
+version = "0.0.1"
+description = "Adsorption Based on ASE"
+readme = "README.md"
+authors = [
+    { name = "LiuGaoyong", email = "liugaoyong_88@163.com" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "ase>=3.24",
+    "pygfn0>=0.0.2",
+    "pygfnff>=0.0.2",
+]
+[dependency-groups]
+dev = [
+    "ruff>=0.11",
+    "pytest>=8.3",
+]
+
+
+# pytest config
+[tool.pytest.ini_options]
+addopts = '--maxfail=1 -rf' # exit after 1 failures, report fail info
+testpaths = ["tests"]
+filterwarnings = [
+    "error", # All other warnings are transformed into errors.
+    # ignore the following warnings that matching a regex
+]
+
+
+# ruff config
+[tool.ruff]
+line-length = 80
+indent-width = 4
+select = ["F", "E", "W", "UP", "D"]
+ignore = ["F722", 'UP038', 'D100']
+[tool.ruff.pydocstyle]
+convention = "google"
