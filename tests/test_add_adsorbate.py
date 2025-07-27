@@ -90,12 +90,8 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
         )
         result.write(f"{k}.xyz", format="extxyz")
         print(f"  Write: {Path(__file__).parent / f'{k}.xyz'}")
-    except RuntimeError:
-        msg = (
-            f"  No success: name={name},"
-            f"calculator={calculator},"
-            f"adsorbate={adsorbate}."
-        )
+    except Exception as e:
+        msg = f"  No success: for {k} because of {e}"
         with open(f"{k}.error", "w") as f:
             f.write(msg)
         print(msg)
