@@ -1,14 +1,13 @@
-from random import random
-
+import numpy as np
 import pytest
 from ase.build import molecule
 
-from adsorption.rotation import Rot, rotate
+from adsorption.rotation import Rot, kabsch, rotate
 
 
 def test_rotation() -> None:  # noqa: D103
     ben = molecule("C6H6")
-    points = ben.positions + [random()] * 3
+    points = ben.positions + np.random.random(3)
     center = points.mean(axis=0)
     print(f"Points center: {center}")
 
@@ -27,3 +26,19 @@ def test_rotation() -> None:  # noqa: D103
     rotated = rotate(points, rotation)
     print(f"Rotated points around center point:\n{rotated}")
     assert pytest.approx(rotated.mean(axis=0)) == center
+
+
+def test_kabsch() -> None:  # noqa: D103
+    B = molecule("C6H6").positions + np.random.random(3)
+    R, T = Rot.random(), np.random.random(3)
+
+    A = rotate(B, R) + T
+    assert pytest.approx((A - T).mean(axis=0)) == B.mean(axis=0)
+
+    R0, T0, rmsd = kabsch(A, B)
+    assert isinstance(T0, np.ndarray)
+    assert pytest.approx(T0) == T
+    assert isinstance(R0, Rot)
+    assert pytest.approx(R0.as_matrix()) == R.as_matrix()
+    assert rmsd <= 1e-5
+    assert pytest.approx(rotate(B, R0) + T0) == A
