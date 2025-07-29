@@ -1,3 +1,5 @@
+from warnings import catch_warnings, filterwarnings
+
 import numpy as np
 from numpy import typing as npt
 from scipy.spatial.transform import Rotation as Rot
@@ -88,40 +90,12 @@ def kabsch(
     assert np.all(np.abs(np.mean(A, axis=0)) < 1e-5)
     assert np.all(np.abs(np.mean(B, axis=0)) < 1e-5)
 
-    rotation, rmsd = Rot.align_vectors(
-        A,
-        B,
-        weights=None,
-        return_sensitivity=False,
-    )
+    with catch_warnings():
+        filterwarnings("ignore", category=UserWarning)
+        rotation, rmsd = Rot.align_vectors(
+            A,
+            B,
+            weights=None,
+            return_sensitivity=False,
+        )
     return rotation, centroid_A - centroid_B, rmsd
-
-
-def new_rotation_from(
-    A: npt.ArrayLike,
-    B: npt.ArrayLike,
-    C: npt.ArrayLike,
-) -> Rot:
-    """Construct rotation for converting B point to A point around C point."""
-    A, B, C = np.asarray(A), np.asarray(B), np.asarray(C)
-    if A.ndim != 1 or B.ndim != 1 or C.ndim != 1:
-        raise ValueError("Arrays must be of 1D arrays.")
-    if A.shape[0] != 3 or B.shape[0] != 3 or C.shape[0] != 3:
-        raise ValueError("Array must be 3D vector.")
-    assert (
-        isinstance(A, np.ndarray)
-        and isinstance(B, np.ndarray)
-        and isinstance(C, np.ndarray)
-    )
-
-    a, b = A - C, B - C
-    a /= np.linalg.norm(a)
-    b /= np.linalg.norm(b)
-    rotation, rmsd = Rot.align_vectors(
-        np.atleast_2d(a),
-        np.atleast_2d(b),
-        weights=None,
-        return_sensitivity=False,
-    )
-    assert rmsd < 1e-5
-    return rotation
