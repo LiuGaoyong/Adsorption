@@ -10,6 +10,8 @@ def rotate(
 ) -> np.ndarray:
     """Rotate 3D points by the provided rotation around a given center.
 
+    Default rotation center is the geometry center of the given points.
+
     Args:
         points (npt.ArrayLike): The 3D points to rotate.
         rotation (Rot, optional): The rotation. Defaults to Rot.random().
@@ -48,7 +50,7 @@ def kabsch(
     """Find rotation matrix and translation vector for convert A into B.
 
     This method solves and returns the R & t in
-        A = R.apply(B) + t
+        A = rotate(B) + t
         where A & B are Nx3 matrices for point coordinates,
             R is the scipy Rotation object, and
             t is the 3D translation vector.
@@ -93,3 +95,33 @@ def kabsch(
         return_sensitivity=False,
     )
     return rotation, centroid_A - centroid_B, rmsd
+
+
+def new_rotation_from(
+    A: npt.ArrayLike,
+    B: npt.ArrayLike,
+    C: npt.ArrayLike,
+) -> Rot:
+    """Construct rotation for converting B point to A point around C point."""
+    A, B, C = np.asarray(A), np.asarray(B), np.asarray(C)
+    if A.ndim != 1 or B.ndim != 1 or C.ndim != 1:
+        raise ValueError("Arrays must be of 1D arrays.")
+    if A.shape[0] != 3 or B.shape[0] != 3 or C.shape[0] != 3:
+        raise ValueError("Array must be 3D vector.")
+    assert (
+        isinstance(A, np.ndarray)
+        and isinstance(B, np.ndarray)
+        and isinstance(C, np.ndarray)
+    )
+
+    a, b = A - C, B - C
+    a /= np.linalg.norm(a)
+    b /= np.linalg.norm(b)
+    rotation, rmsd = Rot.align_vectors(
+        np.atleast_2d(a),
+        np.atleast_2d(b),
+        weights=None,
+        return_sensitivity=False,
+    )
+    assert rmsd < 1e-5
+    return rotation

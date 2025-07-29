@@ -1,12 +1,14 @@
 import numpy as np
+import numpy.typing as npt
 from ase.atom import Atom
 from ase.atoms import Atoms
 from ase.build import molecule
 from ase.calculators.calculator import Calculator
 from ase.data import chemical_symbols as SYMBOLS
-from numpy import typing as npt
+from ase.data import covalent_radii as COV_R
 from scipy.optimize import OptimizeResult, minimize
 from scipy.spatial.distance import cdist
+from skopt import gp_minimize
 
 from adsorption.calculator import get_calculator
 from adsorption.rotation import Rot, rotate
@@ -18,6 +20,7 @@ def add_adsorbate_and_optimize(
     calculator: Calculator | str = "gfnff",
     core: npt.ArrayLike | list[int] | int = 0,
     initial_random_rotation: bool = False,
+    use_bayesian: bool = True,
 ) -> Atoms:
     """Add an adsorbate to a surface or cluster & Optimizition.
 
@@ -43,6 +46,7 @@ def add_adsorbate_and_optimize(
         initial_random_rotation (bool, optional):
             If True, The rotation will be randomly set.
             If False, They will be the identity rotations.
+        use_bayesian (bool, optional): wether use bayesian optimization.
 
     Returns:
         Atoms: The surface or cluster with adsorbate after optimization.
@@ -101,32 +105,120 @@ def add_adsorbate_and_optimize(
         calc_atoms = Atoms(new_atoms[mask], calculator=calculator)
         return calc_atoms.get_potential_energy()
 
-    x0 = np.array([3])  # initial distance between COM of core and ads
-    if initial_random_rotation:
-        r0, r1 = Rot.random(), Rot.random()
+    x_upper = [5, 1, 1, 1, 1, 1, 1, 1, 1]
+    x_lower = [2, -1, -1, -1, -1, -1, -1, -1, -1]
+    x_bounds = np.column_stack([x_lower, x_upper])
+
+    if use_bayesian:
+        result = gp_minimize(func=fun, dimensions=x_bounds)
     else:
-        r0, r1 = Rot.identity(), Rot.identity()
-    x0 = np.append(x0, r0.as_quat(canonical=True, scalar_first=False))
-    x0 = np.append(x0, r1.as_quat(canonical=True, scalar_first=False))
-    result: OptimizeResult = minimize(
-        fun=fun,
-        x0=x0,
-        bounds=[
-            (2, 5),
-            (-1.0, 1.0),
-            (-1.0, 1.0),
-            (-1.0, 1.0),
-            (-1.0, 1.0),
-            (-1.0, 1.0),
-            (-1.0, 1.0),
-            (-1.0, 1.0),
-            (-1.0, 1.0),
-        ],
-    )
-    if result.success:
+        x0 = np.array([3])  # initial distance between COM of core and ads
+        if initial_random_rotation:
+            r0, r1 = Rot.random(), Rot.random()
+        else:
+            r0, r1 = Rot.identity(), Rot.identity()
+        x0 = np.append(x0, r0.as_quat(canonical=True, scalar_first=False))
+        x0 = np.append(x0, r1.as_quat(canonical=True, scalar_first=False))
+        result = minimize(fun=fun, x0=x0, bounds=x_bounds)
+    if isinstance(result, OptimizeResult) and result.success:
         return _fun(result.x)
     else:
         raise RuntimeError("Optimization is not successfully.")
+
+
+def _add_adsorbate_guess(
+    atoms: Atoms,
+    adsorbate: Atoms,
+    core: npt.ArrayLike,
+    adsorbate_index: int | None = None,
+) -> tuple[float, Rot, Rot]:
+    """Guess the distance and rotation of the adsorbate.
+
+    Returns:
+        distance (float): The distance between the COM of adsorbate and core.
+        rotation0 (Rot): The rotation of the adsorbate around core's COM.
+        rotation1 (Rot): The rotation of the adsorbate around its COM
+    """
+    assert isinstance(atoms, Atoms), "Input must be of type Atoms."
+    assert isinstance(adsorbate, Atoms), "Adsorbate must be of type Atoms."
+
+    core = [core] if isinstance(core, int) else core
+    core = np.asarray(core, dtype=int).flatten()
+    assert isinstance(core, np.ndarray) and core.ndim == 1 and core.size > 0, (
+        "The core must be a 1D array-like object with at least one element."
+    )
+    assert np.all(core < len(atoms)), "The core must be within the atoms."
+    assert np.all(core >= 0), "The core must be non-negative."
+    cov_radii_core = np.mean(COV_R[atoms.numbers[core]])
+
+    com_atoms = atoms.get_center_of_mass()
+    com_core = Atoms(atoms[core]).get_center_of_mass()
+    direction: np.ndarray = com_core - com_atoms
+    direction /= np.linalg.norm(direction)
+
+    raise NotImplementedError("Not implemented yet")
+    if len(adsorbate) == 0:
+        raise ValueError("The adsorbate must have at least one atom.")
+    elif len(adsorbate) == 1:
+        d = COV_R[adsorbate.numbers[0]] + cov_radii_core
+        adsorbate_positions = com_core + d * direction
+    else:
+        com_ads = adsorbate.get_center_of_mass()
+        if adsorbate_index is None:
+            v2com_ads = adsorbate.positions - com_ads
+            d2com_ads = np.linalg.norm(v2com_ads, axis=1)
+            adsorbate_index = int(np.argmin(d2com_ads))
+        assert isinstance(adsorbate_index, int), (
+            "The adsorbate_index must be None or integer."
+        )
+        ref_pos = adsorbate.positions[adsorbate_index]
+
+        d_ads = float(np.linalg.norm(ref_pos - com_ads))
+        d = COV_R[adsorbate.numbers[adsorbate_index]] + cov_radii_core
+        target_com_ads = com_core + (d + d_ads) * direction
+        target_ref_pos = com_core + d * direction
+
+        new_adsorbate = Atoms(
+            numbers=adsorbate.numbers,
+            positions=adsorbate.positions - ref_pos + target_ref_pos,
+        )  # translation adsorbate to target position
+        new_adsorbate.rotate(
+            a=new_adsorbate.get_center_of_mass(),
+            v=target_com_ads,
+            center=target_ref_pos,
+        )
+        adsorbate_positions = new_adsorbate.positions
+
+    return Atoms(
+        numbers=np.append(atoms.numbers, adsorbate.numbers),
+        positions=np.vstack((atoms.positions, adsorbate_positions)),
+        cell=atoms.cell,
+        pbc=atoms.pbc,
+    )
+
+
+def add_adsorbate_guess(
+    atoms: Atoms,
+    adsorbate: Atoms,
+    core: npt.ArrayLike,
+    adsorbate_index: int | None = None,
+) -> Atoms:
+    """Add an adsorbate to a surface or cluster.
+
+    Args:
+        atoms (Atoms): The surface or cluster.
+        adsorbate (Atoms): The adsorbate molecule.
+        core (npt.ArrayLike): The central atoms (core) which to place at.
+            Defaults to the first atom, i.e. the 0-th atom.
+        adsorbate_index (int | None, optional): The index of the adsorbate.
+            Defaults to None. It means that the adsorbate's core is its COM.
+            If it is interger, it means that the adsorbate's core is the atom.
+
+    Returns:
+        Atoms: The surface or cluster with adsorbate after optimization.
+    """
+    raise NotImplementedError("Not implemented yet")
+    return Atoms()
 
 
 def add_adsorbate(
