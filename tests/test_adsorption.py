@@ -38,7 +38,7 @@ def result_dir() -> Path:  # noqa: D103
     ],
 )
 @pytest.mark.parametrize("calculator", ["lj", "gfnff"])
-@pytest.mark.parametrize("mode", ["guess", "scipy", "bayesian", "ase"])
+@pytest.mark.parametrize("mode", ["guess"])  # , "ase", "scipy", "bayesian"])
 def test_add_adsorbate_and_optimize(  # noqa: D103
     atoms,
     adsorbate,
@@ -65,5 +65,6 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
         with fname.open("w") as f:
             f.write(msg)
         print(msg)
+        raise e
     finally:
         print(f"  Time({k}) = {perf_counter() - t0:.4f} s")

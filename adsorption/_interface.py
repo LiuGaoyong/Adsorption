@@ -7,9 +7,7 @@ from ase.calculators.calculator import Calculator
 from ase.constraints import FixAtoms, FixBondLengths
 from ase.data import chemical_symbols as SYMBOLS
 from ase.data import covalent_radii as COV_R
-from ase.neighborlist import build_neighbor_list, get_connectivity_matrix
 from ase.optimize import LBFGS
-from scipy import sparse as sp
 from scipy.optimize import OptimizeResult, minimize
 from scipy.spatial.distance import cdist
 from scipy.spatial.transform import Rotation
@@ -64,7 +62,7 @@ class Adsorption:
         elif isinstance(adsorbate, Atom):
             ads = Atoms([adsorbate])
         elif isinstance(adsorbate, str):
-            if adsorbate.lower().capitalize() in SYMBOLS:
+            if adsorbate in SYMBOLS:
                 ads = Atoms([Atom(adsorbate)])
             else:
                 try:
@@ -194,20 +192,23 @@ class Adsorption:
             raise RuntimeError("The bayesian optimization failed.")
 
     def _add_adsorbate_ase(self) -> Atoms:
-        nl = build_neighbor_list(self.__adsorbate)
-        conn = get_connectivity_matrix(nl, sparse=True)  # type: ignore
-        conn: dict[tuple[int, int], bool] = sp.triu(conn).todok()
+        pair = np.triu_indices(len(self.__adsorbate), k=1)
         iatoms = self._add_adsorbate_guess()
         iatoms.calc = self.__calculator
         iatoms.set_constraint(
             [
-                FixBondLengths(list(conn.keys())),
+                FixBondLengths(np.column_stack(pair)),
                 FixAtoms(indices=list(range(len(self.__atoms)))),
             ]
         )
         opt = LBFGS(iatoms, logfile=None, trajectory=None)  # type: ignore
         opt.run(fmax=0.03, steps=100)
-        return Atoms(iatoms.numbers, iatoms.positions, iatoms.cell, iatoms.pbc)
+        return Atoms(
+            numbers=iatoms.numbers,
+            positions=iatoms.positions,
+            cell=iatoms.cell,
+            pbc=iatoms.pbc,
+        )
 
     def _add_adsorbate_guess(self) -> Atoms:
         rotation, translation = _add_adsorbate_guess(
