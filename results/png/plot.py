@@ -25,7 +25,10 @@ def plot(k="O"):  # noqa: D103
         if id != 0:
             f = pngs[id - 1]
             axes[i, j].imshow(plt.imread(f))
-            axes[i, j].set_title(",".join(f.name.split(".")[0].split("_")[1:3]))
+            axes[i, j].set_title(
+                ",".join(f.name.split(".")[0].split("_")[1:3]),
+                fontsize=20,
+            )
     fig.tight_layout()
     plt.savefig(f"ZZZ_{k}.png")
 
