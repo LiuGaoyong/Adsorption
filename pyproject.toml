@@ -22,7 +22,7 @@ dependencies = [
     "typing-extensions",
 ]
 [dependency-groups]
-dev = ["ruff>=0.11", "pytest>=8.3", "pytest-xdist", "ipython"]
+dev = ["ruff>=0.11", "pytest>=8.3", "pytest-xdist", "jupyterlab"]
 
 # uv config
 [tool.uv]

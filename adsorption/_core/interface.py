@@ -1,8 +1,6 @@
 """The core ABC classes for adsorption."""
 
 from abc import ABC
-from functools import reduce
-from operator import iadd
 
 import numpy as np
 import numpy.typing as npt
@@ -10,11 +8,18 @@ from ase.atom import Atom
 from ase.atoms import Atoms
 from ase.build import molecule
 from ase.calculators.calculator import Calculator
+from ase.constraints import FixAtoms
 from ase.data import chemical_symbols as SYMBOLS
+from ase.data import covalent_radii as COV_R
+from ase.optimize.lbfgs import LBFGS
 from GraphAtoms import Cluster, Gas, System
+from GraphAtoms.common.geometry import distance_factory
+from GraphAtoms.common.rotation import rotate
+from GraphAtoms.containner import GRAPH_KEY
+from scipy.spatial.transform import Rotation
 
-from .abc import Point, Site, Vector
-from .calculator import get_calculator
+from adsorption._core.abc import Site
+from adsorption._core.calculator import get_calculator
 
 
 class AdsorptionABC(ABC):
@@ -56,9 +61,28 @@ class AdsorptionABC(ABC):
         assert isinstance(atoms, (Atoms, System, Cluster)), (
             f"Invalid atoms type({type(atoms)})."
         )
-        if isinstance(atoms, Atoms):
-            atoms = System.from_ase(atoms)
-        self.sutrct: System | Cluster = atoms
+        self.__atoms_cls = type(atoms)
+        if not isinstance(atoms, Atoms):
+            atoms = atoms.as_ase()
+        else:
+            atoms = System.from_ase(atoms).as_ase()
+        self.atoms = Atoms(
+            atoms,
+            calculator=None,
+            info={
+                k: v
+                for k, v in atoms.info.items()
+                if k
+                in (
+                    GRAPH_KEY.BOND.CONNECTIVITY,
+                    GRAPH_KEY.ATOM.MOVE_FIX_TAG,
+                    GRAPH_KEY.ATOM.COORDINATION,
+                    GRAPH_KEY.ATOM.IS_OUTER,
+                    GRAPH_KEY.GRAPH.HASH,
+                    GRAPH_KEY.GRAPH.BOX,
+                )
+            },
+        )
 
         # Convert the adsorbate to an Atoms object
         if isinstance(adsorbate, Atoms):
@@ -76,10 +100,15 @@ class AdsorptionABC(ABC):
                     ads = None
         elif isinstance(adsorbate, Gas):
             ads = adsorbate.as_ase()
-        assert isinstance(ads, Atoms), f"{adsorbate} is not a valid adsorbate."
+        else:
+            raise KeyError(f"Invalid adsorbate type({type(adsorbate)}).")
+        assert isinstance(ads, Atoms), (
+            f"Invalid adsorbate type({type(adsorbate)}."
+        )
         if len(ads) == 0:
             raise ValueError("The adsorbate must have at least one atom.")
         self.adsorbate: Atoms = ads
+        self.adsorbate_cov_r = COV_R[self.adsorbate.numbers]
 
         if adsorbate_index is None:
             ads_nonH_idx = np.where(ads.numbers != 1)[0]
@@ -125,31 +154,42 @@ class AdsorptionABC(ABC):
         # Convert the core atoms to a list of integers (np.ndarray)
         core = [core] if isinstance(core, int) else core
         self.core = np.asarray(core, dtype=int)
+        if len(self.core) > 6:
+            raise ValueError(
+                "The core size must be less than or "
+                "equal to 6.The value of core: {core}."
+            )
+        self.core_cov_r = COV_R[self.atoms.numbers[self.core]]
 
-        nbr1hop = reduce(
-            iadd,
-            self.sutrct.IGRAPH.neighborhood(
-                vertices=self.core,
-                order=1,
-                mindist=1,
-            ),
+        i, j = np.transpose(self.atoms.info[GRAPH_KEY.BOND.CONNECTIVITY])
+        nbr1hop = np.append(i[np.isin(j, self.core)], j[np.isin(i, self.core)])
+        nbr1hop = np.setdiff1d(nbr1hop, self.core).flatten()
+        assert len(nbr1hop) > 0, (
+            f"No 1-hop neighbors found for the core of {self.core}."
         )
-        nbr1hop = np.asarray(nbr1hop, dtype=int)
-        assert len(nbr1hop) > 0 and nbr1hop.ndim == 1
-        assert not np.any(np.isin(nbr1hop, self.core))
         site = Site.from_numpy(
-            nbr=self.sutrct.positions[nbr1hop],
-            core=self.sutrct.positions[self.core],
+            nbr=self.atoms.positions[nbr1hop],
+            core=self.atoms.positions[self.core],
         )
-        self.center: Point = site.center
-        self.direction: Vector = site.normal
+        self.center: np.ndarray = np.asarray(site.center.to_list())
+        self.direction: np.ndarray = np.asarray(site.normal.norm.to_list())
+
+    def _get_distance_2site(self, ads_r: float) -> float:
+        r1, r2 = float(ads_r), float(np.mean(self.core_cov_r))
+        if len(self.core) == 1:
+            return r1 + r2
+        elif len(self.core) == 2:
+            return np.sqrt(r1**2 + 2 * r1 * r2)
+        else:
+            x2 = (r2 / np.sin(np.pi / len(self.core))) ** 2
+            return np.sqrt((r1 + r2) ** 2 - x2)
 
     def __call__(  # noqa: D417
         self,
         *args,
         mode: str = "guess",
         **kwds,
-    ) -> Atoms | System | Cluster:
+    ) -> System | Cluster:
         """Run the adsorption calculation.
 
         Args:
@@ -162,4 +202,95 @@ class AdsorptionABC(ABC):
         """
         self.__backend_name: str = f"_add_adsorbate_{mode}"
         assert hasattr(self, self.__backend_name), f"Invalid mode: {mode}."
-        return getattr(self, self.__backend_name)(*args, **kwds)
+        atoms: Atoms = getattr(self, self.__backend_name)(*args, **kwds)
+        _opt = "total"
+        if _opt == "total":
+            atoms.calc = self.calculator
+            atoms.set_constraint(
+                FixAtoms(
+                    indices=[
+                        i
+                        for i in range(len(atoms))
+                        if i not in self.core or i >= len(self.atoms)
+                    ]
+                )
+            )
+            opt = LBFGS(
+                atoms,
+                # logfile=None,  # type: ignore
+                trajectory=None,
+            )
+            opt.run(fmax=0.5)
+        else:
+            d = distance_factory.get_distance_reduce_array(
+                p1=atoms.positions[self.core],
+                p2=atoms.positions,
+                cell=atoms.cell,
+                max_distance=15,
+                reduce_axis=0,
+            )
+            idxs = np.where(d < 14.5)[0]
+            subatoms = Atoms(
+                atoms[idxs],
+                calculator=self.calculator,
+                info={},
+                constraint=FixAtoms(
+                    indices=[
+                        i
+                        for i, old_i in enumerate(idxs)
+                        if old_i not in self.core or old_i >= len(self.atoms)
+                    ],
+                ),
+            )
+            opt = LBFGS(
+                subatoms,
+                # logfile=None,  # type: ignore
+                trajectory=None,
+            )
+            opt.run(fmax=0.5)
+            atoms.positions[idxs] = subatoms.positions
+        return (
+            System.from_ase(atoms, infer_conn=True)
+            if not issubclass(self.__atoms_cls, System)
+            else self.__atoms_cls.from_ase(atoms, infer_conn=False)
+        )
+
+    @staticmethod
+    def add_adsorbate(
+        atoms: Atoms,
+        adsorbate: Atoms,
+        translation: npt.ArrayLike,
+        rotation: Rotation,
+    ) -> Atoms:
+        """Add an adsorbate to a surface or cluster.
+
+        Args:
+            atoms (Atoms): The surface or cluster.
+            adsorbate (Atoms): The adsorbate molecule.
+            translation (npt.ArrayLike): The translation vector (3D).
+            rotation (Rotation): The rotation matrix.
+
+        Returns:
+            Atoms: The surface or cluster with adsorbate after optimization.
+        """
+        assert isinstance(atoms, Atoms), "Input must be of type Atoms."
+        assert isinstance(adsorbate, Atoms), "Adsorbate must be of type Atoms."
+        assert isinstance(rotation, Rotation), (
+            "Rotation must be of type Rotation."
+        )
+
+        translation = np.asarray(translation, dtype=float).flatten()
+        assert translation.shape == (3,), "The translation must be a 3D vector."
+
+        adsorbate_positions = rotate(
+            rotation=rotation,
+            points=adsorbate.positions,
+            center=None,  # around geometry center
+        )
+        adsorbate_positions += translation
+        return Atoms(
+            numbers=np.append(atoms.numbers, adsorbate.numbers),
+            positions=np.vstack((atoms.positions, adsorbate_positions)),
+            cell=atoms.cell,
+            pbc=atoms.pbc,
+        )

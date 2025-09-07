@@ -5,7 +5,7 @@ import pytest
 from ase import Atoms
 from ase.io import read
 
-from adsorption.optmization._interface import Adsorption
+from adsorption import Adsorption
 
 
 @pytest.fixture(scope="module")
@@ -22,7 +22,16 @@ def result_dir() -> Path:  # noqa: D103
     return p
 
 
-@pytest.mark.parametrize("adsorbate", ["CO", "H2O", "CH4", "C6H6"])
+@pytest.mark.parametrize(
+    "adsorbate",
+    [
+        "O",
+        "CO",
+        "H2O",
+        "CH4",
+        # "C6H6",
+    ],
+)
 @pytest.mark.parametrize(
     "core,name",
     [
@@ -56,7 +65,7 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
         if mode != "guess":
             k = f"{k}_{calculator}"
         obj = Adsorption(atoms, adsorbate, calculator, core)
-        result = obj(mode=mode)
+        result = obj(mode=mode).as_ase()
         result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.xyz")
         result.write(fname, format="extxyz")

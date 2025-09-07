@@ -1,7 +1,5 @@
 """The core data classes by pydantic."""
 
-from operator import iadd
-
 import numpy as np
 import pydantic
 from numpy.typing import ArrayLike
@@ -95,10 +93,3 @@ class Site(pydantic.BaseModel):
             core=[Point.from_list(c) for c in core],
             neighbor=[Point.from_list(n) for n in nbr],
         )
-
-
-if __name__ == "__main__":
-    a = Point(x=1, y=2, z=3)
-    b = Point(x=4, y=5, z=6)
-    print(a + b, a - b, iadd(a, b))
-    print()

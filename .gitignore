@@ -1,5 +1,6 @@
-*.xyz
-*.error
+**.xyz
+**.error
+**.png
 **.ipynb
 
 # Byte-compiled / optimized / DLL files
