@@ -30,7 +30,7 @@ def plot(k="O"):  # noqa: D103
                 fontsize=20,
             )
     fig.tight_layout()
-    plt.savefig(f"ZZZ_{k}.png")
+    plt.savefig(Path(__file__).parent.joinpath(f"ZZZ_{k}.png"))
 
 
 for k in ("O", "CO", "H2O", "CH4"):

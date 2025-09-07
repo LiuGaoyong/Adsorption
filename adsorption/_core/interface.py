@@ -200,10 +200,15 @@ class AdsorptionABC(ABC):
                 If it is "ase", use `ase.optimize.optimize` as backend.
 
         """
+        if "_" in mode:
+            mode, _, _opt = mode.split("_")
+            assert _ == "opt", f"Invalid mode for opt: {mode}."
+        else:
+            _opt = ""
+        assert _opt in ("", "total", "sub"), f"Invalid opt_mode: {_opt}."
         self.__backend_name: str = f"_add_adsorbate_{mode}"
         assert hasattr(self, self.__backend_name), f"Invalid mode: {mode}."
         atoms: Atoms = getattr(self, self.__backend_name)(*args, **kwds)
-        _opt = "total"
         if _opt == "total":
             atoms.calc = self.calculator
             atoms.set_constraint(
@@ -221,7 +226,7 @@ class AdsorptionABC(ABC):
                 trajectory=None,
             )
             opt.run(fmax=0.5)
-        else:
+        elif _opt == "sub":
             d = distance_factory.get_distance_reduce_array(
                 p1=atoms.positions[self.core],
                 p2=atoms.positions,
