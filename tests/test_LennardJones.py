@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from ase.cluster import Octahedron
 
-from adsorption.calculator import LennardJones
+from adsorption._core.calculator import LennardJones
 
 
 def test_lj() -> None:  # noqa: D103

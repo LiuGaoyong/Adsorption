@@ -5,7 +5,7 @@ import pytest
 from ase import Atoms
 from ase.io import read
 
-from adsorption._interface import Adsorption
+from adsorption.optmization._interface import Adsorption
 
 
 @pytest.fixture(scope="module")
@@ -39,6 +39,7 @@ def result_dir() -> Path:  # noqa: D103
 )
 @pytest.mark.parametrize("calculator", ["lj", "gfnff"])
 @pytest.mark.parametrize("mode", ["guess"])  # , "ase", "scipy", "bayesian"])
+# @pytest.mark.parametrize("mode", ["guess", "scipy", "bayesian"])
 def test_add_adsorbate_and_optimize(  # noqa: D103
     atoms,
     adsorbate,
@@ -56,6 +57,7 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
             k = f"{k}_{calculator}"
         obj = Adsorption(atoms, adsorbate, calculator, core)
         result = obj(mode=mode)
+        result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.xyz")
         result.write(fname, format="extxyz")
         print(f"  Write: {fname}")

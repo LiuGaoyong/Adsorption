@@ -8,13 +8,13 @@ from ase.constraints import FixAtoms, FixBondLengths
 from ase.data import chemical_symbols as SYMBOLS
 from ase.data import covalent_radii as COV_R
 from ase.optimize import LBFGS
+from GraphAtoms.common.rotation import kabsch, rotate
 from scipy.optimize import OptimizeResult, minimize
 from scipy.spatial.distance import cdist
 from scipy.spatial.transform import Rotation
 from skopt import gp_minimize
 
-from adsorption.calculator import get_calculator
-from adsorption.rotation import kabsch, rotate
+from adsorption._core.calculator import get_calculator
 
 
 class Adsorption:

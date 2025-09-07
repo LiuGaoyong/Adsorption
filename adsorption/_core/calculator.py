@@ -1,5 +1,3 @@
-from typing import Optional
-
 import numpy as np
 from ase.atoms import Atoms
 from ase.calculators import calculator as ase_calc
@@ -171,8 +169,8 @@ class LennardJones(ase_calc.Calculator):
     @override
     def calculate(
         self,
-        atoms: Optional[Atoms] = None,
-        properties: Optional[list[str]] = None,
+        atoms: Atoms | None = None,
+        properties: list[str] | None = None,
         system_changes: list[str] = ase_calc.all_changes,
     ) -> None:
         """Perform actual calculation by GFNFF."""
