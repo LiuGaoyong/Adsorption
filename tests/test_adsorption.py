@@ -5,7 +5,7 @@ import pytest
 from ase import Atoms
 from ase.io import read
 
-from adsorption._interface import Adsorption
+from adsorption import Adsorption
 
 
 @pytest.fixture(scope="module")
@@ -22,7 +22,16 @@ def result_dir() -> Path:  # noqa: D103
     return p
 
 
-@pytest.mark.parametrize("adsorbate", ["CO", "H2O", "CH4", "C6H6"])
+@pytest.mark.parametrize(
+    "adsorbate",
+    [
+        "O",
+        "CO",
+        "H2O",
+        "CH4",
+        # "C6H6",
+    ],
+)
 @pytest.mark.parametrize(
     "core,name",
     [
@@ -37,27 +46,29 @@ def result_dir() -> Path:  # noqa: D103
         ([610], "s_top"),  # surface top
     ],
 )
-@pytest.mark.parametrize("calculator", ["lj", "gfnff"])
-@pytest.mark.parametrize("mode", ["guess"])  # , "ase", "scipy", "bayesian"])
+@pytest.mark.parametrize(
+    "mode", ["guess", "guess_opt_total", "guess_opt_sub"]
+)  # , "ase", "scipy", "bayesian"])
+# @pytest.mark.parametrize("mode", ["guess", "scipy", "bayesian"])
 def test_add_adsorbate_and_optimize(  # noqa: D103
     atoms,
     adsorbate,
     core: int | list[int],
     result_dir: Path,
-    calculator: str,
     mode: str,
     name: str,
 ) -> None:  # noqa: D103
     print()
-    k = f"{adsorbate}_{name}_{mode}"
+    k = f"{adsorbate}_{name}"
     t0 = perf_counter()
+    result_dir = result_dir.joinpath(f"png_{mode}")
+    result_dir.mkdir(exist_ok=True)
     try:
-        if mode != "guess":
-            k = f"{k}_{calculator}"
-        obj = Adsorption(atoms, adsorbate, calculator, core)
-        result = obj(mode=mode)
-        fname = result_dir.joinpath(f"{k}.xyz")
-        result.write(fname, format="extxyz")
+        obj = Adsorption(atoms, adsorbate, "gfnff", core)
+        result = obj(mode=mode).as_ase()
+        result.numbers[core] = 79
+        fname = result_dir.joinpath(f"{k}.png")
+        result.write(fname, format="png")
         print(f"  Write: {fname}")
     except Exception as e:
         msg = f"  No success: for {k} because of {e}"

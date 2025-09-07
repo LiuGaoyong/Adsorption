@@ -2,32 +2,34 @@
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["adsorption"]
+namespaces = true
+
 [project]
 name = "adsorption"
 version = "0.0.1"
 description = "Adsorption Based on ASE"
 readme = "README.md"
-authors = [
-    { name = "LiuGaoyong", email = "liugaoyong_88@163.com" }
-]
-requires-python = ">=3.9"
+authors = [{ name = "LiuGaoyong", email = "liugaoyong_88@163.com" }]
+requires-python = ">=3.10"
 dependencies = [
-    "ase",
-    "numpy",
+    "GraphAtoms>=0.0.2",
     "pygfn0>=0.0.2",
     "pygfnff>=0.0.2",
-    "scikit-learn",
     "scikit-optimize>=0.10.2",
-    "scipy",
     "typing-extensions",
 ]
 [dependency-groups]
-dev = [
-    "ruff>=0.11",
-    "pytest>=8.3",
-    "pytest-xdist",
-]
+dev = ["ruff>=0.11", "pytest>=8.3", "pytest-xdist", "jupyterlab"]
 
+# uv config
+[tool.uv]
+package = true
+[[tool.uv.index]]
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" # TUNA
+default = true
 
 # pytest config
 [tool.pytest.ini_options]
@@ -37,7 +39,6 @@ filterwarnings = [
     "error", # All other warnings are transformed into errors.
     # ignore the following warnings that matching a regex
 ]
-
 
 # ruff config
 [tool.ruff]
