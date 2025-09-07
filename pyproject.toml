@@ -9,7 +9,7 @@ namespaces = true
 
 [project]
 name = "adsorption"
-version = "0.0.1"
+version = "0.0.2"
 description = "Adsorption Based on ASE"
 readme = "README.md"
 authors = [{ name = "LiuGaoyong", email = "liugaoyong_88@163.com" }]
