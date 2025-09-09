@@ -2,14 +2,9 @@
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["adsorption"]
-namespaces = true
-
 [project]
 name = "adsorption"
-version = "0.0.2"
+version = "0.0.3"
 description = "Adsorption Based on ASE"
 readme = "README.md"
 authors = [{ name = "LiuGaoyong", email = "liugaoyong_88@163.com" }]
