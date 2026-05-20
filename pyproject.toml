@@ -75,7 +75,7 @@ channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-arm64"]
 
 [tool.pixi.pypi-dependencies]
-# adsorption = { path = ".", editable = true }
+adsorption = { path = ".", editable = true }
 
 [tool.pixi.environments]
 default = { solve-group = "default" }
@@ -85,7 +85,7 @@ dev = { features = ["dev"], solve-group = "default" }
 test = "pytest -s -vv"
 
 [tool.pixi.dependencies]
-python = "==3.12"
+python = ">=3.12"
 pytest = ">=9.0.3,<10"
 ase = ">=3.28.0,<4"
 pymatgen = ">=2026.5.4,<2027"
