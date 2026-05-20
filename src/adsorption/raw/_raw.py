@@ -1,126 +1,19 @@
-"""The core ABC classes for adsorption."""
+from typing import Literal, override
 
 import numpy as np
 import numpy.typing as npt
-import pydantic
-from ase.atom import Atom
-from ase.atoms import Atoms
+from ase import Atom, Atoms
 from ase.build import molecule
 from ase.data import chemical_symbols as SYMBOLS
 from ase.data import covalent_radii as COV_R
+from graphatoms.geometry.rotation import rotate
+from graphatoms.system import Cluster, Gas, System
+from graphatoms.utils.rdutils import rdmol2ase, smiles2rdmol
 from numpy.typing import ArrayLike
 from scipy.spatial.transform import Rotation
-from typing_extensions import Self
 
-from alchemist.geometry.rotation import rotate
-from alchemist.utils.rdutils import rdmol2ase, smiles2rdmol
-
-
-def _get_1order_nbr(atoms: Atoms, core: np.ndarray | list[int]) -> np.ndarray:
-    """Get the 1-order neighbors of the core atoms."""
-    core, all = np.unique(core), np.arange(len(atoms))
-    i = np.repeat(core, len(all))
-    j = np.tile(all, len(core))
-    d = atoms.get_distances(i, j, mic=True)
-    d_ij = COV_R[atoms.numbers[i]] + COV_R[atoms.numbers[j]] + 0.3
-    return j[d < d_ij]
-
-
-class _XYZ(pydantic.BaseModel):
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-
-    def __add__(self, other: Self) -> Self:
-        return self.__class__(
-            x=self.x + other.x,
-            y=self.y + other.y,
-            z=self.z + other.z,
-        )
-
-    def __sub__(self, other: Self) -> Self:
-        return self.__class__(
-            x=self.x - other.x,
-            y=self.y - other.y,
-            z=self.z - other.z,
-        )
-
-    def to_list(self) -> list[float]:
-        return [self.x, self.y, self.z]
-
-    @classmethod
-    def from_list(cls, lst: list[float]) -> Self:
-        return cls(x=lst[0], y=lst[1], z=lst[2])
-
-
-class Point(_XYZ):
-    """A point in 3D space."""
-
-
-class Vector(_XYZ):
-    """A vector in 3D space."""
-
-    @property
-    def length(self) -> float:
-        """The length of the vector."""
-        v = [self.x, self.y, self.z]
-        return float(np.linalg.norm(v))
-
-    @property
-    def normalize(self) -> Self:
-        """The normalized vector."""
-        t: float = self.length
-        return self.__class__(
-            x=self.x / t,
-            y=self.y / t,
-            z=self.z / t,
-        )
-
-    @classmethod
-    def from_2points(cls, a: Point, b: Point) -> Self:
-        """The vector from point a to point b."""
-        return cls(
-            x=b.x - a.x,
-            y=b.y - a.y,
-            z=b.z - a.z,
-        )
-
-
-class Site(pydantic.BaseModel):
-    """The site for adsorption."""
-
-    neighbor: list[Point]
-    core: list[Point]
-
-    @property
-    def center(self) -> Point:
-        """The center for adsoption."""
-        core = np.asarray([p.to_list() for p in self.core])
-        return Point.from_list(np.mean(core, axis=0))
-
-    @property
-    def direction(self) -> Vector:
-        """The direction vector for adsorption."""
-        center = np.asarray(self.center.to_list())
-        nbr = np.asarray([p.to_list() for p in self.neighbor])
-        n2c = center - nbr  # the vector from the neighbor to the center
-        n2c_norm = np.linalg.norm(n2c, axis=1)  # the norm of n2c
-        n2c_eye = n2c / n2c_norm[:, None]  # the unit vector of n2c
-        sorted_norm = n2c_norm[np.argsort(-n2c_norm)]  # sort by norm
-        sorted_eye = n2c_eye[np.argsort(n2c_norm)]  # sort by norm
-        _n2c = sorted_eye * sorted_norm[:, None]
-        return Vector.from_list(np.mean(_n2c, axis=0))
-
-    @classmethod
-    def from_numpy(cls, nbr: ArrayLike, core: ArrayLike) -> Self:
-        """Create a site from numpy array."""
-        nbr, core = np.array(nbr, dtype=float), np.array(core, dtype=float)
-        assert core.ndim == 2 and core.shape[1] == 3, "The core must be Nx3."
-        assert nbr.ndim == 2 and nbr.shape[1] == 3, "The neighbor must be Nx3."
-        return cls(
-            core=[Point.from_list(c) for c in core],
-            neighbor=[Point.from_list(n) for n in nbr],
-        )
+from ..abc import AdsorptionABC
+from ..abc._dataclass import Site
 
 
 def add_adsorbate(
@@ -161,7 +54,7 @@ def add_adsorbate(
     )
 
 
-def adsorption(
+def adsorption(  # noqa: D417
     atoms: Atoms,
     adsorbate: Atoms | Atom | str,
     core: npt.ArrayLike | list[int] | int = 0,
@@ -312,3 +205,33 @@ def adsorption(
         )
     result.extend(ads)
     return result
+
+
+def _get_1order_nbr(atoms: Atoms, core: np.ndarray | list[int]) -> np.ndarray:
+    """Get the 1-order neighbors of the core atoms."""
+    core, all = np.unique(core), np.arange(len(atoms))
+    i = np.repeat(core, len(all))
+    j = np.tile(all, len(core))
+    d = atoms.get_distances(i, j, mic=True)
+    d_ij = COV_R[atoms.numbers[i]] + COV_R[atoms.numbers[j]] + 0.3
+    return j[d < d_ij]
+
+
+class RawAdsorption(AdsorptionABC):
+    @override
+    def __call__(
+        self,
+        atoms: Atoms | System | Cluster,
+        adsorbate: Atoms | Gas | Atom | str,
+        adsorbate_index: Literal["com"] | int | None = None,
+        core: ArrayLike | list[int] | int = 0,
+    ) -> Atoms:
+        if not isinstance(atoms, Atoms):
+            atoms = atoms.to_ase()
+        assert adsorbate_index != "com"
+        return adsorption(
+            atoms=atoms,
+            adsorbate=adsorbate,
+            adsorbate_index=adsorbate_index,
+            core=core,
+        )

@@ -46,7 +46,8 @@ class Vector(_XYZ):
         return float(np.linalg.norm(v))
 
     @property
-    def norm(self) -> Self:
+    def normalize(self) -> Self:
+        """The normalized vector."""
         t: float = self.length
         return self.__class__(
             x=self.x / t,
@@ -64,16 +65,20 @@ class Vector(_XYZ):
 
 
 class Site(pydantic.BaseModel):
+    """The site for adsorption."""
+
     neighbor: list[Point]
     core: list[Point]
 
     @property
     def center(self) -> Point:
+        """The center for adsoption."""
         core = np.asarray([p.to_list() for p in self.core])
         return Point.from_list(np.mean(core, axis=0))
 
     @property
-    def normal(self) -> Vector:
+    def direction(self) -> Vector:
+        """The direction vector for adsorption."""
         center = np.asarray(self.center.to_list())
         nbr = np.asarray([p.to_list() for p in self.neighbor])
         n2c = center - nbr  # the vector from the neighbor to the center
@@ -86,6 +91,7 @@ class Site(pydantic.BaseModel):
 
     @classmethod
     def from_numpy(cls, nbr: ArrayLike, core: ArrayLike) -> Self:
+        """Create a site from numpy array."""
         nbr, core = np.array(nbr, dtype=float), np.array(core, dtype=float)
         assert core.ndim == 2 and core.shape[1] == 3, "The core must be Nx3."
         assert nbr.ndim == 2 and nbr.shape[1] == 3, "The neighbor must be Nx3."
