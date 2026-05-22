@@ -76,7 +76,7 @@ jobs:
           name: conda-package-distributions
           path: dist
       - name: Show files under `dist`
-        run: ls -lh dist/graphatoms*
+        run: ls -lh dist/*
       - name: Release
         if: github.ref_type == 'tag'
         uses: ncipollo/release-action@v1
