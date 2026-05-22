@@ -1,23 +1,43 @@
 [build-system]
-requires = ["setuptools>=61"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.11.15,<0.12"]
+build-backend = "uv_build"
+
+[project.urls]
+Homepage = "https://github.com/LiuGaoyong/Adsorption"
+Repository = "https://github.com/LiuGaoyong/Adsorption"
+Issues = "https://github.com/LiuGaoyong/Adsorption/issues/"
 
 [project]
 name = "adsorption"
-version = "0.0.3"
-description = "Adsorption Based on ASE"
+version = "0.0.4"
 readme = "README.md"
-authors = [{ name = "LiuGaoyong", email = "liugaoyong_88@163.com" }]
+description = "Adsorption Based on ASE."
+keywords = ["chemistry", "adsorption"]
+authors = [
+    { name = "LiuGaoyong", email = "liugaoyong_88@163.com" }, #
+]
+
+classifiers = [
+    'Development Status :: 5 - Production/Stable',
+    'Topic :: Scientific/Engineering :: Chemistry',
+    'Intended Audience :: Science/Research',
+]
 requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
 dependencies = [
-    "GraphAtoms>=0.0.2",
-    "pygfn0>=0.0.2",
-    "pygfnff>=0.0.2",
-    "scikit-optimize>=0.10.2",
+    "ase",               #
+    'array-api-compat',
+    "graphatoms>=1.1.0",
     "typing-extensions",
 ]
 [dependency-groups]
-dev = ["ruff>=0.11", "pytest>=8.3", "pytest-xdist", "jupyterlab"]
+dev = [
+    "ruff>=0.11",       #
+    "pytest>=8.3",
+    'array-api-strict',
+    "pytest-xdist",
+    "jupyterlab",
+]
 
 # uv config
 [tool.uv]
@@ -29,7 +49,7 @@ default = true
 # pytest config
 [tool.pytest.ini_options]
 addopts = '--maxfail=1 -rf' # exit after 1 failures, report fail info
-testpaths = ["tests"]
+testpaths = ["src/tests"]
 filterwarnings = [
     "error", # All other warnings are transformed into errors.
     # ignore the following warnings that matching a regex
@@ -43,3 +63,43 @@ select = ["F", "E", "W", "UP", "D"]
 ignore = ["F722", 'UP038', 'D100']
 [tool.ruff.pydocstyle]
 convention = "google"
+
+[tool.pixi.package]
+name = 'adsorption'
+version = '0.0.4'
+
+[tool.pixi.package.build]
+backend = { name = "pixi-build-python", version = "*" }
+
+[tool.pixi.workspace]
+preview = ["pixi-build"]
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64", "osx-arm64"]
+
+[tool.pixi.pypi-dependencies]
+adsorption = { path = ".", editable = true }
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+
+[tool.pixi.tasks]
+test = "pytest -s -vv"
+
+[tool.pixi.dependencies]
+python = ">=3.12"
+pytest = ">=9.0.3,<10"
+ase = ">=3.28.0,<4"
+pymatgen = ">=2026.5.4,<2027"
+rdkit = ">=2025.9.5,<2027"
+openbabel = ">=3.1.1,<4"
+# pyarrow = ">=21.0.0,<25"
+scikit-learn = ">=1.8.0,<2"
+python-igraph = ">=0.11.9,<0.12"
+numpydantic = ">=1.8.1,<2"
+python-snappy = ">=0.7.3,<0.8"
+h5py = ">=3.16.0,<4"
+hydra-core = ">=1.3.2,<2"
+tomli-w = ">=1.2.0,<2"
+loguru = ">=0.7.3,<0.8"
+array-api-compat = ">=1.14.0,<2"

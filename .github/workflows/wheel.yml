@@ -4,46 +4,81 @@ on:
   release:
     types: [published]
   push:
-    tags:
-      - 'v*' # Alternative: only build for tags.
+    # tags:
+    #   - 'v*' # Alternative: only build for tags.
   pull_request:
 
 jobs:
-  build_wheels:
-    name: Build wheel
+  build:
+    name: Build wheel & source package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Build sdist
-        run: pipx run build --wheel
-      - uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v6
+      - name: Install UV
+        uses: astral-sh/setup-uv@v7
         with:
-          name: cibw-wheel
-          path: dist/*.whl
-
-  build_sdist:
-    name: Build source distribution
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build sdist
-        run: pipx run build --sdist
-      - uses: actions/upload-artifact@v4
+          enable-cache: true
+      - name: Build
+        run: uv build --out-dir dist && ls dist
+      - uses: actions/upload-artifact@v7
         with:
-          name: cibw-sdist
-          path: dist/*.tar.gz
+          name: python-package-distributions
+          path: dist/*
 
   upload_pypi:
-    needs: [build_wheels, build_sdist]
+    needs:
+      - build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag
     permissions:
-        # IMPORTANT: this permission is mandatory for trusted publishing
-        id-token: write
+        id-token: write # IMPORTANT: mandatory for trusted publishing
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all the dists
+        uses: actions/download-artifact@v8
         with:
-          pattern: cibw-*
+          name: python-package-distributions
           path: dist
           merge-multiple: true
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish distribution 📦 to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  build_conda:
+    name: Build wheel & conda package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.9.5
+        with:
+          pixi-version: latest
+          cache: true
+      - name: Build conda package
+        run: pixi publish --target-dir dist && ls dist/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: conda-package-distributions
+          path: dist/*
+
+  upload_release:
+    needs:
+      - build
+      - build_conda
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all the dists A
+        uses: actions/download-artifact@v8
+        with:
+          name: python-package-distributions
+          path: dist
+      - name: Download all the dists B
+        uses: actions/download-artifact@v8
+        with:
+          name: conda-package-distributions
+          path: dist
+      - name: Show files under `dist`
+        run: ls -lh dist/graphatoms*
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "dist/*"
