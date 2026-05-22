@@ -29,14 +29,17 @@ dependencies = [
     'array-api-compat',
     "graphatoms>=1.1.0",
     "typing-extensions",
+    'ray[tune]>=2.50',
 ]
 [dependency-groups]
 dev = [
-    "ruff>=0.11",       #
+    "ruff>=0.11",         #
     "pytest>=8.3",
     'array-api-strict',
     "pytest-xdist",
     "jupyterlab",
+    "matscipy>=1.2.0,<2",
+    "nequip>=0.16",
 ]
 
 # uv config

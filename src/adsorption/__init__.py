@@ -1,3 +1,9 @@
-# from adsorption.deprecated.optmization import AdsorptionOpt as Adsorption  # noqa: D104
+from ._interfaces import (  # noqa: D104
+    DirectAdsorption,
+    RawAdsorption,
+)
 
-# __all__ = ["Adsorption"]
+__all__ = [
+    "DirectAdsorption",
+    "RawAdsorption",
+]
