@@ -1,0 +1,39 @@
+output: ./outputs # the output directory, i.e. workdir
+hydra:
+  run:
+    dir: ${output}
+  verbose: true
+  job_logging:
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
+
+
+calculator:
+  _target_: ase.calculators.emt.EMT
+adsorption:
+  nfibonacci: 1000
+  max_steps_for_first_stage: 100
+  max_steps_for_second_stage: 100
+  max_force: 0.05
+  debug: false
+
+
+system:
+  atoms:
+    _target_: ase.cluster.Octahedron
+    symbol: Cu
+    length: 10
+  core:
+    - 303
+    - 334
+    - 464
+  name: v_fcc
+gas:
+  C6H6
