@@ -1,17 +1,22 @@
 """The core ABC classes for adsorption."""
 
 from abc import ABC, abstractmethod
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Literal
 
 import numpy as np
-import numpy.typing as npt
+from ase import Atoms
 from ase.atom import Atom
-from ase.atoms import Atoms
 from ase.build import molecule
 from ase.calculators.calculator import Calculator
+from ase.constraints import FixAtoms, FixBondLengths
 from ase.data import chemical_symbols as SYMBOLS
+from ase.io import iread
+from ase.optimize import LBFGS
 from graphatoms.system import Cluster, Gas, System
 from graphatoms.utils.rdutils import rdmol2ase, smiles2rdmol
+from numpy import typing as npt
 
 from .libquaternion import quaternion_apply
 
@@ -22,6 +27,36 @@ class AdsorptionABC(ABC):
             f"{calculator} is not a valid calculator."
         )
         self.calculator: Calculator = calculator
+
+    @abstractmethod
+    def __call__(  # noqa: D417
+        self,
+        atoms: Atoms | System | Cluster,
+        adsorbate: Atoms | Gas | Atom | str,
+        adsorbate_index: Literal["com"] | int | None = None,
+        core: npt.ArrayLike | list[int] | int = 0,
+    ) -> Atoms:
+        """Run the adsorption calculation.
+
+        Args:
+            atoms (Atoms | System | Cluster): The surface or
+                cluster onto which the adsorbate should be added.
+            adsorbate (Atoms | Gas | Atom | str): The adsorbate.
+                Must be one of the following three types:
+                    1. An atoms object (for a molecular adsorbate).
+                    2. An atom object.
+                    3. A string:
+                        the chemical symbol for a single atom.
+                        the molecule string by `ase.build`.
+                        the SMILES of the molecule.
+            adsorbate_index (int | None, optional): The index of the adsorbate.
+                Defaults to None. It means that the adsorbate's core
+                is its COM. If it is interger, it means that the
+                adsorbate's core is the atom.
+            core (npt.ArrayLike | list[int] | int, optional):
+                The central atoms (core) which will place at.
+                Defaults to the first atom, i.e. the 0-th atom.
+        """
 
     @staticmethod
     def _get_adsorbate(
@@ -89,39 +124,6 @@ class AdsorptionABC(ABC):
         assert isinstance(ad_anchor, np.ndarray) and ad_anchor.shape == (3,)
         return ads, ad_anchor
 
-        """Initialize the adsorption calculation.
-        """
-
-    @abstractmethod
-    def __call__(  # noqa: D417
-        self,
-        atoms: Atoms | System | Cluster,
-        adsorbate: Atoms | Gas | Atom | str,
-        adsorbate_index: Literal["com"] | int | None = None,
-        core: npt.ArrayLike | list[int] | int = 0,
-    ) -> Atoms:
-        """Run the adsorption calculation.
-
-        Args:
-            atoms (Atoms | System | Cluster): The surface or
-                cluster onto which the adsorbate should be added.
-            adsorbate (Atoms | Gas | Atom | str): The adsorbate.
-                Must be one of the following three types:
-                    1. An atoms object (for a molecular adsorbate).
-                    2. An atom object.
-                    3. A string:
-                        the chemical symbol for a single atom.
-                        the molecule string by `ase.build`.
-                        the SMILES of the molecule.
-            adsorbate_index (int | None, optional): The index of the adsorbate.
-                Defaults to None. It means that the adsorbate's core
-                is its COM. If it is interger, it means that the
-                adsorbate's core is the atom.
-            core (npt.ArrayLike | list[int] | int, optional):
-                The central atoms (core) which will place at.
-                Defaults to the first atom, i.e. the 0-th atom.
-        """
-
     @staticmethod
     def _try_adsorbate(
         atoms: Atoms,
@@ -177,3 +179,61 @@ class AdsorptionABC(ABC):
             cell=atoms.cell,
             pbc=atoms.pbc,
         )
+
+    @staticmethod
+    def _first_stage_opt(
+        natoms: int,
+        result: Atoms,
+        calc: Calculator,
+        fmax: float = 0.05,
+        max_steps: int = 100,
+        debug: bool = True,
+    ) -> tuple[list[Atoms], bool]:
+        with TemporaryDirectory() as work_dir:
+            result_lst: list[Atoms] = []
+            converged = False
+            result.calc = calc
+            result.calc.reset()
+            if debug:
+                result.write("debug.png")
+            result.set_constraint(
+                [
+                    FixAtoms(indices=list(range(natoms))),
+                    FixBondLengths(
+                        np.column_stack(
+                            np.triu_indices(len(result) - natoms, k=1),
+                        )
+                        + natoms
+                    ),
+                ]
+            )
+            p = Path(work_dir) / "opt_1.traj"
+            opt = LBFGS(result, trajectory=p.as_posix())
+            try:
+                converged = opt.run(steps=max_steps, fmax=fmax)
+            except RuntimeError:
+                converged = False
+            result_lst.extend(list(iread(p)))
+        return result_lst, converged
+
+    @staticmethod
+    def _second_stage_opt(
+        result: Atoms,
+        calc: Calculator,
+        fmax: float = 0.05,
+        max_steps: int = 100,
+    ) -> tuple[list[Atoms], bool]:
+        with TemporaryDirectory() as work_dir:
+            result_lst: list[Atoms] = []
+            converged = False
+            result.calc = calc
+            result.calc.reset()
+            result.set_constraint(None)
+            p = Path(work_dir) / "opt_2.traj"
+            opt = LBFGS(result, trajectory=p.as_posix())
+            try:
+                converged = opt.run(steps=max_steps, fmax=fmax)
+            except RuntimeError:
+                converged = False
+            result_lst.extend(list(iread(p)))
+        return result_lst, converged

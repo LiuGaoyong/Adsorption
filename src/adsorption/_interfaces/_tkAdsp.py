@@ -20,7 +20,7 @@ from scipy.spatial.transform import Rotation as Rot
 
 from alchemist.utils.rdutils import rdmol2ase, smiles2rdmol
 
-from ._tkAdspDirct import get_grid_of_core
+from ._direct import get_grid_of_core
 from ._tkAdspTorch import torch, torch_optimize_rotation
 
 

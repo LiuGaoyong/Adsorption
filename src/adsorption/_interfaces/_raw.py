@@ -12,8 +12,8 @@ from graphatoms.utils.rdutils import rdmol2ase, smiles2rdmol
 from numpy.typing import ArrayLike
 from scipy.spatial.transform import Rotation
 
-from ..abc import AdsorptionABC
-from ..abc._dataclass import Site
+from .._abc import AdsorptionABC
+from .._abc._dataclass import Site
 
 
 def add_adsorbate(

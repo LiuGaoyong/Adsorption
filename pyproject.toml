@@ -49,7 +49,7 @@ default = true
 # pytest config
 [tool.pytest.ini_options]
 addopts = '--maxfail=1 -rf' # exit after 1 failures, report fail info
-testpaths = ["tests"]
+testpaths = ["src/tests"]
 filterwarnings = [
     "error", # All other warnings are transformed into errors.
     # ignore the following warnings that matching a regex
@@ -93,7 +93,7 @@ ase = ">=3.28.0,<4"
 pymatgen = ">=2026.5.4,<2027"
 rdkit = ">=2025.9.5,<2027"
 openbabel = ">=3.1.1,<4"
-pyarrow = ">=21.0.0,<25"
+# pyarrow = ">=21.0.0,<25"
 scikit-learn = ">=1.8.0,<2"
 python-igraph = ">=0.11.9,<0.12"
 numpydantic = ">=1.8.1,<2"

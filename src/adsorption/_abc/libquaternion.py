@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
 import array_api_compat
-
-if TYPE_CHECKING:
-    from array_api_compat.common._helpers import _ArrayApiObj as Array
+from numpy.typing import ArrayLike as Array
 
 
 def quaternion_apply(quaternion, point) -> Array:

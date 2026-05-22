@@ -1,27 +1,29 @@
-# ruff: noqa: D205 UP007
-import os
-import warnings
-
-os.environ["SCIPY_ARRAY_API"] = "1"
+from typing import Literal, override
 
 import numpy as np
-import torch
-from ase import Atoms
+from ase import Atom, Atoms
 from ase.data import covalent_radii as COV_R
 from ase.geometry import find_mic
+from graphatoms.geometry import neighbor_list
+from graphatoms.geometry.sample import fibonacci_lattice
+from graphatoms.system import Cluster, Gas, System
+from numpy.typing import ArrayLike
 
-try:
-    from vesin import ase_neighbor_list as neighbor_list
-except ImportError:
-    try:
-        from matscipy.neighbours import neighbor_list
-    except ImportError:
-        warnings.warn(
-            "Please install vesin/matscipy to speed up "  #
-            "the calculation of neighbor list."
-        )
-        from ase.neighborlist import neighbor_list
-TORCH_TYPE_INT, TORCH_TYPE_FLOAT = torch.int32, torch.float64
+from .._abc import AdsorptionABC
+
+
+class DirectAdsorption(AdsorptionABC):
+    @override
+    def __call__(
+        self,
+        atoms: Atoms | System | Cluster,
+        adsorbate: Atoms | Gas | Atom | str,
+        adsorbate_index: Literal["com"] | int | None = None,
+        core: ArrayLike | list[int] | int = 0,
+    ) -> Atoms:
+        if not isinstance(atoms, Atoms):
+            atoms = atoms.to_ase()
+        raise NotImplementedError
 
 
 def get_grid_of_core(
@@ -66,25 +68,6 @@ def get_grid_of_core(
     matrix_cov_r = np.column_stack([cov_r] * len(grid))
     cond = np.all(matrix_cov_r + float(skin) < d, axis=0)
     return grid[cond]
-
-
-def fibonacci_lattice(n: int) -> np.ndarray:
-    """The Fibonacci Lattice grid.
-
-    https://pubs.acs.org/doi/suppl/10.1021/acscatal.3c04964/suppl_file/cs3c04964_si_001.pdf
-    """
-    n = int(n)
-    arange = np.arange(n)
-    a = 2 * arange + 1
-    theta = np.arccos(1 - a / n)
-    psi = (1 + np.sqrt(5)) / 2 * a * np.pi
-    return np.column_stack(
-        [
-            np.sin(theta) * np.cos(psi),
-            np.sin(theta) * np.sin(psi),
-            np.cos(theta),
-        ]
-    )
 
 
 def test_get_grid_of_core() -> None:
