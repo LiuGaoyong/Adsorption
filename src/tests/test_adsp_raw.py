@@ -4,7 +4,6 @@ from time import perf_counter
 
 import pytest
 from ase import Atoms
-from ase.calculators.emt import EMT
 from ase.cluster import Octahedron
 from ase.io import read
 
@@ -65,7 +64,7 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
     t0 = perf_counter()
     result_dir.mkdir(exist_ok=True)
     try:
-        obj = RawAdsorption(calculator=EMT())
+        obj = RawAdsorption(calculator=None)
         result = obj(atoms=atoms, adsorbate=adsorbate, core=core)
         result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.png")

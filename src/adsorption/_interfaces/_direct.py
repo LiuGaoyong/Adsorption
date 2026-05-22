@@ -1,7 +1,8 @@
-from typing import Literal, override
+from typing import override
 
 import numpy as np
 from ase import Atom, Atoms
+from ase.calculators.calculator import Calculator
 from ase.data import covalent_radii as COV_R
 from ase.geometry import find_mic
 from graphatoms.geometry import neighbor_list
@@ -13,17 +14,142 @@ from .._abc import AdsorptionABC
 
 
 class DirectAdsorption(AdsorptionABC):
+    def __init__(
+        self,
+        calculator: Calculator | None = None,
+        *,
+        nfibonacci: int = 1000,
+        max_steps_for_first_stage: int = 100,
+        max_steps_for_second_stage: int = 100,
+        max_force: float = 0.05,
+        debug: bool = True,
+    ) -> None:
+        super().__init__(
+            calculator=calculator,
+            max_steps_for_first_stage=max_steps_for_first_stage,
+            max_steps_for_second_stage=max_steps_for_second_stage,
+            max_force=max_force,
+            debug=debug,
+        )
+        self.__nfibonacci = int(nfibonacci)
+
     @override
     def __call__(
         self,
         atoms: Atoms | System | Cluster,
         adsorbate: Atoms | Gas | Atom | str,
-        adsorbate_index: Literal["com"] | int | None = None,
-        core: ArrayLike | list[int] | int = 0,
+        *,
+        core: ArrayLike | None = 0,
+        idx_grid_core: int | None = None,
+        grid_core: np.ndarray | None = None,
+        grid_ads: np.ndarray | None = None,
+        idx_grid_ads: int | None = None,
+        distance: float | None = None,
     ) -> Atoms:
         if not isinstance(atoms, Atoms):
             atoms = atoms.to_ase()
-        raise NotImplementedError
+        adsorbate = gas = self._get_adsorbate(adsorbate).copy()
+
+        # A. get the direction of `adsorbate`
+        if grid_ads is None:
+            grid_ads, anchor_ads = self._get_grids(adsorbate, None)
+        else:
+            grid_ads = np.asarray(grid_ads, dtype=float)
+            anchor_ads = np.mean(adsorbate.positions, axis=0)
+        assert grid_ads.ndim == 2 and grid_ads.shape[1] == 3
+        assert len(grid_ads) == self.__nfibonacci
+        if idx_grid_ads is None:
+            idx_grid_ads = np.random.randint(len(grid_ads))
+        idx_grid_ads = int(idx_grid_ads)
+        # B. rotate adsorbate
+        center = anchor_ads
+        adsorbate.rotate(
+            center + [0, 0, 1],
+            grid_ads[idx_grid_ads],
+            rotate_cell=False,
+            center=center,
+        )
+
+        # C get the direction of core
+        if grid_core is None:
+            grid_core, anchor_core = self._get_grids(atoms, core)
+        else:
+            if isinstance(core, int):
+                core = np.asarray([core])
+            core = np.asarray(core, dtype=int)
+            core = np.unique(core.flatten())
+            anchor_core = np.mean(atoms.positions[core], axis=0)
+            grid_core = np.asarray(grid_core, dtype=float)
+        assert grid_core.ndim == 2 and grid_core.shape[1] == 3
+        if idx_grid_core is None:
+            idx_grid_core = np.random.randint(len(grid_core))
+        idx_grid_core = int(idx_grid_core)
+        direction_core = grid_core[idx_grid_core]
+        direction_core /= np.linalg.norm(direction_core)
+
+        # place gas into
+        if distance is None:
+            d_gas = gas.positions - gas.positions.mean(axis=0)
+            d_gas_max: float = np.max(np.linalg.norm(d_gas, axis=0))
+            d_gas_min: float = np.max(COV_R[gas.numbers])
+            v_core = grid_core - anchor_core
+            _, d_core = find_mic(v_core, atoms.cell)
+            distance = np.mean(d_core) + d_gas_min  # type: ignore
+            distance += 0.5 * (d_gas_max - d_gas_min)  # type: ignore
+        assert isinstance(distance, float)
+
+        adsorbate.set_positions(
+            adsorbate.positions
+            - anchor_ads  #
+            + anchor_core
+            + direction_core * distance
+        )
+        result = atoms.copy()
+        result.extend(gas)
+        result_lst: list[Atoms] = [result]
+        if self.calculator is not None:
+            result_1, converged_1 = self._first_stage_opt(
+                natoms=len(atoms),
+                result=result,
+                calc=self.calculator,
+                fmax=self.max_force,
+                max_steps=self.max_steps_for_first_stage,
+                debug=self.debug,
+            )
+            if converged_1:
+                result_lst.extend(result_1)
+                result_2, converged_2 = self._second_stage_opt(
+                    result=result_1[-1],
+                    calc=self.calculator,
+                    fmax=self.max_force,
+                    max_steps=self.max_steps_for_second_stage,
+                )
+                if converged_2:
+                    result_lst.extend(result_2)
+        return result_lst[-1]
+
+    def _get_grids(
+        self,
+        atoms: Atoms,
+        core: ArrayLike | None = 0,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if isinstance(core, int):
+            core = np.asarray([core])
+        elif core is None:
+            core = np.arange(len(atoms))
+        core = np.asarray(core, dtype=int)
+        core = np.unique(core.flatten())
+        anchor = np.mean(atoms.positions[core], axis=0)
+
+        if len(core) != len(atoms):
+            grid = get_grid_of_core(
+                atoms=atoms,
+                select_core=core,
+                nfibonacci=self.__nfibonacci,
+            )
+        else:
+            grid = fibonacci_lattice(self.__nfibonacci) + anchor
+        return grid, anchor
 
 
 def get_grid_of_core(
