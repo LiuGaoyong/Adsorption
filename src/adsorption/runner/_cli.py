@@ -10,6 +10,7 @@ from ase.calculators.calculator import Calculator
 from graphatoms.utils.parser import hydra_parse
 from omegaconf import DictConfig, OmegaConf
 from ray import tune
+from ray.tune.search import create_searcher
 
 from ._tune import TuneAdsorption
 
@@ -76,15 +77,37 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
             score = result.get_potential_energy()
         except Exception:
             score = 1.0
+
+        key: list[str] = []
+        for k in sorted(config.keys()):
+            if k == 'distance':
+                v = config[k] * 100
+                v = f'{int(v):03d}pm'
+            else:
+                v = f'{int(config[k]):04d}'
+            key.append(f'{k}_{v}')
+        key.append(f'E_{int(score*1000):07d}meV')
+        s = '--'.join(key)
+
+        p.joinpath('png').mkdir(parents=True, exist_ok=True)
+        p.joinpath('xyz').mkdir(parents=True, exist_ok=True)
+        result.write(p.joinpath('xyz',f'{s}.xyz'), format='extxyz')
+        result.write(p.joinpath('png',f'{s}.png'), format='png')
         return {"score": score}
 
     tuner = tune.Tuner(
         tune.with_resources(helper, {"cpu": 1}),
         param_space={
-            "idx_grid_ads": tune.grid_search(range(0, len(grid_ads))),
-            "idx_grid_core": tune.grid_search(range(0, len(grid_core))),
-            "distance": tune.grid_search(np.arange(1, 5, 0.1)),
-        }
+            "idx_grid_ads": tune.randint(0, len(grid_ads)),
+            "idx_grid_core": tune.randint(0, len(grid_core)),
+            "distance": tune.choice(np.arange(1, 5, 0.15).tolist()),
+        },
+        tune_config=tune.TuneConfig(
+            mode='min',
+            metric='score',
+            search_alg=create_searcher('random'),
+            num_samples=100,
+        )
     )
     tuner.fit()
 
