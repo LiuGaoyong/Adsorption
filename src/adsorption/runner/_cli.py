@@ -1,6 +1,7 @@
 import logging
 import os
-from functools import partial
+from pathlib import Path
+from typing import Any
 
 import hydra
 import numpy as np
@@ -27,6 +28,11 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
     log.info(f"Output directory  : {hydracfg.runtime.output_dir}")
     log.info(f"Output logfile    : {outlogfile}")
     log.info("=" * 64)
+
+    p = Path(outlogfile).parent
+    with p.joinpath(".gitignore").open("w") as f:
+        f.write("*\n")
+    outlogfile = p / 'run.log'
 
     # check something
     if hydracfg.mode == "MULTIRUN":
@@ -57,23 +63,28 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
         core=core,
     )
 
-    tuner = tune.Tuner(
-        partial(
-            TuneAdsorption.helper,
-        ),
-        param_space={
-            "idx_grid_ads": tune.randint(0, len(grid_ads)),
-            "idx_grid_core": tune.randint(0, len(grid_core)),
-            "distance": tune.choice(np.arange(1, 5, 0.1).tolist()),
-        }
-        | dict(
-            obj=obj,
+    def helper(config: dict[str, Any]) -> dict[str, Any]:
+        result: Atoms = obj.__call__(
             atoms=atoms,
             grid_ads=grid_ads,
             grid_core=grid_core,
             adsorbate=adsorbate,
             core=core,
-        ),
+            **config
+        )
+        try:
+            score = result.get_potential_energy()
+        except Exception:
+            score = 1.0
+        return {"score": score}
+
+    tuner = tune.Tuner(
+        tune.with_resources(helper, {"cpu": 1}),
+        param_space={
+            "idx_grid_ads": tune.grid_search(range(0, len(grid_ads))),
+            "idx_grid_core": tune.grid_search(range(0, len(grid_core))),
+            "distance": tune.grid_search(np.arange(1, 5, 0.1)),
+        }
     )
     tuner.fit()
 

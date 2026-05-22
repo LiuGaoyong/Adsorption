@@ -24,28 +24,4 @@ class TuneAdsorption(DirectAdsorption):
         grid_core, _ = self._get_grids(atoms, core)
         return grid_core, grid_ads
 
-    @staticmethod
-    def helper(config: dict[str, Any]) -> dict[str, Any]:
-        assert isinstance(config["obj"], TuneAdsorption)
-        result: Atoms = config["obj"].__call__(
-            **{
-                k: v
-                for k, v in config.items()
-                if k
-                in (
-                    "core",
-                    "atoms",
-                    "adsorbate",
-                    "idx_grid_ads",
-                    "idx_grid_core",
-                    "grid_core",
-                    "grid_ads",
-                    "distance",
-                )
-            },
-        )
-        try:
-            score = result.get_potential_energy()
-        except Exception:
-            score = 1.0
-        return {"score": score}
+

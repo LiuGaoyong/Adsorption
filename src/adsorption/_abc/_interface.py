@@ -105,7 +105,7 @@ class AdsorptionABC(ABC):
                 ]
             )
             p = Path(work_dir) / "opt_1.traj"
-            opt = LBFGS(result, trajectory=p.as_posix())
+            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None) # type: ignore
             try:
                 converged = opt.run(steps=max_steps, fmax=fmax)
             except RuntimeError:
@@ -127,7 +127,7 @@ class AdsorptionABC(ABC):
             result.calc.reset()
             result.set_constraint(None)
             p = Path(work_dir) / "opt_2.traj"
-            opt = LBFGS(result, trajectory=p.as_posix())
+            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None)# type: ignore
             try:
                 converged = opt.run(steps=max_steps, fmax=fmax)
             except RuntimeError:
