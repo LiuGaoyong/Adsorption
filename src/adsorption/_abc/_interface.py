@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Literal
 
 import numpy as np
 from ase import Atoms
@@ -44,8 +45,44 @@ class AdsorptionABC(ABC):
         self,
         atoms: Atoms | System | Cluster,
         adsorbate: Atoms | Gas | Atom | str,
-    ) -> Atoms:
+    ) -> tuple[Atoms, Literal[0,1,2]]:
         pass
+
+    def _opt(self, atoms: Atoms, natoms: int)-> tuple[Atoms, Literal[0,1,2]]:
+        nstage = 0
+        result_lst: list[Atoms] = [atoms.copy()]
+        if self.calculator is not None:
+            result_1, converged_1 = self._first_stage_opt(
+                natoms=natoms,
+                result=atoms,
+                calc=self.calculator,
+                fmax=self.max_force,
+                max_steps=self.max_steps_for_first_stage,
+                debug=self.debug,
+            )
+            result_lst.extend(result_1)
+            if converged_1:
+                nstage = 1
+                result_2, converged_2 = self._second_stage_opt(
+                    result=result_1[-1],
+                    calc=self.calculator,
+                    fmax=self.max_force,
+                    max_steps=self.max_steps_for_second_stage,
+                )
+                result_lst.extend(result_2)
+                if converged_2:
+                    nstage = 2
+
+        engs = []
+        for at in result_lst:
+            try:
+                energy = at.get_potential_energy(False, False)
+            except Exception:
+                energy = np.inf
+            engs.append(energy)
+        return result_lst[np.argmin(engs)], nstage
+        ...
+
 
     @staticmethod
     def _get_adsorbate(adsorbate: Atoms | Gas | Atom | str) -> Atoms:
@@ -105,7 +142,7 @@ class AdsorptionABC(ABC):
                 ]
             )
             p = Path(work_dir) / "opt_1.traj"
-            opt = LBFGS(result, trajectory=p.as_posix())
+            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None) # type: ignore
             try:
                 converged = opt.run(steps=max_steps, fmax=fmax)
             except RuntimeError:
@@ -127,7 +164,7 @@ class AdsorptionABC(ABC):
             result.calc.reset()
             result.set_constraint(None)
             p = Path(work_dir) / "opt_2.traj"
-            opt = LBFGS(result, trajectory=p.as_posix())
+            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None)# type: ignore
             try:
                 converged = opt.run(steps=max_steps, fmax=fmax)
             except RuntimeError:

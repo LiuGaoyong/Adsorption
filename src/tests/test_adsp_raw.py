@@ -65,7 +65,7 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
     result_dir.mkdir(exist_ok=True)
     try:
         obj = RawAdsorption(calculator=None)
-        result = obj(atoms=atoms, adsorbate=adsorbate, core=core)
+        result = obj(atoms=atoms, adsorbate=adsorbate, core=core)[0]
         result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.png")
         result.write(fname, format="png")
