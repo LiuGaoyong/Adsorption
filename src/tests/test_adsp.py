@@ -67,7 +67,7 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
     t0 = perf_counter()
     try:
         obj = DirectAdsorption(calculator=None)
-        result = obj(atoms=atoms, adsorbate=adsorbate, core=core)
+        result = obj(atoms=atoms, adsorbate=adsorbate, core=core)[0]
         result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.png")
         result.write(fname, format="png")

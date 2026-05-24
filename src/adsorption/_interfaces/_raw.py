@@ -19,7 +19,7 @@ class RawAdsorption(AdsorptionABC):
         adsorbate_index: Literal["com"] | int | None = None,
         nbr1hop: npt.ArrayLike | list[int] | None = None,
         core: npt.ArrayLike | list[int] | int = 0,
-    ) -> Atoms:
+    ) -> tuple[Atoms, Literal[0,1,2]]:
         """Run the adsorption calculation.
 
         Args:
@@ -150,27 +150,10 @@ class RawAdsorption(AdsorptionABC):
 
         result = atoms.copy()
         result.extend(ads)
-        result_lst: list[Atoms] = [result]
-        if self.calculator is not None:
-            result_1, converged_1 = self._first_stage_opt(
-                natoms=len(atoms),
-                result=result,
-                calc=self.calculator,
-                fmax=self.max_force,
-                max_steps=self.max_steps_for_first_stage,
-                debug=self.debug,
-            )
-            if converged_1:
-                result_lst.extend(result_1)
-                result_2, converged_2 = self._second_stage_opt(
-                    result=result_1[-1],
-                    calc=self.calculator,
-                    fmax=self.max_force,
-                    max_steps=self.max_steps_for_second_stage,
-                )
-                if converged_2:
-                    result_lst.extend(result_2)
-        return result_lst[-1]
+        return self._opt(
+            natoms=len(atoms),
+            atoms=result,
+        )
 
 
 def _get_1order_nbr(atoms: Atoms, core: np.ndarray | list[int]) -> np.ndarray:

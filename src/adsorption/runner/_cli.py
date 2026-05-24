@@ -12,6 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 from ray import tune
 from ray.tune.search import create_searcher
 
+from ._plot import plot
 from ._tune import TuneAdsorption
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
     p = Path(outlogfile).parent
     with p.joinpath(".gitignore").open("w") as f:
         f.write("*\n")
-    outlogfile = p / 'run.log'
+    outlogfile = p / "run.log"
 
     # check something
     if hydracfg.mode == "MULTIRUN":
@@ -65,35 +66,39 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
     )
 
     def helper(config: dict[str, Any]) -> dict[str, Any]:
-        result: Atoms = obj.__call__(
+        result = obj.__call__(
             atoms=atoms,
             grid_ads=grid_ads,
             grid_core=grid_core,
             adsorbate=adsorbate,
             core=core,
-            **config
+            **config,
         )
+        result_atoms: Atoms = result[0]
         try:
-            score = result.get_potential_energy()
+            score = result_atoms.get_potential_energy(False, False)
+            force = result_atoms.get_forces(False, False)
+            fmax = np.linalg.norm(force, axis=1).max()
         except Exception:
-            score = 1.0
+            score = fmax = np.inf
 
         key: list[str] = []
         for k in sorted(config.keys()):
-            if k == 'distance':
+            if k == "distance":
                 v = config[k] * 100
-                v = f'{int(v):03d}pm'
+                v = f"{int(v):03d}pm"
             else:
-                v = f'{int(config[k]):04d}'
-            key.append(f'{k}_{v}')
-        key.append(f'E_{int(score*1000):07d}meV')
-        s = '--'.join(key)
+                v = f"{int(config[k]):04d}"
+            key.append(f"{k}_{v}")
+        key.append(f"E_{int(score * 1000):07d}meV")
+        key.append(f"stage_{result[1]:d}")
+        s = "--".join(key)
 
-        p.joinpath('png').mkdir(parents=True, exist_ok=True)
-        p.joinpath('xyz').mkdir(parents=True, exist_ok=True)
-        result.write(p.joinpath('xyz',f'{s}.xyz'), format='extxyz')
-        result.write(p.joinpath('png',f'{s}.png'), format='png')
-        return {"score": score}
+        p.joinpath("png").mkdir(parents=True, exist_ok=True)
+        p.joinpath("xyz").mkdir(parents=True, exist_ok=True)
+        result_atoms.write(p.joinpath("xyz", f"{s}.xyz"), format="extxyz")
+        plot(result_atoms, pngfname=p.joinpath("png", f"{s}.png"))
+        return {"score": score, "nstage": result[1], "fmax": fmax}
 
     tuner = tune.Tuner(
         tune.with_resources(helper, {"cpu": 1}),
@@ -103,11 +108,11 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
             "distance": tune.choice(np.arange(1, 5, 0.15).tolist()),
         },
         tune_config=tune.TuneConfig(
-            mode='min',
-            metric='score',
-            search_alg=create_searcher('random'),
+            mode="min",
+            metric="score",
+            search_alg=create_searcher("random"),
             num_samples=100,
-        )
+        ),
     )
     tuner.fit()
 

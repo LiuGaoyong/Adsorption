@@ -1,4 +1,4 @@
-from typing import override
+from typing import Literal, override
 
 import numpy as np
 from ase import Atom, Atoms
@@ -45,7 +45,7 @@ class DirectAdsorption(AdsorptionABC):
         grid_ads: np.ndarray | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,
-    ) -> Atoms:
+    ) -> tuple[Atoms, Literal[0,1,2]]:
         if not isinstance(atoms, Atoms):
             atoms = atoms.to_ase()
         adsorbate = gas = self._get_adsorbate(adsorbate).copy()
@@ -104,29 +104,13 @@ class DirectAdsorption(AdsorptionABC):
             + anchor_core
             + direction_core * distance
         )
+
         result = atoms.copy()
         result.extend(gas)
-        result_lst: list[Atoms] = [result]
-        if self.calculator is not None:
-            result_1, converged_1 = self._first_stage_opt(
-                natoms=len(atoms),
-                result=result,
-                calc=self.calculator,
-                fmax=self.max_force,
-                max_steps=self.max_steps_for_first_stage,
-                debug=self.debug,
-            )
-            if converged_1:
-                result_lst.extend(result_1)
-                result_2, converged_2 = self._second_stage_opt(
-                    result=result_1[-1],
-                    calc=self.calculator,
-                    fmax=self.max_force,
-                    max_steps=self.max_steps_for_second_stage,
-                )
-                if converged_2:
-                    result_lst.extend(result_2)
-        return result_lst[-1]
+        return self._opt(
+            natoms=len(atoms),
+            atoms=result,
+        )
 
     def _get_grids(
         self,
