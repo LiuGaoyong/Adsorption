@@ -9,7 +9,7 @@ Issues = "https://github.com/LiuGaoyong/Adsorption/issues/"
 
 [project]
 name = "adsorption"
-version = "0.0.4"
+version = "0.0.5"
 readme = "README.md"
 description = "Adsorption Based on ASE."
 keywords = ["chemistry", "adsorption"]
@@ -70,7 +70,7 @@ convention = "google"
 
 [tool.pixi.package]
 name = 'adsorption'
-version = '0.0.4'
+version = '0.0.5'
 
 [tool.pixi.package.build]
 backend = { name = "pixi-build-python", version = "*" }
