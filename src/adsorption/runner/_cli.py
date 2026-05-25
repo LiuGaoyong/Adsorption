@@ -28,7 +28,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
 
     p = Path(outlogfile).parent
     with p.joinpath(".gitignore").open("w") as f:
-        f.write("*\n")
+        f.write("\n".join(["*", "!config.yaml", "!run.sh", ""]))
     outlogfile = p / "run.log"
 
     # check something

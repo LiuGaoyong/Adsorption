@@ -38,6 +38,7 @@ dev = [
     'array-api-strict',
     "pytest-xdist",
     "jupyterlab",
+    "nequip; sys_platform != 'win32'",
 ]
 
 [project.scripts]
