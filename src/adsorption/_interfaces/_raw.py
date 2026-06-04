@@ -1,3 +1,4 @@
+from functools import reduce
 from typing import Literal, override
 
 import numpy as np
@@ -19,7 +20,7 @@ class RawAdsorption(AdsorptionABC):
         adsorbate_index: Literal["com"] | int | None = None,
         nbr1hop: npt.ArrayLike | list[int] | None = None,
         core: npt.ArrayLike | list[int] | int = 0,
-    ) -> tuple[Atoms, Literal[0,1,2]]:
+    ) -> tuple[Atoms, Literal[0, 1, 2]]:
         """Run the adsorption calculation.
 
         Args:
@@ -44,9 +45,12 @@ class RawAdsorption(AdsorptionABC):
                 The central atoms (core) which will place at.
                 Defaults to the first atom, i.e. the 0-th atom.
         """
-        if not isinstance(atoms, Atoms):
-            atoms = atoms.to_ase()
         adsorbate = ads = self._get_adsorbate(adsorbate=adsorbate)
+        if not isinstance(atoms, Atoms):
+            atoms, _origin = atoms.to_ase(), atoms
+        else:
+            _origin: System | Cluster | None = None
+        assert isinstance(_origin, (System, Cluster)) or _origin is None
 
         # A. get `adsorbate_index` & `ad_anchor`
         if adsorbate_index == "com":
@@ -91,7 +95,12 @@ class RawAdsorption(AdsorptionABC):
                 f" to 6. The value of core: {core}."
             )
         if nbr1hop is None:
-            nbr1hop = _get_1order_nbr(atoms, core)
+            if _origin is not None:
+                assert isinstance(_origin, (System, Cluster))
+                lst = [_origin.get_neighbors(i) for i in core]
+                nbr1hop = reduce(np.append, lst)
+            else:
+                nbr1hop = _get_1order_nbr(atoms, core)
         else:
             nbr1hop = np.asarray(nbr1hop, int).ravel()
         nbr1hop = np.setdiff1d(nbr1hop, core).ravel()
