@@ -3,4 +3,281 @@
 [![Pypi version](https://img.shields.io/pypi/v/adsorption)](https://pypi.org/project/adsorption/)
 [![PyPI Downloads](https://static.pepy.tech/badge/adsorption)](https://pepy.tech/projects/adsorption)
 
-The Adsorption package is a Python package for the adsorption of molecules on clusters or surfaces.
+A Python package for simulating molecular adsorption on clusters or surfaces, built on top of ASE (Atomic Simulation Environment).
+
+## Overview
+
+The `adsorption` package provides tools for placing and optimizing adsorbates (molecules or atoms) on surface or cluster substrates. It automates the process of:
+
+- Generating adsorption sites on surfaces/clusters
+- Placing adsorbates at optimal positions and orientations
+- Performing geometry optimization using two-stage relaxation
+- Running high-throughput adsorption studies with Ray Tune
+
+## Features
+
+- **Multiple Adsorption Strategies**:
+  - `RawAdsorption`: Places adsorbates based on geometric site analysis (top, bridge, hollow sites)
+  - `DirectAdsorption`: Uses Fibonacci lattice sampling for comprehensive orientation exploration
+
+- **Flexible Adsorbate Input**:
+  - ASE `Atoms` objects
+  - Chemical symbols (e.g., `"O"`, `"C"`)
+  - Molecule names recognized by ASE (e.g., `"H2O"`, `"CO"`)
+  - SMILES strings (e.g., `"C=C-C-C-C-C"`)
+
+- **Two-Stage Optimization**:
+  1. First stage: Fixed substrate + bond length constraints on adsorbate
+  2. Second stage: Full relaxation of the entire system
+
+- **High-Throughput Screening**:
+  - Integration with Ray Tune for parallel optimization
+  - Automatic grid generation for systematic adsorption site exploration
+
+## Installation
+
+```bash
+pip install adsorption
+```
+
+Or using pixi:
+
+```bash
+pixi install
+```
+
+## Quick Start
+
+### Basic Usage
+
+```python
+from ase.cluster import Octahedron
+from adsorption import RawAdsorption, DirectAdsorption
+
+# Create a copper cluster
+cluster = Octahedron("Cu", 10)
+
+# Method 1: RawAdsorption (geometric site-based)
+ads = RawAdsorption(calculator=None)  # Replace with actual calculator
+result, stage = ads(
+    atoms=cluster,
+    adsorbate="CO",
+    core=[303, 334, 464],  # FCC hollow site
+)
+
+# Method 2: DirectAdsorption (Fibonacci lattice sampling)
+ads = DirectAdsorption(calculator=None, nfibonacci=100)
+result, stage = ads(
+    atoms=cluster,
+    adsorbate="C6H6",  # Benzene
+    core=[454],  # Top site
+)
+```
+
+### Command Line Interface
+
+The package provides a CLI tool for running high-throughput adsorption studies:
+
+```bash
+adsorption-tune -cn config.yaml
+```
+
+Example configuration (`config.yaml`):
+
+```yaml
+output: ./outputs
+calculator:
+  _target_: ase.calculators.emt.EMT
+adsorption:
+  nfibonacci: 100
+  max_steps_for_first_stage: 100
+  max_steps_for_second_stage: 100
+  max_force: 0.05
+system:
+  atoms:
+    _target_: ase.build.fcc111
+    symbol: Cu
+    size: [10, 10, 5]
+    vacuum: 15
+  core: [454]
+gas: C6H6
+```
+
+## Architecture
+
+### Core Components
+
+```
+adsorption/
+├── _abc/
+│   ├── _interface.py    # Abstract base class (AdsorptionABC)
+│   └── _dataclass.py    # Data structures (Point, Vector, Site)
+├── _interfaces/
+│   ├── _raw.py          # RawAdsorption implementation
+│   └── _direct.py       # DirectAdsorption implementation
+└── runner/
+    ├── _cli.py          # Command-line interface
+    ├── _tune.py         # Ray Tune integration
+    └── _plot.py         # Visualization utilities
+```
+
+### Key Classes
+
+#### `AdsorptionABC` (Abstract Base Class)
+
+The abstract base class that defines the common interface and optimization workflow:
+
+- **Two-stage optimization**:
+  - Stage 1: Fixes substrate atoms, applies bond length constraints to adsorbate
+  - Stage 2: Full relaxation without constraints
+
+- **Adsorbate parsing**: Converts various input types (string, Atom, Atoms, Gas) to ASE Atoms
+
+#### `RawAdsorption`
+
+Places adsorbates based on geometric analysis of adsorption sites:
+
+- Automatically identifies neighbor atoms around the core site
+- Calculates optimal adsorption direction based on site geometry
+- Supports top, bridge, and hollow sites
+
+**Parameters**:
+- `adsorbate_index`: Index of anchoring atom in adsorbate (or `"com"` for center of mass)
+- `nbr1hop`: First-neighbor shell indices (auto-detected if not provided)
+- `core`: Core atom indices defining the adsorption site
+
+#### `DirectAdsorption`
+
+Uses Fibonacci lattice sampling for comprehensive orientation exploration:
+
+- Generates uniform sampling points on a sphere
+- Supports custom grid definitions for both adsorbate and substrate
+- Ideal for high-throughput screening
+
+**Parameters**:
+- `nfibonacci`: Number of Fibonacci lattice points (default: 1000)
+- `grid_core`: Custom grid for substrate orientations
+- `grid_ads`: Custom grid for adsorbate orientations
+- `distance`: Adsorbate-substrate distance
+
+### Data Structures
+
+#### `Site`
+
+Represents an adsorption site with:
+- `neighbor`: List of neighboring atom positions
+- `core`: List of core atom positions
+- `center`: Calculated center of the site
+- `direction`: Optimal adsorption direction vector
+
+## Examples
+
+### Example 1: Benzene on Cu(111) Surface
+
+```python
+from ase.build import fcc111
+from adsorption import DirectAdsorption
+from ase.calculators.emt import EMT
+
+# Create Cu(111) surface
+surface = fcc111("Cu", size=(10, 10, 5), vacuum=15, orthogonal=True)
+
+# Initialize adsorption calculator
+ads = DirectAdsorption(
+    calculator=EMT(),
+    nfibonacci=100,
+    max_steps_for_first_stage=100,
+    max_steps_for_second_stage=100,
+)
+
+# Place benzene on surface
+result, stage = ads(
+    atoms=surface,
+    adsorbate="C6H6",
+    core=[454],  # Surface site index
+)
+```
+
+### Example 2: CO on Copper Cluster
+
+```python
+from ase.cluster import Octahedron
+from adsorption import RawAdsorption
+
+# Create octahedral Cu cluster
+cluster = Octahedron("Cu", 10)
+
+# Place CO on FCC hollow site
+ads = RawAdsorption(calculator=None)
+result, stage = ads(
+    atoms=cluster,
+    adsorbate="CO",
+    core=[303, 334, 464],  # FCC hollow site
+    adsorbate_index=0,  # Anchor on carbon atom
+)
+```
+
+## High-Throughput Screening
+
+The `tune_adsorption` function enables parallel exploration of multiple adsorption configurations:
+
+```python
+from pathlib import Path
+from adsorption.runner._tune import tune_adsorption
+from ase.build import fcc111
+
+surface = fcc111("Cu", size=(10, 10, 5), vacuum=15)
+
+results = tune_adsorption(
+    cfg=config,  # DictConfig with calculator and adsorption settings
+    atoms=surface,
+    adsorbate="C6H6",
+    core=[454],
+    nsamples=100,  # Number of random samples
+    output=Path("./results"),
+)
+```
+
+Results are saved as:
+- `.xyz` files with energy and optimization stage in filename
+- `.png` visualization files with multiple viewing angles
+
+## Dependencies
+
+- **ASE**: Atomic Simulation Environment for atom manipulation
+- **graphatoms**: Graph-based atom system utilities
+- **Ray Tune**: Distributed hyperparameter optimization
+- **Hydra**: Configuration management
+- **NumPy**: Numerical computations
+- **Pydantic**: Data validation
+
+## Development
+
+### Running Tests
+
+```bash
+pixi run test
+# or
+pytest -s -vv
+```
+
+### Code Style
+
+The project uses:
+- **Ruff** for linting and formatting
+- **Google-style docstrings**
+- Line length: 80 characters
+
+## License
+
+GPL-3.0-or-later
+
+## Author
+
+LiuGaoyong (liugaoyong_88@163.com)
+
+## Links
+
+- [Homepage](https://github.com/LiuGaoyong/Adsorption)
+- [Repository](https://github.com/LiuGaoyong/Adsorption)
+- [Issues](https://github.com/LiuGaoyong/Adsorption/issues/)

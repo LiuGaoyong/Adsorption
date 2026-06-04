@@ -45,10 +45,10 @@ class AdsorptionABC(ABC):
         self,
         atoms: Atoms | System | Cluster,
         adsorbate: Atoms | Gas | Atom | str,
-    ) -> tuple[Atoms, Literal[0,1,2]]:
+    ) -> tuple[Atoms, Literal[0, 1, 2]]:
         pass
 
-    def _opt(self, atoms: Atoms, natoms: int)-> tuple[Atoms, Literal[0,1,2]]:
+    def _opt(self, atoms: Atoms, natoms: int) -> tuple[Atoms, Literal[0, 1, 2]]:
         nstage = 0
         result_lst: list[Atoms] = [atoms.copy()]
         if self.calculator is not None:
@@ -81,8 +81,6 @@ class AdsorptionABC(ABC):
                 energy = np.inf
             engs.append(energy)
         return result_lst[np.argmin(engs)], nstage
-        ...
-
 
     @staticmethod
     def _get_adsorbate(adsorbate: Atoms | Gas | Atom | str) -> Atoms:
@@ -142,7 +140,7 @@ class AdsorptionABC(ABC):
                 ]
             )
             p = Path(work_dir) / "opt_1.traj"
-            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None) # type: ignore
+            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None)  # type: ignore
             try:
                 converged = opt.run(steps=max_steps, fmax=fmax)
             except RuntimeError:
@@ -164,7 +162,7 @@ class AdsorptionABC(ABC):
             result.calc.reset()
             result.set_constraint(None)
             p = Path(work_dir) / "opt_2.traj"
-            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None)# type: ignore
+            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None)  # type: ignore
             try:
                 converged = opt.run(steps=max_steps, fmax=fmax)
             except RuntimeError:

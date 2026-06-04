@@ -70,7 +70,8 @@ def tune_adsorption(
             core=core,
             **config,
         )
-        result_atoms: Atoms = result[0]
+        result_atoms, nstage = result
+        assert isinstance(result_atoms, Atoms)
         try:
             score = result_atoms.get_potential_energy(False, False)
             force = result_atoms.get_forces(False, False)
@@ -87,14 +88,14 @@ def tune_adsorption(
                 v = f"{int(config[k]):04d}"
             key.append(f"{k}_{v}")
         key.insert(0, f"E_{int(score * 1000):07d}meV")
-        key.append(f"stage_{result[1]:d}")
+        key.append(f"stage_{nstage:d}")
         s = "--".join(key)
 
         p.joinpath("png").mkdir(parents=True, exist_ok=True)
         p.joinpath("xyz").mkdir(parents=True, exist_ok=True)
         result_atoms.write(p.joinpath("xyz", f"{s}.xyz"), format="extxyz")
         plot(result_atoms, pngfname=p.joinpath("png", f"{s}.png"))
-        return {"score": score, "nstage": result[1], "fmax": fmax}
+        return {"score": score, "nstage": nstage, "fmax": fmax}
 
     tuner = tune.Tuner(
         tune.with_resources(helper, {"cpu": 1}),
