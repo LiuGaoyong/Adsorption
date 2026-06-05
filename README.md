@@ -1,5 +1,7 @@
 # Adsorption
 
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption) 
+[![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption)
 [![Pypi version](https://img.shields.io/pypi/v/adsorption)](https://pypi.org/project/adsorption/)
 [![PyPI Downloads](https://static.pepy.tech/badge/adsorption)](https://pepy.tech/projects/adsorption)
 
