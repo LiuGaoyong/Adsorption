@@ -4,12 +4,11 @@ from pathlib import Path
 
 import hydra
 from ase import Atoms
-from ase.calculators.calculator import Calculator
 from graphatoms.utils.parser import hydra_parse
 from omegaconf import DictConfig, OmegaConf
 from ray.tune import ResultGrid
 
-from ._tune import TuneAdsorption
+from ._tune import tune_adsorption
 
 log = logging.getLogger(__name__)
 os.environ["HYDRA_FULL_ERROR"] = "1"
@@ -29,7 +28,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
 
     p = Path(outlogfile).parent
     with p.joinpath(".gitignore").open("w") as f:
-        f.write("*\n")
+        f.write("\n".join(["*", "!config.yaml", "!run.sh", ""]))
     outlogfile = p / "run.log"
 
     # check something
@@ -41,14 +40,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D103
             "will be parallelized by Ray innerly."
         )
 
-    obj = TuneAdsorption(
-        calculator=hydra_parse(
-            cfg=cfg.calculator,
-            cls=Calculator,
-        ),
-        **cfg.adsorption,
-    )
-    result: ResultGrid = obj.tune(
+    result: ResultGrid = tune_adsorption(
+        cfg=cfg,
         atoms=hydra_parse(cfg=cfg.system.atoms, cls=Atoms),
         adsorbate=(
             hydra_parse(cfg=cfg.gas, cls=Atoms)

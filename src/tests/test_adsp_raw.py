@@ -20,7 +20,7 @@ def atoms() -> Atoms:  # noqa: D103
 @pytest.fixture(scope="module")
 def result_dir() -> Path:  # noqa: D103
     p = Path(__file__).parent
-    p /= ".test.adsp.results"
+    p /= ".test.raw.results"
     shutil.rmtree(p, ignore_errors=True)
     p.mkdir(exist_ok=True)
     with p.joinpath(".gitignore").open("w") as f:

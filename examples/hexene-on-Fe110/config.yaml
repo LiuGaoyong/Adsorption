@@ -17,6 +17,10 @@ hydra:
 
 calculator:
   _target_: ase.calculators.emt.EMT
+  # _target_: nequip.integrations.ase.NequIPCalculator.from_compiled_model
+  # #compile_path:  #~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth
+  # compile_path:  'C:/Users/liuga/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth'
+  # device: cpu
 adsorption:
   nfibonacci: 100
   max_steps_for_first_stage: 100
@@ -27,6 +31,10 @@ adsorption:
 
 system:
   atoms:
+    # _target_: ase.build.bcc110
+    # symbol: Fe
+    # size:
+    #   - 8
     _target_: ase.build.fcc111
     symbol: Cu
     size:
@@ -38,5 +46,6 @@ system:
     periodic: true
   core:
     - 454
+    # - 363
 gas:
-  C6H6
+  C=C-C-C-C-C
