@@ -22,7 +22,7 @@ class DirectAdsorption(AdsorptionABC):
         max_steps_for_first_stage: int = 100,
         max_steps_for_second_stage: int = 100,
         max_force: float = 0.05,
-        debug: bool = True,
+        debug: bool = False,
     ) -> None:
         super().__init__(
             calculator=calculator,
@@ -45,14 +45,14 @@ class DirectAdsorption(AdsorptionABC):
         grid_ads: np.ndarray | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,
-    ) -> tuple[Atoms, Literal[0,1,2]]:
+    ) -> tuple[Atoms, Literal[0, 1, 2]]:
         if not isinstance(atoms, Atoms):
             atoms = atoms.to_ase()
         adsorbate = gas = self._get_adsorbate(adsorbate).copy()
 
         # A. get the direction of `adsorbate`
         if grid_ads is None:
-            grid_ads, anchor_ads = self._get_grids(adsorbate, None)
+            grid_ads, anchor_ads = self.__get_grids(adsorbate, None)
         else:
             grid_ads = np.asarray(grid_ads, dtype=float)
             anchor_ads = np.mean(adsorbate.positions, axis=0)
@@ -72,7 +72,7 @@ class DirectAdsorption(AdsorptionABC):
 
         # C get the direction of core
         if grid_core is None:
-            grid_core, anchor_core = self._get_grids(atoms, core)
+            grid_core, anchor_core = self.__get_grids(atoms, core)
         else:
             if isinstance(core, int):
                 core = np.asarray([core])
@@ -112,7 +112,7 @@ class DirectAdsorption(AdsorptionABC):
             atoms=result,
         )
 
-    def _get_grids(
+    def __get_grids(
         self,
         atoms: Atoms,
         core: ArrayLike | None = 0,
@@ -134,6 +134,20 @@ class DirectAdsorption(AdsorptionABC):
         else:
             grid = fibonacci_lattice(self.__nfibonacci) + anchor
         return grid, anchor
+
+    def grid_generation(
+        self,
+        atoms: Atoms | System | Cluster,
+        adsorbate: Atoms | Gas | Atom | str,
+        *,
+        core: ArrayLike | None = 0,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if not isinstance(atoms, Atoms):
+            atoms = atoms.to_ase()
+        adsorbate = self._get_adsorbate(adsorbate)
+        grid_ads, _ = self.__get_grids(adsorbate, None)
+        grid_core, _ = self.__get_grids(atoms, core)
+        return grid_core, grid_ads
 
 
 def get_grid_of_core(
