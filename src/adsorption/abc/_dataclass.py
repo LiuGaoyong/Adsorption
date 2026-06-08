@@ -1,9 +1,10 @@
 """The core data classes by pydantic."""
 
+from typing import Self
+
 import numpy as np
 import pydantic
 from numpy.typing import ArrayLike
-from typing_extensions import Self
 
 
 class _XYZ(pydantic.BaseModel):

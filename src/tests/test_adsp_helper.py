@@ -14,7 +14,7 @@ from ase import Atoms
 from ase.calculators.emt import EMT
 from ase.cluster import Octahedron
 
-from adsorption._interfaces.helper import Helper
+from adsorption.interfaces.helper import Helper
 
 
 @pytest.fixture(scope="module")

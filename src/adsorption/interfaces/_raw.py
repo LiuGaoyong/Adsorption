@@ -7,8 +7,8 @@ from ase import Atom, Atoms
 from ase.data import covalent_radii as COV_R
 from graphatoms.system import Cluster, Gas, System
 
-from .._abc import AdsorptionABC
-from .._abc._dataclass import Site
+from ..abc import AdsorptionABC
+from ..abc._dataclass import Site
 
 
 class RawAdsorption(AdsorptionABC):

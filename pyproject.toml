@@ -9,7 +9,7 @@ Issues = "https://github.com/LiuGaoyong/Adsorption/issues/"
 
 [project]
 name = "adsorption"
-version = "0.0.6"
+version = "0.1.0"
 readme = "README.md"
 description = "Adsorption Based on ASE."
 keywords = ["chemistry", "adsorption"]

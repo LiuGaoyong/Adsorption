@@ -9,8 +9,8 @@ from omegaconf import DictConfig
 from ray import tune
 from ray.tune.search import create_searcher
 
-from .._interfaces._direct import DirectAdsorption as TuneAdsorption
-from .._interfaces.helper import plot
+from ..interfaces._direct import DirectAdsorption as TuneAdsorption
+from ..interfaces.helper import plot
 
 
 def tune_adsorption(

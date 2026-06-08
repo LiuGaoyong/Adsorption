@@ -1,4 +1,4 @@
-from ._interfaces import (  # noqa: D104
+from .interfaces import (  # noqa: D104
     DirectAdsorption,
     RawAdsorption,
 )
