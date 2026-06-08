@@ -18,6 +18,8 @@ from ._raw import RawAdsorption
 
 matplotlib.use("Agg")
 
+__all__ = ["Helper", "plot"]
+
 
 def plot(atoms: Atoms, pngfname: Path) -> None:
     """Plot the atoms."""

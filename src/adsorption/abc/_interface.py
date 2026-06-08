@@ -49,6 +49,7 @@ class AdsorptionABC(ABC):
         pass
 
     def _opt(self, atoms: Atoms, natoms: int) -> tuple[Atoms, Literal[0, 1, 2]]:
+        return atoms, 0
         nstage = 0
         result_lst: list[Atoms] = [atoms.copy()]
         if self.calculator is not None:

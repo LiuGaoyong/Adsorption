@@ -42,6 +42,7 @@ class DirectAdsorption(AdsorptionABC):
         core: ArrayLike | None = 0,
         idx_grid_core: int | None = None,
         grid_core: np.ndarray | None = None,
+        anchor_core: np.ndarray | None = None,
         grid_ads: np.ndarray | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,
@@ -74,17 +75,14 @@ class DirectAdsorption(AdsorptionABC):
         if grid_core is None:
             grid_core, anchor_core = self.__get_grids(atoms, core)
         else:
-            if isinstance(core, int):
-                core = np.asarray([core])
-            core = np.asarray(core, dtype=int)
-            core = np.unique(core.flatten())
-            anchor_core = np.mean(atoms.positions[core], axis=0)
+            assert anchor_core is not None, "anchor_core must be provided."
+            anchor_core = np.asarray(anchor_core, dtype=float)
             grid_core = np.asarray(grid_core, dtype=float)
         assert grid_core.ndim == 2 and grid_core.shape[1] == 3
         if idx_grid_core is None:
             idx_grid_core = np.random.randint(len(grid_core))
         idx_grid_core = int(idx_grid_core)
-        direction_core = grid_core[idx_grid_core]
+        direction_core = grid_core[idx_grid_core] - anchor_core
         direction_core /= np.linalg.norm(direction_core)
 
         # place gas into
@@ -107,6 +105,7 @@ class DirectAdsorption(AdsorptionABC):
 
         result = atoms.copy()
         result.extend(gas)
+        return result, 0
         return self._opt(
             natoms=len(atoms),
             atoms=result,
@@ -123,16 +122,16 @@ class DirectAdsorption(AdsorptionABC):
             core = np.arange(len(atoms))
         core = np.asarray(core, dtype=int)
         core = np.unique(core.flatten())
-        anchor = np.mean(atoms.positions[core], axis=0)
-
-        if len(core) != len(atoms):
-            grid = get_grid_of_core(
+        if len(core) == len(atoms):
+            assert not atoms.pbc.any(), "PBC is not supported for 'COM'."
+            anchor = np.mean(atoms.positions[core], axis=0)
+            grid = fibonacci_lattice(self.__nfibonacci) + anchor
+        else:
+            grid, anchor = get_grid_and_anchor_of_core(
                 atoms=atoms,
                 select_core=core,
                 nfibonacci=self.__nfibonacci,
             )
-        else:
-            grid = fibonacci_lattice(self.__nfibonacci) + anchor
         return grid, anchor
 
     def grid_generation(
@@ -150,15 +149,25 @@ class DirectAdsorption(AdsorptionABC):
         return grid_core, grid_ads
 
 
-def get_grid_of_core(
+def get_grid_and_anchor_of_core(
     atoms: Atoms,
     select_core: int | list[int] | np.ndarray,
     nfibonacci: int = 1000,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     if isinstance(select_core, int):
         select_core = [select_core]
     core = np.asarray(select_core, dtype=int)
     core = np.unique(core)
+
+    # move core atoms if mic
+    _MIC_POS: np.ndarray = np.zeros(3)
+    if any(atoms.get_pbc()) and len(core) > 1:
+        _MIC_POS = atoms.cell.cartesian_positions([0.5, 0.5, 0.5])
+        _MIC_POS -= atoms.positions[core[0]]
+        atoms = atoms.copy()
+        atoms.translate(_MIC_POS)
+        atoms.wrap(pbc=True)
+    assert _MIC_POS.shape == (3,)
 
     skin = 0.5
     scale = 1.5
@@ -181,7 +190,8 @@ def get_grid_of_core(
     pos = atoms.positions[nbrs]
 
     # calculate distance by minimum-image representation
-    grid += atoms.positions[core].mean(axis=0)
+    anchor = atoms.positions[core].mean(axis=0)
+    grid: np.ndarray = anchor + grid
     if base_direction is not None:
         base_direction = np.asarray(base_direction)
         grid += base_direction.flatten()[:3]
@@ -191,53 +201,6 @@ def get_grid_of_core(
 
     matrix_cov_r = np.column_stack([cov_r] * len(grid))
     cond = np.all(matrix_cov_r + float(skin) < d, axis=0)
-    return grid[cond]
-
-
-def test_get_grid_of_core() -> None:
-    from pathlib import Path
-
-    from ase import Atoms
-    from ase.cluster import Octahedron
-    from ase.visualize.plot import plot_atoms
-    from matplotlib import pyplot as plt
-    from matplotlib.axes import Axes
-
-    fig, axes = plt.subplots(2, 3, figsize=(6, 4), dpi=150)
-
-    atoms = Octahedron("Cu", 5)
-    for ax, core, name in zip(
-        axes.flatten(),
-        [
-            [61],
-            [61, 44],
-            [61, 24, 44],
-            [60],  # fcc-top
-            [60, 67],  # fcc-bri
-            [60, 79, 67],  # fcc
-        ],
-        [
-            "Vertex Top",
-            "Vertex Bridge",
-            "Vertex 3-Fold",
-            "FCC Top",
-            "FCC Bridge",
-            "FCC 3-Fold",
-        ],
-    ):
-        assert isinstance(ax, Axes)
-        grid = get_grid_of_core(atoms, core, 100)
-        new_atoms = atoms.copy()
-        new_atoms.numbers[core] = 79
-        new_atoms.extend(Atoms([0] * len(grid), grid))
-        plot_atoms(new_atoms, ax=ax)
-        ax.set_title(f"{name}")
-        ax.axis("on")
-        ax.set_xticks([])
-        ax.set_yticks([])
-    plt.tight_layout()
-    fig.savefig(Path(__file__).with_suffix(".png"))
-
-
-if __name__ == "__main__":
-    test_get_grid_of_core()
+    grid = grid[cond] - _MIC_POS
+    anchor = anchor - _MIC_POS
+    return grid, anchor
