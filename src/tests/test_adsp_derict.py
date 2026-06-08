@@ -6,7 +6,7 @@ import pytest
 from ase import Atoms
 from ase.cluster import Octahedron
 
-from adsorption._interfaces import DirectAdsorption
+from adsorption.interfaces import DirectAdsorption
 
 
 @pytest.fixture(scope="module")

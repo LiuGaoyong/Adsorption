@@ -47,6 +47,7 @@ def plot(atoms: Atoms, pngfname: Path) -> None:
         ax.set_xticks([])
         ax.set_yticks([])
     fig.savefig(pngfname.with_suffix(".png"))
+    plt.close(fig)
 
 
 class Helper:
@@ -123,7 +124,7 @@ class Helper:
             irun -= 1
 
         if irun < 0:
-            assert self.__use_direct, "use_direct must be True."
+            assert self.__use_raw, "use_raw must be True."
             result = self.__obj_raw.__call__(
                 atoms=self.__atoms,
                 adsorbate=self.__adsorbate,

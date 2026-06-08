@@ -7,7 +7,7 @@ from ase import Atoms
 from ase.cluster import Octahedron
 from ase.io import read
 
-from adsorption._interfaces import RawAdsorption
+from adsorption.interfaces import RawAdsorption
 
 
 @pytest.fixture(scope="module")
