@@ -28,7 +28,7 @@ def tune_adsorption(
         ),
         **cfg.adsorption,
     )
-    grid_core, grid_ads = obj.grid_generation(
+    grid_core, grid_ads, anchor_core = obj.grid_generation(
         adsorbate=adsorbate,
         atoms=atoms,
         core=core,
@@ -48,6 +48,7 @@ def tune_adsorption(
             atoms=atoms,
             grid_ads=grid_ads,
             grid_core=grid_core,
+            anchor_core=anchor_core,
             adsorbate=adsorbate,
             core=core,
             **config,

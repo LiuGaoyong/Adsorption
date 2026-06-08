@@ -10,7 +10,7 @@ from graphatoms.geometry.sample import fibonacci_lattice
 from graphatoms.system import Cluster, Gas, System
 from numpy.typing import ArrayLike
 
-from ..abc import AdsorptionABC
+from ..common import AdsorptionABC
 
 
 class DirectAdsorption(AdsorptionABC):
