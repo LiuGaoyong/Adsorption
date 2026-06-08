@@ -105,7 +105,6 @@ class DirectAdsorption(AdsorptionABC):
 
         result = atoms.copy()
         result.extend(gas)
-        return result, 0
         return self._opt(
             natoms=len(atoms),
             atoms=result,
@@ -140,13 +139,20 @@ class DirectAdsorption(AdsorptionABC):
         adsorbate: Atoms | Gas | Atom | str,
         *,
         core: ArrayLike | None = 0,
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Generate the grid of core and adsorbate.
+
+        Returns:
+            grid_core: The grid of core.
+            grid_ads: The grid of adsorbate.
+            anchor_core: The anchor of core.
+        """
         if not isinstance(atoms, Atoms):
             atoms = atoms.to_ase()
         adsorbate = self._get_adsorbate(adsorbate)
         grid_ads, _ = self.__get_grids(adsorbate, None)
-        grid_core, _ = self.__get_grids(atoms, core)
-        return grid_core, grid_ads
+        grid_core, anchor_core = self.__get_grids(atoms, core)
+        return grid_core, grid_ads, anchor_core
 
 
 def get_grid_and_anchor_of_core(

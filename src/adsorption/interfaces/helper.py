@@ -81,6 +81,7 @@ class Helper:
         # return the total number of runs
         self.__bonds_cfg = bonds_cfg
         self.__fmax = max_force
+        self.__debug = debug
         self.nrun = 0
         if use_direct:
             self.__obj_direct = obj = DirectAdsorption(
@@ -91,8 +92,12 @@ class Helper:
                 max_force=max_force,
                 debug=debug,
             )
-            self.__grid_core, self.__grid_ads = obj.grid_generation(
-                adsorbate=adsorbate, atoms=atoms, core=core
+            self.__grid_core, self.__grid_ads, self.__anchor_core = (
+                obj.grid_generation(
+                    adsorbate=adsorbate,
+                    atoms=atoms,
+                    core=core,
+                )
             )
             self.__distance_lst = distance_lst
             self.nrun += (
@@ -117,7 +122,7 @@ class Helper:
         self.__atoms = atoms
         self.__core = core
 
-    def __call__(
+    def __call__(  # noqa: D102
         self,
         irun: int = 0,
         outdir: Path = Path("."),
@@ -147,6 +152,7 @@ class Helper:
                 distance=self.__distance_lst[idist],
                 idx_grid_core=icore,
                 grid_core=self.__grid_core,
+                anchor_core=self.__anchor_core,
             )
         result_atoms, nstage = result
         assert isinstance(result_atoms, Atoms)
@@ -158,22 +164,22 @@ class Helper:
         except Exception:
             score = fmax = np.inf
 
+        result = {"fmax": fmax, "score": score, "nstage": nstage}
         if not np.isinf(score) and fmax <= self.__fmax:
             sys = analysis(result_atoms, bonds_cfg=self.__bonds_cfg)
             if any(
                 len(sys.get_neighbors(i)) > 0
                 for i in range(len(self.__atoms), len(sys))
             ):
-                key = [sys.symbols.get_chemical_formula("metal"), sys.hash]
-                # key.insert(0, f"E_{int(score * 1000):07d}meV")
-                key.append(f"stage_{nstage:d}")
-                s = "-".join(key)
-                result_atoms.write(outdir.joinpath(f"{s}.xyz"), format="extxyz")
-                plot(result_atoms, pngfname=outdir.joinpath(f"{s}.png"))
-
-        return {
-            "fmax": fmax,
-            "score": score,
-            "nstage": nstage,
-            "atoms": result_atoms,
-        }
+                if self.__debug:
+                    key = [sys.symbols.get_chemical_formula("metal"), sys.hash]
+                    # key.insert(0, f"E_{int(score * 1000):07d}meV")
+                    key.append(f"stage_{nstage:d}")
+                    s = "-".join(key)
+                    result_atoms.write(
+                        outdir.joinpath(f"{s}.xyz"), format="extxyz"
+                    )
+                    plot(result_atoms, pngfname=outdir.joinpath(f"{s}.png"))
+                result["system"] = sys
+        result["atoms"] = result_atoms
+        return result
