@@ -1,8 +1,6 @@
 """The core ABC classes for adsorption."""
 
 from abc import ABC, abstractmethod
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Literal
 
 import numpy as np
@@ -12,11 +10,11 @@ from ase.build import molecule
 from ase.calculators.calculator import Calculator
 from ase.constraints import FixAtoms, FixBondLengths
 from ase.data import chemical_symbols as SYMBOLS
-from ase.io import iread
-from ase.optimize import LBFGS
 from graphatoms.system import Cluster, Gas, System
 from graphatoms.utils.rdutils import rdmol2ase, smiles2rdmol
 from scipy.spatial.transform import Rotation
+
+from .optimize import optimize
 
 
 def quaternion_apply(quat, pos) -> np.ndarray:
@@ -50,39 +48,53 @@ class AdsorptionABC(ABC):
 
     def _opt(self, atoms: Atoms, natoms: int) -> tuple[Atoms, Literal[0, 1, 2]]:
         if self.calculator is None:
-            return atoms.copy(), 0
-        nstage = 0
-        result_lst: list[Atoms] = [atoms.copy()]
-        if self.calculator is not None:
-            result_1, converged_1 = self._first_stage_opt(
-                natoms=natoms,
-                result=atoms,
-                calc=self.calculator,
-                fmax=self.max_force,
-                max_steps=self.max_steps_for_first_stage,
-                debug=self.debug,
+            return atoms, 0
+        else:
+            # first stage optimization
+            atoms = atoms.copy()
+            atoms.set_constraint(
+                [
+                    FixAtoms(indices=list(range(natoms))),
+                    FixBondLengths(
+                        np.column_stack(
+                            np.triu_indices(len(atoms) - natoms, k=1),
+                        )
+                        + natoms
+                    ),
+                ]
             )
-            result_lst.extend(result_1)
-            if converged_1:
-                nstage = 1
-                result_2, converged_2 = self._second_stage_opt(
-                    result=result_1[-1],
-                    calc=self.calculator,
-                    fmax=self.max_force,
-                    max_steps=self.max_steps_for_second_stage,
-                )
-                result_lst.extend(result_2)
-                if converged_2:
-                    nstage = 2
-
-        engs = []
-        for at in result_lst:
             try:
-                energy = at.get_potential_energy(False, False)
+                lst_1, coveraged_1 = optimize(
+                    atoms,
+                    self.calculator,
+                    logfile="-" if self.debug else None,
+                    max_steps=self.max_steps_for_first_stage,
+                    fmax=self.max_force,
+                    trajectory=None,
+                )
             except Exception:
-                energy = np.inf
-            engs.append(energy)
-        return result_lst[np.argmin(engs)], nstage
+                # Sometimes, FixBondLengths will cause an error:
+                #     RuntimeError: Did not converge
+                # TODO: use torch automatic differentiation instead.
+                lst_1, coveraged_1 = [atoms], False
+
+            atoms_2 = lst_1[-1].copy()
+            atoms_2.set_constraint(None)
+            lst_2, coveraged_2 = optimize(
+                atoms_2,
+                self.calculator,
+                logfile="-" if self.debug else None,
+                max_steps=self.max_steps_for_second_stage,
+                fmax=self.max_force,
+                trajectory=None,
+            )
+            result_lst = lst_1 + lst_2
+            assert coveraged_1 or coveraged_2, (
+                "The coveraged of the first stage or "
+                "the second stage must be True."
+            )
+            coveraged = int(sum([coveraged_1, coveraged_2]))
+            return result_lst[-1], coveraged  # type: ignore
 
     @staticmethod
     def _get_adsorbate(adsorbate: Atoms | Gas | Atom | str) -> Atoms:
@@ -113,61 +125,3 @@ class AdsorptionABC(ABC):
         if len(ads) == 0:
             raise ValueError("The adsorbate must have at least one atom.")
         return ads
-
-    @staticmethod
-    def _first_stage_opt(
-        natoms: int,
-        result: Atoms,
-        calc: Calculator,
-        fmax: float = 0.05,
-        max_steps: int = 100,
-        debug: bool = True,
-    ) -> tuple[list[Atoms], bool]:
-        with TemporaryDirectory() as work_dir:
-            result_lst: list[Atoms] = []
-            converged = False
-            result.calc = calc
-            result.calc.reset()
-            if debug:
-                result.write("debug.png")
-            result.set_constraint(
-                [
-                    FixAtoms(indices=list(range(natoms))),
-                    FixBondLengths(
-                        np.column_stack(
-                            np.triu_indices(len(result) - natoms, k=1),
-                        )
-                        + natoms
-                    ),
-                ]
-            )
-            p = Path(work_dir) / "opt_1.traj"
-            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None)  # type: ignore
-            try:
-                converged = opt.run(steps=max_steps, fmax=fmax)
-            except RuntimeError:
-                converged = False
-            result_lst.extend(list(iread(p)))
-        return result_lst, converged
-
-    @staticmethod
-    def _second_stage_opt(
-        result: Atoms,
-        calc: Calculator,
-        fmax: float = 0.05,
-        max_steps: int = 100,
-    ) -> tuple[list[Atoms], bool]:
-        with TemporaryDirectory() as work_dir:
-            result_lst: list[Atoms] = []
-            converged = False
-            result.calc = calc
-            result.calc.reset()
-            result.set_constraint(None)
-            p = Path(work_dir) / "opt_2.traj"
-            opt = LBFGS(result, trajectory=p.as_posix(), logfile=None)  # type: ignore
-            try:
-                converged = opt.run(steps=max_steps, fmax=fmax)
-            except RuntimeError:
-                converged = False
-            result_lst.extend(list(iread(p)))
-        return result_lst, converged
