@@ -15,6 +15,7 @@ hydra:
         filename: ${hydra.runtime.output_dir}/run.log
 
 calculator:
+  # _target_: ase.calculators.emt.EMT
   _target_: nequip.integrations.ase.NequIPCalculator.from_compiled_model
   compile_path:
     _target_: os.path.expanduser
@@ -30,15 +31,18 @@ adsorption:
 
 system:
   atoms:
-    _target_: ase.build.bcc110
-    symbol: Fe
+    _target_: ase.build.fcc111
+    symbol: Pd
     size:
-      - 8
+      - 10
       - 10
       - 5
     vacuum: 15
     orthogonal: true
     periodic: true
   core:
-    - 363
-gas: C=C-C-C-C-C
+    - 454
+gas:
+  _target_: ase.io.read
+  filename: ./furfural.sdf
+  format: sdf

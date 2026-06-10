@@ -15,7 +15,6 @@ hydra:
                 filename: ${hydra.runtime.output_dir}/run.log
 
 calculator:
-    # _target_: ase.calculators.emt.EMT
     _target_: nequip.integrations.ase.NequIPCalculator.from_compiled_model
     compile_path:
         _target_: os.path.expanduser
