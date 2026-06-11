@@ -68,15 +68,18 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
     try:
         from nequip.integrations.ase import NequIPCalculator
 
+        path = "~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth"
+        path = os.path.expanduser(path)
+        if not os.path.exists(path):
+            return
+
         _test_add_(
             atoms=atoms,
             adsorbate=adsorbate,
             core=core,
             cls=DirectAdsorptionAD,
             calculator=NequIPCalculator.from_compiled_model(
-                compile_path=os.path.expanduser(
-                    "~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth"
-                ),
+                compile_path=path,
                 chemical_species_to_atom_type_map=True,
                 device="cpu",
             ),
