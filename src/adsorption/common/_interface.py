@@ -12,6 +12,7 @@ from ase.constraints import FixAtoms, FixBondLengths
 from ase.data import chemical_symbols as SYMBOLS
 from graphatoms.system import Cluster, Gas, System
 from graphatoms.utils.rdutils import rdmol2ase, smiles2rdmol
+from numpy.typing import ArrayLike
 from scipy.spatial.transform import Rotation
 
 from .optimize import optimize
@@ -43,6 +44,7 @@ class AdsorptionABC(ABC):
         self,
         atoms: Atoms | System | Cluster,
         adsorbate: Atoms | Gas | Atom | str,
+        core: ArrayLike | None = 0,
     ) -> tuple[Atoms, Literal[0, 1, 2]]:
         pass
 
@@ -103,13 +105,16 @@ class AdsorptionABC(ABC):
                 fmax=self.max_force,
                 trajectory=None,
             )
-            result_lst = lst_1 + lst_2
-            assert coveraged_1 or coveraged_2, (
-                "The coveraged of the first stage or "
-                "the second stage must be True."
-            )
+            self._atoms_lst = result_lst = lst_1 + lst_2
+            # assert coveraged_1 or coveraged_2, (
+            #     "The coveraged of the first stage or "
+            #     "the second stage must be True."
+            # )
             coveraged = int(sum([coveraged_1, coveraged_2]))
-            return result_lst[-1], coveraged  # type: ignore
+            if coveraged == 0:
+                return atoms, 0
+            else:
+                return result_lst[-1], coveraged  # type: ignore
 
     @staticmethod
     def _get_adsorbate(adsorbate: Atoms | Gas | Atom | str) -> Atoms:

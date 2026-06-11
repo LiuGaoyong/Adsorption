@@ -1,12 +1,10 @@
-from collections.abc import Generator
-from contextlib import contextmanager
-from typing import Any, Literal, override
+import warnings
+from typing import Literal, override
 
 import numpy as np
 from ase import Atom, Atoms
 from ase.calculators.calculator import Calculator
 from graphatoms.system import Cluster, Gas, System
-from nequip.data import AtomicDataDict, from_ase
 from numpy.typing import ArrayLike
 from scipy.spatial.transform import Rotation
 
@@ -14,6 +12,7 @@ from ._direct import DirectAdsorption
 
 try:
     import torch
+    from nequip.data import AtomicDataDict, from_ase, to_ase
     from nequip.integrations.ase import NequIPCalculator  # type: ignore
 except ImportError as e:
     raise ImportError(
@@ -53,8 +52,8 @@ class DirectAdsorptionAD(DirectAdsorption):
         self,
         atoms: Atoms | System | Cluster,
         adsorbate: Atoms | Gas | Atom | str,
+        core: ArrayLike | None = None,
         *,
-        core: ArrayLike | None = 0,
         idx_grid_core: int | None = None,
         grid_core: np.ndarray | None = None,
         anchor_core: np.ndarray | None = None,
@@ -80,28 +79,36 @@ class DirectAdsorptionAD(DirectAdsorption):
         # calculate two quaternions: one for core and one for adsorbate
         #   1. the quaternion for adsorbate rotation
         np.set_printoptions(precision=5)
-        rot_estimated, rssd = Rotation.align_vectors(
-            self._adsorbate_pos - self._adsorbate_pos.mean(axis=0),
-            gas.positions - gas.positions.mean(axis=0),
-        )
-        quat_ads: np.ndarray = rot_estimated.as_quat(scalar_first=True)
-        assert quat_ads.shape == (4,), (
-            f"Rot estimated shape is not 4, but: {quat_ads.shape}"
-        )
-        assert np.allclose(np.linalg.norm(quat_ads), 1.0), (
-            f"Rot estimated norm is not 1.0, but: {np.linalg.norm(quat_ads)}"
-        )
-        assert rssd < 1e-4, f"RSSD is not < 1e-4, but: {rssd:.3e}"
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            if len(gas) == 1:
+                quat_ads: np.ndarray = np.array([0, 0, 0, 1], dtype=float)
+            else:
+                rot_estimated, rssd = Rotation.align_vectors(
+                    self._adsorbate_pos - self._adsorbate_pos.mean(axis=0),
+                    gas.positions - gas.positions.mean(axis=0),
+                )
+                quat_ads: np.ndarray = rot_estimated.as_quat(scalar_first=True)
+                assert quat_ads.shape == (4,), (
+                    f"Rot estimated shape is not 4, but: {quat_ads.shape}"
+                )
+                assert np.allclose(np.linalg.norm(quat_ads), 1.0), (
+                    f"Rot estimated norm is not 1.0, "
+                    f"but: {np.linalg.norm(quat_ads)}"
+                )
+                assert rssd < 1e-4, f"RSSD is not < 1e-4, but: {rssd:.3e}"
         # rot_estimated.apply(gas.positions - gas.positions.mean(axis=0))
         #   2. the quaternion for core direction rotation
         assert np.allclose(np.linalg.norm(self._direction_core), 1.0), (
             f"Core direction is not normalized, but: "
             f"{np.linalg.norm(self._direction_core)}"
         )
-        rot_estimated, rssd = Rotation.align_vectors(
-            self._direction_core, [0, 0, 1]
-        )
-        quat_core: np.ndarray = rot_estimated.as_quat(scalar_first=True)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            rot_estimated_2, rssd = Rotation.align_vectors(
+                self._direction_core, [0, 0, 1]
+            )
+        quat_core: np.ndarray = rot_estimated_2.as_quat(scalar_first=True)
         assert quat_core.shape == (4,), (
             f"Rot estimated shape is not 4, but: {quat_core.shape}"
         )
@@ -109,49 +116,98 @@ class DirectAdsorptionAD(DirectAdsorption):
             f"Rot estimated norm is not 1.0, but: {np.linalg.norm(quat_core)}"
         )
         assert rssd < 1e-4, f"RSSD is not < 1e-4, but: {rssd:.3e}"
-        # rot_estimated.apply([0, 0, 1])
+        # rot_estimated_2.apply([0, 0, 1])
 
         if isinstance(self.calculator, NequIPCalculator):
-            torch_distance = torch.tensor(self._distance, requires_grad=True)
-            torch_quat_core = torch.tensor(quat_core, requires_grad=True)
-            torch_quat_ads = torch.tensor(quat_ads, requires_grad=True)
-            with force_retain_graph():
-                out = _nequip_energy(
-                    result=result,
-                    calc=self.calculator,
-                    adsorbate_pos=torch.from_numpy(gas.positions),
-                    anchor_core=torch.from_numpy(self._anchor_core),
-                    quat_core=torch_quat_core,
-                    quat_ads=torch_quat_ads,
-                    distance=torch_distance,
-                )
-                eng_k = AtomicDataDict.TOTAL_ENERGY_KEY
-                e = self.calculator.energy_units_to_eV * out[eng_k]
-
-                print(
-                    torch.autograd.grad(
-                        e,
-                        [
-                            torch_distance,
-                            torch_quat_core,
-                            torch_quat_ads,
-                        ],
-                    )
-                )
-                print(e)
-                print(out.keys())
-                print(out[eng_k])
-            # assert False
+            self._init_gas_pos = torch.tensor(gas.positions)  # .copy()
+            self._distance = torch.tensor(self._distance)
+            self._quat_core = torch.tensor(quat_core)
+            self._quat_ads = torch.tensor(quat_ads)
+            return self._opt(
+                natoms=len(atoms),
+                atoms=result,
+            )
 
         else:
             raise NotImplementedError(
                 f"{self.calculator.__class__.__name__} is not supported now."
             )
 
-        return self._opt(
-            natoms=len(atoms),
-            atoms=result,
+    @override
+    def _opt_1st_stage(
+        self,
+        atoms: Atoms,
+        natoms: int,
+    ) -> tuple[list[Atoms], bool]:
+        assert self.calculator is not None, (
+            "The calculator must be set before calling the method."
         )
+        lst, coveraged = [], False
+        quat_core = self._quat_core.clone().detach().requires_grad_(True)
+        quat_ads = self._quat_ads.clone().detach().requires_grad_(True)
+        distance = self._distance.clone().detach().requires_grad_(True)
+        optimizer = torch.optim.LBFGS([distance, quat_core, quat_ads], lr=1e-2)
+
+        loss_history = []
+        best_loss = float("inf")
+        early_stop_patience = 5
+        early_stop_min_delta = 1e-4
+        wait = 0
+
+        for _ in range(self.max_steps_for_first_stage):
+            outputs = _nequip_energy(
+                result=atoms,
+                calc=self.calculator,
+                adsorbate_pos=self._init_gas_pos,
+                anchor_core=torch.from_numpy(self._anchor_core),
+                quat_core=quat_core,
+                quat_ads=quat_ads,
+                distance=distance,
+            )
+            _output = to_ase(
+                {
+                    k: v.clone().detach()  # clone to avoid inplace operation
+                    for k, v in outputs.items()
+                }
+            )
+            if isinstance(_output, Atoms):
+                lst.append(_output)
+            elif isinstance(_output, list):
+                lst.extend(_output)
+            else:
+                raise ValueError(f"Unknown type: {type(_output)}")
+            f = outputs[AtomicDataDict.FORCE_KEY]
+            fmax = torch.linalg.norm(f, dim=0).max()
+            e = outputs[AtomicDataDict.TOTAL_ENERGY_KEY]
+
+            # record current loss (ensure convert to Python scalar)
+            current_loss = e.item()
+            loss_history.append(current_loss)
+
+            # check if current loss is better than best loss
+            if current_loss < best_loss - early_stop_min_delta:
+                best_loss = current_loss
+                wait = 0
+            else:
+                wait += 1
+
+            coveraged = bool(fmax < self.max_force)
+            if wait >= early_stop_patience:
+                # early stopping
+                break
+            elif coveraged:
+                # coveraged
+                break
+            else:
+                outputs[AtomicDataDict.POSITIONS_KEY].backward(gradient=-f)
+                optimizer.step(lambda: e)
+                # print(e.item(), fmax.item())
+        return lst, coveraged
+
+
+#########################################################################
+#               The Utility of NequIP Helper Function
+#########################################################################
 
 
 def _nequip_energy(
@@ -164,68 +220,44 @@ def _nequip_energy(
     distance: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
     data: dict[str, torch.Tensor] = from_ase(result)
+    natoms: int = len(result) - len(adsorbate_pos)
     calc.reset()
 
-    # rotate adsorbate
-    pos_ads = quaternion_apply(quat_ads, adsorbate_pos)
-    pos_ads = (
-        anchor_core
-        + pos_ads
-        + quaternion_apply(quat_core, torch.tensor([0, 0, 1])) * distance
-    )
-
     # reset adsorbate position
-    new_ads_pos = torch.zeros_like(data[AtomicDataDict.POSITIONS_KEY])
-    new_ads_pos[-len(pos_ads) :] = pos_ads
-    print(data[AtomicDataDict.POSITIONS_KEY].shape)
-    a = torch.arange(len(result)) >= len(result) - len(pos_ads)
-    print(
-        torch.column_stack([a, a, a]).shape,
-        new_ads_pos.shape,
-        data[AtomicDataDict.POSITIONS_KEY].shape,
+    _pos = (
+        quaternion_apply(
+            quat_ads,
+            adsorbate_pos - torch.mean(adsorbate_pos, dim=0),
+        )
+        + anchor_core
+        + distance
+        * quaternion_apply(
+            quat_core,
+            torch.tensor([0, 0, 1]),
+        )
     )
-    new_ads_pos: torch.Tensor = torch.where(
-        torch.column_stack([a, a, a]),
-        new_ads_pos,
-        data[AtomicDataDict.POSITIONS_KEY],
-    )
+    pos_ads = torch.vstack([torch.zeros(natoms, 3), _pos])
+    _loc = torch.arange(len(result)) >= natoms
+    loc_ads = torch.column_stack([_loc, _loc, _loc])
     data[AtomicDataDict.POSITIONS_KEY] = torch.where(
-        torch.column_stack([a, a, a]),
-        data[AtomicDataDict.POSITIONS_KEY],
-        new_ads_pos,
+        loc_ads, pos_ads, data[AtomicDataDict.POSITIONS_KEY]
     )
 
+    # calculate energy
     if calc._move_to_device_before_transforms:
         data = AtomicDataDict.to_(data, calc.device)
     for t in calc.transforms:
         data = t(data)
     if not calc._move_to_device_before_transforms:
         data = AtomicDataDict.to_(data, calc.device)
-    print(calc.model)
     out: dict[str, torch.Tensor] = calc.call_model(data)
-    return out
-
-
-def _torch_hook(module: torch.nn.Module, input, output):
-    output.retain_grad()
-
-
-@contextmanager
-def force_retain_graph() -> Generator[None, Any, None]:
-    original_backward = torch.Tensor.backward
-
-    def patched_backward(
-        self, gradient=None, retain_graph=None, create_graph=False
-    ):
-        if retain_graph is None:
-            retain_graph = True  # 强制保留计算图
-        return original_backward(self, gradient, retain_graph, create_graph)
-
-    torch.Tensor.backward = patched_backward  # type: ignore
-    try:
-        yield
-    finally:
-        torch.Tensor.backward = original_backward
+    # data[AtomicDataDict.POSITIONS_KEY].backward(
+    #     gradient=out[AtomicDataDict.FORCE_KEY],
+    # )
+    # print(distance.grad)
+    # print(quat_core.grad)
+    # print(quat_ads.grad)
+    return out | data
 
 
 #########################################################################

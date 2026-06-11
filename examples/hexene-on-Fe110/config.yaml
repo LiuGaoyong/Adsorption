@@ -41,4 +41,7 @@ system:
     periodic: true
   core:
     - 363
-gas: C=C-C-C-C-C
+gas:
+  _target_: ase.io.read
+  filename: ./hexene.xyz
+  format: extxyz

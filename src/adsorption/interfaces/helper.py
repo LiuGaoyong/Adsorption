@@ -14,6 +14,7 @@ from matplotlib.axes import Axes
 from numpy.typing import ArrayLike
 
 from ._direct import DirectAdsorption
+from ._directAD import DirectAdsorptionAD
 from ._raw import RawAdsorption
 
 matplotlib.use("Agg")
@@ -64,6 +65,7 @@ class Helper:
         use_direct: bool = True,
         use_raw: bool = True,
         *,
+        use_direct_ad: bool = False,
         nfibonacci: int = 1000,
         max_steps_for_first_stage: int = 100,
         max_steps_for_second_stage: int = 100,
@@ -84,7 +86,11 @@ class Helper:
         self.__debug = debug
         self.nrun = 0
         if use_direct:
-            self.__obj_direct = obj = DirectAdsorption(
+            if use_direct_ad:
+                _CLS = DirectAdsorptionAD
+            else:
+                _CLS = DirectAdsorption
+            self.__obj_direct = obj = _CLS(
                 calculator=calculator,
                 max_steps_for_first_stage=max_steps_for_first_stage,
                 max_steps_for_second_stage=max_steps_for_second_stage,

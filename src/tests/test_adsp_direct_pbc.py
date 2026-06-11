@@ -3,7 +3,6 @@
 import shutil
 from io import StringIO
 from pathlib import Path
-from time import perf_counter
 
 import numpy as np
 import pytest
@@ -15,6 +14,9 @@ from matplotlib.axes import Axes
 
 from adsorption.interfaces import DirectAdsorption
 from adsorption.interfaces._direct import get_grid_and_anchor_of_core
+from adsorption.interfaces._test import (
+    test_add_adsorbate_and_optimize as _test_add_,
+)
 
 
 @pytest.fixture(scope="module")
@@ -58,27 +60,16 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
     result_dir: Path,
     name: str,
 ) -> None:  # noqa: D103
-    print()
-    k = f"{name}_{adsorbate}"
-    result_dir.mkdir(exist_ok=True)
-    t0 = perf_counter()
-    try:
-        obj = DirectAdsorption(calculator=None)
-        result = obj(atoms=atoms, adsorbate=adsorbate, core=core)[0]
-        result.numbers[core] = 79
-        result.rotate([0, 0, 1], [0, 0, -1], rotate_cell=True)
-        fname = result_dir.joinpath(f"{k}.png")
-        result.write(fname, format="png")
-        print(f"  Write: {fname}")
-    except Exception as e:
-        msg = f"  No success: for {k} because of {e}"
-        fname = result_dir.joinpath(f"{k}.error")
-        with fname.open("w") as f:
-            f.write(msg)
-        print(msg)
-        raise e
-    finally:
-        print(f"  Time({k}) = {perf_counter() - t0:.4f} s")
+
+    _test_add_(
+        atoms=atoms,
+        adsorbate=adsorbate,
+        core=core,
+        cls=DirectAdsorption,
+        calculator=None,
+        result_dir=result_dir,
+        name=name,
+    )
 
 
 def _plot(atoms: Atoms, core: list[int], name: str, ax: Axes) -> Atoms:

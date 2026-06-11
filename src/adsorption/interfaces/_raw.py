@@ -17,9 +17,10 @@ class RawAdsorption(AdsorptionABC):
         self,
         atoms: Atoms | System | Cluster,
         adsorbate: Atoms | Gas | Atom | str,
+        core: npt.ArrayLike | None = None,
+        *,
         adsorbate_index: Literal["com"] | int | None = None,
-        nbr1hop: npt.ArrayLike | list[int] | None = None,
-        core: npt.ArrayLike | list[int] | int = 0,
+        nbr1hop: npt.ArrayLike | None = None,
     ) -> tuple[Atoms, Literal[0, 1, 2]]:
         """Run the adsorption calculation.
 
