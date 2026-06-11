@@ -70,6 +70,8 @@ def tune_adsorption(
             else:
                 v = f"{int(config[k]):04d}"
             key.append(f"{k}_{v}")
+        if np.isinf(score):
+            score = -0.001
         key.insert(0, f"E_{int(score * 1000):07d}meV")
         key.append(f"stage_{nstage:d}")
         s = "--".join(key)

@@ -202,6 +202,7 @@ class DirectAdsorptionAD(DirectAdsorption):
                 outputs[AtomicDataDict.POSITIONS_KEY].backward(gradient=-f)
                 optimizer.step(lambda: e)
                 # print(e.item(), fmax.item())
+        assert len(lst) > 0, "No output."
         return lst, coveraged
 
 

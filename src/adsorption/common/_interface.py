@@ -95,7 +95,10 @@ class AdsorptionABC(ABC):
                 natoms=natoms,
             )
 
-            atoms_2 = lst_1[-1].copy()
+            if len(lst_1) > 0:
+                atoms_2 = lst_1[-1].copy()
+            else:
+                atoms_2 = atoms.copy()
             atoms_2.set_constraint(None)
             lst_2, coveraged_2 = optimize(
                 atoms_2,
