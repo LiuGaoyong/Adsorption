@@ -1,6 +1,6 @@
 # Adsorption
 
-[![Conda Version](https://img.shields.io/conda/vn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption) 
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption)
 [![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption)
 [![Pypi version](https://img.shields.io/pypi/v/adsorption)](https://pypi.org/project/adsorption/)
 [![PyPI Downloads](https://static.pepy.tech/badge/adsorption)](https://pepy.tech/projects/adsorption)
@@ -14,6 +14,7 @@ The `adsorption` package provides tools for placing and optimizing adsorbates (m
 - Generating adsorption sites on surfaces/clusters
 - Placing adsorbates at optimal positions and orientations
 - Performing geometry optimization using two-stage relaxation
+- Running transition state searches (dimer and NEB methods)
 - Running high-throughput adsorption studies with Ray Tune
 
 ## Features
@@ -21,6 +22,7 @@ The `adsorption` package provides tools for placing and optimizing adsorbates (m
 - **Multiple Adsorption Strategies**:
   - `RawAdsorption`: Places adsorbates based on geometric site analysis (top, bridge, hollow sites)
   - `DirectAdsorption`: Uses Fibonacci lattice sampling for comprehensive orientation exploration
+  - `DirectAdsorptionAD`: Extends `DirectAdsorption` with NequIP-based torch autodiff optimization for GPU-accelerated relaxation
 
 - **Flexible Adsorbate Input**:
   - ASE `Atoms` objects
@@ -32,9 +34,15 @@ The `adsorption` package provides tools for placing and optimizing adsorbates (m
   1. First stage: Fixed substrate + bond length constraints on adsorbate
   2. Second stage: Full relaxation of the entire system
 
+- **Transition State Search**:
+  - Dimer method (`call_dimer`) for saddle point searches
+  - NEB / DyNEB method (`call_neb`) for minimum energy path searches
+  - Built-in trajectory recording with per-step energy snapshots
+
 - **High-Throughput Screening**:
   - Integration with Ray Tune for parallel optimization
   - Automatic grid generation for systematic adsorption site exploration
+  - Unified `Helper` interface for iterating over both raw and direct adsorption paths
 
 ## Installation
 
@@ -76,6 +84,70 @@ result, stage = ads(
 )
 ```
 
+### NequIP-Based Autodiff Optimization
+
+```python
+from ase.cluster import Octahedron
+from adsorption.interfaces import DirectAdsorptionAD
+from nequip.ase import NequIPCalculator
+
+cluster = Octahedron("Cu", 10)
+calc = NequIPCalculator.from_compiled_model("path/to/model.pth")
+
+ads = DirectAdsorptionAD(calculator=calc, nfibonacci=100)
+result, stage = ads(atoms=cluster, adsorbate="CO", core=[454])
+```
+
+### Unified Helper Interface
+
+```python
+from ase.cluster import Octahedron
+from adsorption.interfaces import Helper
+from ase.calculators.emt import EMT
+
+cluster = Octahedron("Cu", 10)
+
+helper = Helper(
+    calculator=EMT(),
+    atoms=cluster,
+    adsorbate="CO",
+    core=[454],
+    use_direct=True,
+    use_raw=True,
+)
+
+# Run raw adsorption path
+result = helper(irun=0, outdir="./results")
+
+# Run direct adsorption path (iterates over orientation grids)
+for i in range(1, helper.nrun):
+    result = helper(irun=i, outdir="./results")
+```
+
+### Transition State Search
+
+```python
+from ase.build import fcc100
+from adsorption.common.optimize import call_dimer, call_neb
+from ase.calculators.emt import EMT
+
+# Create a slab
+slab = fcc100("Cu", size=(3, 3, 3), vacuum=10)
+
+# Dimer method for saddle point search
+trajectory, converged = call_dimer(
+    slab, EMT(), displacement=..., max_steps=1000, fmax=0.02
+)
+
+# NEB method for minimum energy path
+initial = slab.copy()
+final = slab.copy()
+# ... set up initial and final states ...
+trajectory, converged = call_neb(
+    initial, EMT(), final, nimages=5, climb=True
+)
+```
+
 ### Command Line Interface
 
 The package provides a CLI tool for running high-throughput adsorption studies:
@@ -110,17 +182,22 @@ gas: C6H6
 ### Core Components
 
 ```
-adsorption/
-├── _abc/
-│   ├── _interface.py    # Abstract base class (AdsorptionABC)
-│   └── _dataclass.py    # Data structures (Point, Vector, Site)
-├── _interfaces/
-│   ├── _raw.py          # RawAdsorption implementation
-│   └── _direct.py       # DirectAdsorption implementation
+src/adsorption/
+├── common/
+│   ├── __init__.py       # Exports AdsorptionABC, Point, Vector, Site
+│   ├── _interface.py     # Abstract base class (AdsorptionABC)
+│   ├── _dataclass.py     # Data structures (Point, Vector, Site)
+│   └── optimize.py       # optimize(), call_dimer(), call_neb()
+├── interfaces/
+│   ├── __init__.py       # Exports RawAdsorption, DirectAdsorption, DirectAdsorptionAD
+│   ├── _raw.py           # RawAdsorption implementation
+│   ├── _direct.py        # DirectAdsorption implementation
+│   ├── _directAD.py      # DirectAdsorptionAD (NequIP + torch autodiff)
+│   └── helper.py         # Helper class + plot() visualization
 └── runner/
-    ├── _cli.py          # Command-line interface
-    ├── _tune.py         # Ray Tune integration
-    └── _plot.py         # Visualization utilities
+    ├── _cli.py           # Hydra-based CLI (adsorption-tune entry point)
+    ├── _cli.yaml         # Default Hydra configuration
+    └── _tune.py          # Ray Tune integration
 ```
 
 ### Key Classes
@@ -162,15 +239,39 @@ Uses Fibonacci lattice sampling for comprehensive orientation exploration:
 - `grid_ads`: Custom grid for adsorbate orientations
 - `distance`: Adsorbate-substrate distance
 
+#### `DirectAdsorptionAD`
+
+Extends `DirectAdsorption` with NequIP-based torch autodiff optimization:
+
+- Requires a `NequIPCalculator` instance
+- Uses `torch.optim.LBFGS` for GPU-accelerated relaxation
+- Optimizes distance, quaternion rotations via autodiff gradients
+- Early stopping with configurable patience and tolerance
+
+#### `Helper`
+
+Unified interface that wraps both `RawAdsorption` and `DirectAdsorption`:
+
+- Initializes grids and configurations for both adsorption paths
+- `irun=0`: Runs the raw adsorption path
+- `irun>=1`: Runs the direct adsorption path (iterates over orientation x distance grids)
+- Returns structured results with energy, convergence stage, and structure
+
 ### Data Structures
 
-#### `Site`
+All defined in `common/_dataclass.py` as Pydantic models:
 
-Represents an adsorption site with:
-- `neighbor`: List of neighboring atom positions
-- `core`: List of core atom positions
-- `center`: Calculated center of the site
-- `direction`: Optimal adsorption direction vector
+- **`Point`**: 3D point with arithmetic operations
+- **`Vector`**: 3D vector with `length` and `normalize` properties
+- **`Site`**: Adsorption site with `neighbor`, `core`, computed `center` and `direction`
+
+### Optimization Utilities
+
+`common/optimize.py` provides:
+
+- **`optimize(atoms, calc, method, max_steps, fmax)`**: General ASE structure optimization with trajectory recording. Returns `(trajectory, converged)`.
+- **`call_dimer(atoms, calc, displacement, mask, max_steps, fmax)`**: Dimer method for transition state search. Returns `(trajectory, converged)`.
+- **`call_neb(atoms, calc, final_atoms, nimages, climb, ...)`**: DyNEB method for minimum energy path search. Returns `(trajectory, converged)`.
 
 ## Examples
 
@@ -248,10 +349,10 @@ Results are saved as:
 
 - **ASE**: Atomic Simulation Environment for atom manipulation
 - **graphatoms**: Graph-based atom system utilities
-- **Ray Tune**: Distributed hyperparameter optimization
-- **Hydra**: Configuration management
-- **NumPy**: Numerical computations
-- **Pydantic**: Data validation
+- **Ray[default, tune]**: Distributed hyperparameter optimization
+- **Hydra-core**: Configuration management
+- **typing-extensions**: Type hints support
+- **NequIP** (optional): Neural network interatomic potential for `DirectAdsorptionAD`
 
 ## Development
 
