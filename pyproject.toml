@@ -56,6 +56,7 @@ testpaths = ["src/tests"]
 filterwarnings = [
     "error", # All other warnings are transformed into errors.
     # ignore the following warnings that matching a regex
+    "ignore::DeprecationWarning",
 ]
 
 # ruff config

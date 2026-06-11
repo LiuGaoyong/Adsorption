@@ -46,37 +46,52 @@ class AdsorptionABC(ABC):
     ) -> tuple[Atoms, Literal[0, 1, 2]]:
         pass
 
+    def _opt_1st_stage(
+        self,
+        atoms: Atoms,
+        natoms: int,
+    ) -> tuple[list[Atoms], bool]:
+        """Optimize the first stage of the adsorption."""
+        assert self.calculator is not None, (
+            "The calculator must be set before calling the method."
+        )
+        # first stage optimization
+        atoms = atoms.copy()
+        atoms.set_constraint(
+            [
+                FixAtoms(indices=list(range(natoms))),
+                FixBondLengths(
+                    np.column_stack(
+                        np.triu_indices(len(atoms) - natoms, k=1),
+                    )
+                    + natoms
+                ),
+            ]
+        )
+        try:
+            lst, coveraged = optimize(
+                atoms,
+                self.calculator,
+                logfile="-" if self.debug else None,
+                max_steps=self.max_steps_for_first_stage,
+                fmax=self.max_force,
+                trajectory=None,
+            )
+        except Exception:
+            # Sometimes, FixBondLengths will cause an error:
+            #     RuntimeError: Did not converge
+            # TODO: use torch automatic differentiation instead.
+            lst, coveraged = [atoms], False
+        return lst, coveraged
+
     def _opt(self, atoms: Atoms, natoms: int) -> tuple[Atoms, Literal[0, 1, 2]]:
         if self.calculator is None:
             return atoms, 0
         else:
-            # first stage optimization
-            atoms = atoms.copy()
-            atoms.set_constraint(
-                [
-                    FixAtoms(indices=list(range(natoms))),
-                    FixBondLengths(
-                        np.column_stack(
-                            np.triu_indices(len(atoms) - natoms, k=1),
-                        )
-                        + natoms
-                    ),
-                ]
+            lst_1, coveraged_1 = self._opt_1st_stage(
+                atoms=atoms,
+                natoms=natoms,
             )
-            try:
-                lst_1, coveraged_1 = optimize(
-                    atoms,
-                    self.calculator,
-                    logfile="-" if self.debug else None,
-                    max_steps=self.max_steps_for_first_stage,
-                    fmax=self.max_force,
-                    trajectory=None,
-                )
-            except Exception:
-                # Sometimes, FixBondLengths will cause an error:
-                #     RuntimeError: Did not converge
-                # TODO: use torch automatic differentiation instead.
-                lst_1, coveraged_1 = [atoms], False
 
             atoms_2 = lst_1[-1].copy()
             atoms_2.set_constraint(None)

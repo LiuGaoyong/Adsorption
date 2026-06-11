@@ -33,11 +33,10 @@ class DirectAdsorption(AdsorptionABC):
         )
         self.__nfibonacci = int(nfibonacci)
 
-    @override
-    def __call__(
+    def _combine(
         self,
-        atoms: Atoms | System | Cluster,
-        adsorbate: Atoms | Gas | Atom | str,
+        atoms: Atoms,
+        adsorbate: Atoms,
         *,
         core: ArrayLike | None = 0,
         idx_grid_core: int | None = None,
@@ -46,11 +45,9 @@ class DirectAdsorption(AdsorptionABC):
         grid_ads: np.ndarray | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,
-    ) -> tuple[Atoms, Literal[0, 1, 2]]:
-        if not isinstance(atoms, Atoms):
-            atoms = atoms.to_ase()
-        adsorbate = gas = self._get_adsorbate(adsorbate).copy()
-
+    ) -> Atoms:
+        """Combine the substrate and adsorbate."""
+        gas = adsorbate
         # A. get the direction of `adsorbate`
         if grid_ads is None:
             grid_ads, anchor_ads = self.__get_grids(adsorbate, None)
@@ -98,13 +95,49 @@ class DirectAdsorption(AdsorptionABC):
 
         adsorbate.set_positions(
             adsorbate.positions
-            - anchor_ads  #
-            + anchor_core
-            + direction_core * distance
+            - anchor_ads  # 1. move adsorbate to the zero position
+            + anchor_core  # 2. move adsorbate to the core position
+            + direction_core * distance  # 3. move adsorbate
         )
+
+        # save some information
+        self._adsorbate_pos = adsorbate.positions.copy()
+        self._direction_core = direction_core
+        self._anchor_core = anchor_core
+        self._anchor_ads = anchor_ads
+        self._distance = distance
 
         result = atoms.copy()
         result.extend(gas)
+        return result
+
+    @override
+    def __call__(
+        self,
+        atoms: Atoms | System | Cluster,
+        adsorbate: Atoms | Gas | Atom | str,
+        *,
+        core: ArrayLike | None = 0,
+        idx_grid_core: int | None = None,
+        grid_core: np.ndarray | None = None,
+        anchor_core: np.ndarray | None = None,
+        grid_ads: np.ndarray | None = None,
+        idx_grid_ads: int | None = None,
+        distance: float | None = None,
+    ) -> tuple[Atoms, Literal[0, 1, 2]]:
+        if not isinstance(atoms, Atoms):
+            atoms = atoms.to_ase()
+        result = self._combine(
+            atoms=atoms,
+            adsorbate=self._get_adsorbate(adsorbate).copy(),
+            core=core,
+            idx_grid_core=idx_grid_core,
+            grid_core=grid_core,
+            anchor_core=anchor_core,
+            grid_ads=grid_ads,
+            idx_grid_ads=idx_grid_ads,
+            distance=distance,
+        )
         return self._opt(
             natoms=len(atoms),
             atoms=result,
