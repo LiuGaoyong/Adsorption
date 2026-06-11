@@ -9,7 +9,7 @@ from omegaconf import DictConfig
 from ray import tune
 from ray.tune.search import create_searcher
 
-from ..interfaces._direct import DirectAdsorption as TuneAdsorption
+from ..interfaces._directAD import DirectAdsorptionAD as TuneAdsorption
 from ..interfaces.helper import plot
 
 
@@ -28,7 +28,7 @@ def tune_adsorption(
         ),
         **cfg.adsorption,
     )
-    grid_core, grid_ads = obj.grid_generation(
+    grid_core, grid_ads, anchor_core = obj.grid_generation(
         adsorbate=adsorbate,
         atoms=atoms,
         core=core,
@@ -48,6 +48,7 @@ def tune_adsorption(
             atoms=atoms,
             grid_ads=grid_ads,
             grid_core=grid_core,
+            anchor_core=anchor_core,
             adsorbate=adsorbate,
             core=core,
             **config,
@@ -69,6 +70,8 @@ def tune_adsorption(
             else:
                 v = f"{int(config[k]):04d}"
             key.append(f"{k}_{v}")
+        if np.isinf(score):
+            score = -0.001
         key.insert(0, f"E_{int(score * 1000):07d}meV")
         key.append(f"stage_{nstage:d}")
         s = "--".join(key)

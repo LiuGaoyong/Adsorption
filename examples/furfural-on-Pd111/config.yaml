@@ -30,18 +30,18 @@ adsorption:
 
 system:
   atoms:
-    _target_: ase.build.bcc110
-    symbol: Fe
+    _target_: ase.build.fcc111
+    symbol: Pd
     size:
-      - 8
+      - 10
       - 10
       - 5
     vacuum: 15
     orthogonal: true
     periodic: true
   core:
-    - 363
+    - 454
 gas:
   _target_: ase.io.read
-  filename: ./hexene.xyz
-  format: extxyz
+  filename: ./furfural.sdf
+  format: sdf

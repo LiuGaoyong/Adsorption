@@ -7,8 +7,8 @@ from ase import Atom, Atoms
 from ase.data import covalent_radii as COV_R
 from graphatoms.system import Cluster, Gas, System
 
-from ..abc import AdsorptionABC
-from ..abc._dataclass import Site
+from ..common import AdsorptionABC
+from ..common._dataclass import Site
 
 
 class RawAdsorption(AdsorptionABC):
@@ -17,9 +17,10 @@ class RawAdsorption(AdsorptionABC):
         self,
         atoms: Atoms | System | Cluster,
         adsorbate: Atoms | Gas | Atom | str,
+        core: npt.ArrayLike | None = None,
+        *,
         adsorbate_index: Literal["com"] | int | None = None,
-        nbr1hop: npt.ArrayLike | list[int] | None = None,
-        core: npt.ArrayLike | list[int] | int = 0,
+        nbr1hop: npt.ArrayLike | None = None,
     ) -> tuple[Atoms, Literal[0, 1, 2]]:
         """Run the adsorption calculation.
 
