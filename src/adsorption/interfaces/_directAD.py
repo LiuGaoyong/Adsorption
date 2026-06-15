@@ -142,6 +142,94 @@ class DirectAdsorptionAD(DirectAdsorption):
         assert self.calculator is not None, (
             "The calculator must be set before calling the method."
         )
+        import geotorch
+        import torch.nn as nn
+
+        class UnitQuaternion(nn.Module):
+            def __init__(self, init_quat) -> None:
+                super().__init__()
+                self.quat = nn.Parameter(init_quat.clone().detach())
+                geotorch.sphere(self, "quat")  # type: ignore
+
+            def forward(self):
+                return self.quat  # 返回约束后的四元数
+
+        quat_core_mod = UnitQuaternion(self._quat_core)
+        quat_ads_mod = UnitQuaternion(self._quat_ads)
+        distance = self._distance.clone().detach().requires_grad_(True)
+        optimizer = torch.optim.LBFGS(
+            list(quat_core_mod.parameters()) + list(quat_ads_mod.parameters()),
+            lr=1e-2,
+        )
+
+        lst, coveraged = [], False
+        loss_history = []
+        best_loss = float("inf")
+        early_stop_patience = 5
+        early_stop_min_delta = 1e-4
+        wait = 0
+
+        for _ in range(self.max_steps_for_first_stage):
+            # 从约束模块中取出当前有效的四元数（已自动归一化）
+            quat_core = quat_core_mod()
+            quat_ads = quat_ads_mod()
+            outputs = _nequip_energy(
+                result=atoms,
+                calc=self.calculator,
+                adsorbate_pos=self._init_gas_pos,
+                anchor_core=torch.from_numpy(self._anchor_core),
+                quat_core=quat_core,
+                quat_ads=quat_ads,
+                distance=distance,
+            )
+            _output = to_ase(
+                {k: v.clone().detach() for k, v in outputs.items()}
+            )
+            if isinstance(_output, Atoms):
+                lst.append(_output)
+            elif isinstance(_output, list):
+                lst.extend(_output)
+            else:
+                raise ValueError(f"Unknown type: {type(_output)}")
+
+            f = outputs[AtomicDataDict.FORCE_KEY]
+            fmax = torch.linalg.norm(f, dim=0).max()
+            e = outputs[AtomicDataDict.TOTAL_ENERGY_KEY]
+
+            current_loss = e.item()
+            loss_history.append(current_loss)
+
+            if current_loss < best_loss - early_stop_min_delta:
+                best_loss = current_loss
+                wait = 0
+            else:
+                wait += 1
+
+            coveraged = bool(fmax < self.max_force)
+            if wait >= early_stop_patience or coveraged:
+                break
+            else:
+                outputs[AtomicDataDict.POSITIONS_KEY].backward(gradient=-f)
+                optimizer.step(lambda: e)
+                print(
+                    e.item(),
+                    fmax.item(),
+                    distance.item(),
+                    torch.linalg.norm(quat_core).item(),
+                    torch.linalg.norm(quat_ads).item(),
+                )
+
+        assert len(lst) > 0, "No output."
+        return lst, coveraged
+
+    def ____opt_1st_stage(
+        self,
+        atoms: Atoms,
+        natoms: int,
+    ) -> tuple[list[Atoms], bool]:
+        assert self.calculator is not None, (
+            "The calculator must be set before calling the method."
+        )
         lst, coveraged = [], False
         quat_core = self._quat_core.clone().detach().requires_grad_(True)
         quat_ads = self._quat_ads.clone().detach().requires_grad_(True)
@@ -201,7 +289,13 @@ class DirectAdsorptionAD(DirectAdsorption):
             else:
                 outputs[AtomicDataDict.POSITIONS_KEY].backward(gradient=-f)
                 optimizer.step(lambda: e)
-                # print(e.item(), fmax.item())
+                print(
+                    e.item(),
+                    fmax.item(),
+                    distance.item(),
+                    torch.linalg.norm(quat_core).item(),
+                    torch.linalg.norm(quat_ads).item(),
+                )
         assert len(lst) > 0, "No output."
         return lst, coveraged
 
