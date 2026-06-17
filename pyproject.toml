@@ -25,7 +25,7 @@ requires-python = ">=3.12, <3.14"
 license = "GPL-3.0-or-later"
 dependencies = [
     "ase",
-    "graphatoms>=1.1.3",
+    "graphatoms>=1.1.5",
     "typing-extensions",
     'ray[default, tune]>2.50',
     "hydra-core>=1.3",
@@ -96,7 +96,7 @@ ray-tune = '>=2.50'
 ase = ">=3.28.0,<4"
 openbabel = ">=3.1.1,<4"
 hydra-core = ">=1.3.2,<2"
-graphatoms = ">=1.1.3,<2"
+graphatoms = ">=1.1.5,<2"
 pytest = ">=8.3.0,<9"
 nequip = ">=0.18.0,<0.19"
 pytest-xdist = ">=3.8.0,<4"

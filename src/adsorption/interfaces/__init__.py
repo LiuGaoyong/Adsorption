@@ -1,8 +1,8 @@
 """Interfaces for adsorption."""
 
-from ._direct import DirectAdsorption
-from ._directAD import DirectAdsorptionAD
-from ._raw import RawAdsorption
+from ._adsDirect import DirectAdsorption
+from ._adsDirectAD import DirectAdsorptionAD
+from ._adsRaw import RawAdsorption
 
 __all__ = [
     "RawAdsorption",
