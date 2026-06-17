@@ -15,6 +15,7 @@ from graphatoms.utils.rdutils import rdmol2ase, smiles2rdmol
 from numpy.typing import ArrayLike
 from scipy.spatial.transform import Rotation
 
+from ..common._site import Site, _site_helper
 from .optimize import optimize
 
 
@@ -26,27 +27,102 @@ def quaternion_apply(quat, pos) -> np.ndarray:
 class AdsorptionABC(ABC):
     def __init__(
         self,
-        calculator: Calculator | None = None,
+        atoms: Atoms | System | Cluster,
         *,
+        core: ArrayLike = 0,
+        neighbors: ArrayLike | None = None,
+        calculator: Calculator | None = None,
         max_steps_for_first_stage: int = 100,
         max_steps_for_second_stage: int = 100,
         max_force: float = 0.05,
         debug: bool = False,
     ) -> None:
+        """Initialize the adsorption calculation.
+
+        Args:
+            atoms (Atoms | System | Cluster): The surface or
+                cluster onto which the adsorbate should be added.
+            core (npt.ArrayLike | list[int] | int, optional):
+                The central atoms (core) which will place at.
+                Defaults to the first atom, i.e. the 0-th atom.
+            neighbors (npt.ArrayLike | list[int] |None, optional):
+                The first hop neighbor of core atoms.
+                If None, the code will generated automated.
+            calculator (Calculator | None, optional): The calculator to use.
+                Defaults to None.
+            max_steps_for_first_stage (int, optional): The maximum number of
+                steps for the first stage optimization. Defaults to 100.
+            max_steps_for_second_stage (int, optional): The maximum number of
+                steps for the second stage optimization. Defaults to 100.
+            max_force (float, optional): The maximum force to use.
+                Defaults to 0.05 eV/\u212b.
+            debug (bool, optional): Whether to print debug information.
+                Defaults to False
+        """
         self.calculator = calculator
-        self.max_steps_for_first_stage = int(max_steps_for_first_stage)
+        a = _site_helper(atoms=atoms, core=core, neighbors=neighbors)
+        self.atoms, self.core, self.neighbors, self._origin, self.site = a
         self.max_steps_for_second_stage = int(max_steps_for_second_stage)
+        self.max_steps_for_first_stage = int(max_steps_for_first_stage)
         self.max_force = float(max_force)
         self.debug = bool(debug)
+        assert self._origin is None or isinstance(
+            self._origin, (System, Cluster)
+        ), f"Invalid origin type({type(self._origin)})."
+        assert isinstance(self.atoms, Atoms), (
+            f"Invalid atoms type({type(self.atoms)})."
+        )
+        assert isinstance(self.site, Site), (
+            f"Invalid site type({type(self.site)})."
+        )
+        assert isinstance(self.core, np.ndarray), (
+            f"Invalid core type({type(self.core)})."
+        )
+        assert isinstance(self.neighbors, np.ndarray), (
+            f"Invalid neighbors type({type(self.neighbors)})."
+        )
 
     @abstractmethod
-    def __call__(  # noqa: D417
+    def _try_adsorption(  # noqa: D417
         self,
-        atoms: Atoms | System | Cluster,
-        adsorbate: Atoms | Gas | Atom | str,
-        core: ArrayLike | None = 0,
-    ) -> tuple[Atoms, Literal[0, 1, 2]]:
+        adsorbate: Atoms,
+        *,
+        adsorbate_index: Literal["com"] | int | None = None,
+    ) -> Atoms:
         pass
+
+    def __call__(
+        self,
+        adsorbate: Atoms | Gas | Atom | str,
+        *,
+        adsorbate_index: Literal["com"] | int | None = None,
+        **kwargs,
+    ) -> tuple[Atoms, Literal[0, 1, 2]]:
+        """Run the adsorption calculation.
+
+        Args:
+            adsorbate (Atoms | Gas | Atom | str): The adsorbate.
+                Must be one of the following three types:
+                    1. An atoms object (for a molecular adsorbate).
+                    2. An atom object.
+                    3. A string:
+                        the chemical symbol for a single atom.
+                        the molecule string by `ase.build`.
+                        the SMILES of the molecule.
+            adsorbate_index (int | None, optional): The index of the adsorbate.
+                Defaults to None. It means that the adsorbate's core
+                is its COM. If it is interger, it means that the
+                adsorbate's core is the atom.
+            **kwargs: The keyword arguments for the adsorption method.
+        """
+        return self.__opt(
+            atoms=self._try_adsorption(
+                adsorbate_index=adsorbate_index,
+                adsorbate=self._get_adsorbate(adsorbate=adsorbate),
+                **kwargs,
+            ),
+            natoms=len(self.atoms),
+        )
 
     def _opt_1st_stage(
         self,
@@ -82,11 +158,12 @@ class AdsorptionABC(ABC):
         except Exception:
             # Sometimes, FixBondLengths will cause an error:
             #     RuntimeError: Did not converge
-            # TODO: use torch automatic differentiation instead.
             lst, coveraged = [atoms], False
         return lst, coveraged
 
-    def _opt(self, atoms: Atoms, natoms: int) -> tuple[Atoms, Literal[0, 1, 2]]:
+    def __opt(
+        self, atoms: Atoms, natoms: int
+    ) -> tuple[Atoms, Literal[0, 1, 2]]:
         if self.calculator is None:
             return atoms, 0
         else:

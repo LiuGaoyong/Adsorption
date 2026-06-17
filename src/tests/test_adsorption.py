@@ -1,37 +1,14 @@
 # ruff: noqa D103
-import shutil
 from pathlib import Path
 from time import perf_counter
 
 import pytest
 from ase import Atoms
-from ase.build import fcc111
-from ase.cluster import Octahedron
-from adsorption.runner._tune import plot
-
 from adsorption.interfaces import RawAdsorption
-
-
-@pytest.fixture(scope="module")
-def atoms_nopbc_pbc() -> tuple[Atoms, Atoms]:
-    return Atoms(Octahedron("Cu", 10)), fcc111(
-        "Cu",
-        (10, 10, 5),
-        orthogonal=True,
-        periodic=True,
-        vacuum=10,
-    )
-
-
-@pytest.fixture(scope="module")
-def result_dir() -> Path:
-    p0 = Path(__file__)
-    p = p0.parent / p0.name.split(".")[0]
-    shutil.rmtree(p, ignore_errors=True)
-    p.mkdir(exist_ok=True)
-    with p.joinpath(".gitignore").open("w") as f:
-        f.write("*\n")
-    return p
+from adsorption.common import AdsorptionABC
+from adsorption.interfaces import DirectAdsorption, DirectAdsorptionAD
+from ase.calculators.calculator import Calculator
+from ase.calculators.emt import EMT
 
 
 @pytest.mark.parametrize(
@@ -62,12 +39,24 @@ def result_dir() -> Path:
         ([400, 490, 499], "s_fcc", True),  # surface fcc hollow
     ],
 )
-def test_add_adsorbate_and_optimize(  # noqa: D103
+@pytest.mark.parametrize(
+    "ADS_CLS,sub_dir,calc",
+    [
+        (RawAdsorption, "raw-None", None),
+        (DirectAdsorption, "direct-None", None),
+        (DirectAdsorption, "direct-EMT", EMT()),
+        # (DirectAdsorptionAD, "direct_ad-EMT", EMT()),
+    ],
+)
+def test_add_adsorption_class_and_optimize(  # noqa: D103
     atoms_nopbc_pbc: tuple[Atoms, Atoms],
     adsorbate: str,
     use_pbc: bool,
-    core: int | list[int],
+    core: list[int],
     result_dir: Path,
+    sub_dir: str,
+    ADS_CLS: type[AdsorptionABC],
+    calc: Calculator | None,
     name: str,
 ) -> None:  # noqa: D103
     print()
@@ -82,9 +71,16 @@ def test_add_adsorbate_and_optimize(  # noqa: D103
         atoms = atoms_nopbc_pbc[0]
         assert not any(atoms.pbc), atoms
 
+    result_dir = result_dir.joinpath(sub_dir)
+    result_dir.mkdir(exist_ok=True)
+
     try:
-        obj = RawAdsorption(calculator=None)
-        result = obj(atoms=atoms, adsorbate=adsorbate, core=core)[0]
+        obj = ADS_CLS(
+            calculator=calc,
+            atoms=atoms,
+            core=core,
+        )
+        result = obj(adsorbate=adsorbate)[0]
         result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.png")
         result.write(fname, format="png")
