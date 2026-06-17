@@ -222,7 +222,7 @@ Places adsorbates based on geometric analysis of adsorption sites:
 
 **Parameters**:
 - `adsorbate_index`: Index of anchoring atom in adsorbate (or `"com"` for center of mass)
-- `nbr1hop`: First-neighbor shell indices (auto-detected if not provided)
+- `neighbors`: First-neighbor shell indices (auto-detected if not provided)
 - `core`: Core atom indices defining the adsorption site
 
 #### `DirectAdsorption`
