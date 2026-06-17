@@ -1,26 +1,32 @@
+# ruff: noqa D103
 import shutil
 from pathlib import Path
 from time import perf_counter
 
 import pytest
 from ase import Atoms
+from ase.build import fcc111
 from ase.cluster import Octahedron
-from ase.io import read
+from adsorption.runner._tune import plot
 
 from adsorption.interfaces import RawAdsorption
 
 
 @pytest.fixture(scope="module")
-def atoms() -> Atoms:  # noqa: D103
-    return Octahedron("Cu", 10)
-    p = Path(__file__).parent / "OctCu10.xyz"
-    return read(p.__fspath__())  # type: ignore
+def atoms_nopbc_pbc() -> tuple[Atoms, Atoms]:
+    return Atoms(Octahedron("Cu", 10)), fcc111(
+        "Cu",
+        (10, 10, 5),
+        orthogonal=True,
+        periodic=True,
+        vacuum=10,
+    )
 
 
 @pytest.fixture(scope="module")
-def result_dir() -> Path:  # noqa: D103
-    p = Path(__file__).parent
-    p /= ".test.raw.results"
+def result_dir() -> Path:
+    p0 = Path(__file__)
+    p = p0.parent / p0.name.split(".")[0]
     shutil.rmtree(p, ignore_errors=True)
     p.mkdir(exist_ok=True)
     with p.joinpath(".gitignore").open("w") as f:
@@ -39,30 +45,43 @@ def result_dir() -> Path:  # noqa: D103
     ],
 )
 @pytest.mark.parametrize(
-    "core,name",
+    "core,name,use_pbc",
     [
-        ([303, 334, 464], "v_fcc"),  # vertex fcc hollow
-        ([303, 334], "v_bri"),  # vertex bridge
-        (303, "v_top"),  # vertex top
-        (578, "e_top"),  # edge top
-        ([578, 638], "e_bri"),  # edge bridge
-        ([578, 638, 596], "e_fcc"),  # edge fcc hollow
-        ([607, 608, 610], "s_fcc"),  # surface fcc hollow
-        ([608, 610], "s_bri"),  # surface bridge
-        ([610], "s_top"),  # surface top
+        ([303, 334, 464], "v_fcc", False),  # vertex fcc hollow
+        ([303, 334], "v_bri", False),  # vertex bridge
+        ([303], "v_top", False),  # vertex top
+        ([578], "e_top", False),  # edge top
+        ([578, 638], "e_bri", False),  # edge bridge
+        ([578, 638, 596], "e_fcc", False),  # edge fcc hollow
+        ([607, 608, 610], "s_fcc", False),  # surface fcc hollow
+        ([608, 610], "s_bri", False),  # surface bridge
+        ([610], "s_top", False),  # surface top
+        # use periodic boundary condition
+        ([400], "s_top", True),  # surface top
+        ([400, 490], "s_bri", True),  # surface bridge
+        ([400, 490, 499], "s_fcc", True),  # surface fcc hollow
     ],
 )
 def test_add_adsorbate_and_optimize(  # noqa: D103
-    atoms,
-    adsorbate,
+    atoms_nopbc_pbc: tuple[Atoms, Atoms],
+    adsorbate: str,
+    use_pbc: bool,
     core: int | list[int],
     result_dir: Path,
     name: str,
 ) -> None:  # noqa: D103
     print()
     k = f"{adsorbate}_{name}"
+    k = f"pbc_{k}" if use_pbc else f"nopbc_{k}"
     t0 = perf_counter()
     result_dir.mkdir(exist_ok=True)
+    if use_pbc:
+        atoms = atoms_nopbc_pbc[1]
+        assert all(atoms.pbc), atoms
+    else:
+        atoms = atoms_nopbc_pbc[0]
+        assert not any(atoms.pbc), atoms
+
     try:
         obj = RawAdsorption(calculator=None)
         result = obj(atoms=atoms, adsorbate=adsorbate, core=core)[0]

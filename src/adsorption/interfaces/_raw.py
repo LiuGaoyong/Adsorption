@@ -8,7 +8,7 @@ from ase.data import covalent_radii as COV_R
 from graphatoms.system import Cluster, Gas, System
 
 from ..common import AdsorptionABC
-from ..common._dataclass import Site
+from ..common._site import Site
 
 
 class RawAdsorption(AdsorptionABC):
@@ -108,12 +108,13 @@ class RawAdsorption(AdsorptionABC):
         assert len(nbr1hop) > 0, (
             f"No 1-hop neighbors found for the core of {core}."
         )
-        site = Site.from_numpy(
-            nbr=atoms.positions[nbr1hop],
+        site = Site(
+            neighbor=atoms.positions[nbr1hop],
             core=atoms.positions[core],
+            cell=atoms.cell.array,
         )
-        at_anchor: np.ndarray = np.asarray(site.center.to_list())
-        direction: np.ndarray = np.asarray(site.direction.normalize.to_list())
+        at_anchor: np.ndarray = np.asarray(site.center)
+        direction: np.ndarray = np.asarray(site.direction)
 
         # C. get `distance_of_two_anchor`
         if isinstance(adsorbate_index, int):
@@ -147,10 +148,9 @@ class RawAdsorption(AdsorptionABC):
                     )
                     d = np.linalg.norm(ads.positions - com_ads, axis=1)
                     ref_pos = ads.positions[np.argsort(d)[-3:]].mean(axis=0)
-            com_core = Atoms(atoms[core]).get_center_of_mass()
             d2com = float(np.linalg.norm(ref_pos - com_ads)) + d2site
-            target_ref_pos = com_core + d2site * direction
-            target_com_ads = com_core + d2com * direction
+            target_ref_pos = at_anchor + d2site * direction
+            target_com_ads = at_anchor + d2com * direction
             ads.positions += target_ref_pos - ref_pos
             ads.rotate(
                 a=ads.get_center_of_mass() - target_ref_pos,
