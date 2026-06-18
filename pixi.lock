@@ -11415,6 +11415,8 @@ packages:
   name: adsorption
   requires_dist:
   - ase
+  - array-api-compat
+  - array-api-extra
   - graphatoms>=1.1.5
   - typing-extensions
   - ray[default,tune]>2.50

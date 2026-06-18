@@ -1,13 +1,17 @@
 # ruff: noqa E501
 import os
 from tempfile import TemporaryDirectory
+from pathlib import Path
 
 import numpy as np
 from ase import Atoms
 from ase.build import fcc111, molecule
 from ase.calculators.calculator import Calculator
 
-from adsorption.interfaces._calcLJArrayAPI import LennardJones
+from adsorption.interfaces._calcLJArrayAPI import (
+    LennardJonesTorch,
+    LennardJones,
+)
 
 
 def test_lj() -> None:  # noqa: D103
@@ -17,12 +21,13 @@ def test_lj() -> None:  # noqa: D103
     kim_lj = ""
 
     with TemporaryDirectory() as tmpdir:
-        cwd = os.getcwd()
+        cwd = Path(os.getcwd())
         os.chdir(tmpdir)
         try:
             calc_dict: dict[str, Calculator] = {
                 "KIM": kim_lj,  # type: ignore
                 "Our": LennardJones(),
+                "OurTorch": LennardJonesTorch(),
             }
             atoms_lst: list[Atoms] = [
                 Atoms(molecule("CH3CH2OH")),
@@ -110,9 +115,12 @@ def test_lj() -> None:  # noqa: D103
                     print(atoms)
                     print(k, e)
                     print(f)
+                    print("-" * 32)
+                    print()
         except Exception as e:
             os.chdir(cwd)
             raise e
+        os.chdir(cwd)
 
 
 # Atoms(symbols='C2OH6', pbc=False, calculator=KIMModelCalculator(...))
