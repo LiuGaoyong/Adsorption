@@ -1,3 +1,4 @@
+# ruff: noqa D101 D102 D107
 from typing import override
 
 from ase import Atoms
@@ -5,17 +6,32 @@ from ase import Atoms
 from ._adsDirect import DirectAdsorption
 
 try:
+    import geotorch
     import torch
+    import torch.nn as nn
     from nequip.data import AtomicDataDict, from_ase, to_ase
     from nequip.integrations.ase import NequIPCalculator  # type: ignore
 except ImportError as e:
     raise ImportError(
-        f"NequIPCalculator is required to use `DirectAdsorptionAD`.\n{e}"
+        f"pytorch, geotorch & nequip is required"  #
+        f" to use `DirectAdsorptionAD`.\n{e}"
     )
-    torch = NequIPCalculator = None
+    torch = NequIPCalculator = geotorch = None  # type: ignore
+
+
+class UnitQuaternion(nn.Module):
+    def __init__(self, init_quat) -> None:
+        super().__init__()
+        self.quat = nn.Parameter(init_quat.clone().detach())
+        geotorch.sphere(self, "quat")  # type: ignore
+
+    def forward(self) -> nn.Parameter:
+        return self.quat  # Return the normalized quaternion.
 
 
 class DirectAdsorptionAD(DirectAdsorption):
+    """The direct adsorption interface by automatic differentiation."""
+
     @override
     def _opt_1st_stage(
         self,
@@ -25,17 +41,6 @@ class DirectAdsorptionAD(DirectAdsorption):
         assert self.calculator is not None, (
             "The calculator must be set before calling the method."
         )
-        import geotorch
-        import torch.nn as nn
-
-        class UnitQuaternion(nn.Module):
-            def __init__(self, init_quat) -> None:
-                super().__init__()
-                self.quat = nn.Parameter(init_quat.clone().detach())
-                geotorch.sphere(self, "quat")  # type: ignore
-
-            def forward(self) -> nn.Parameter:
-                return self.quat  # Return the normalized quaternion.
 
         assert hasattr(self, "_quat_ads")
         assert hasattr(self, "_quat_core")

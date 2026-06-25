@@ -8,7 +8,7 @@ from ase import Atoms
 from ase.build import fcc111, molecule
 from ase.calculators.calculator import Calculator
 
-from adsorption.interfaces._calcLJArrayAPI import (
+from adsorption.experimental._calcLJArrayAPI import (
     LennardJonesTorch,
     LennardJones,
 )

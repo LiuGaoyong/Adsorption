@@ -163,6 +163,7 @@ class PairwiseCalculator(Calculator):
         """Calculate the pairwise energy, forces, and stresses."""
         if xp is None:
             xp = get_namespace(source, target, shift)
+        assert xp is not None, "xp must be set."
         linalg: LinalgNamespace = getattr(xp, "linalg")
         assert isinstance(linalg, LinalgNamespace), type(linalg)
         assert isinstance(self.atoms, Atoms), type(self.atoms)
