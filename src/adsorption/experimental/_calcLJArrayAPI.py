@@ -8,9 +8,9 @@ from ase.stress import full_3x3_to_voigt_6_stress
 from graphatoms.arrayapi import Array, ArrayNamespace
 from graphatoms.geometry import neighbor_list  # type: ignore
 
-from adsorption.common._pairwise import PairwiseCalculator
+from adsorption.experimental._pairwise import PairwiseCalculator
 
-from ..common._pairutils import get_lj_param
+from ._pairutils import get_lj_param
 
 
 class LennardJones(PairwiseCalculator):
