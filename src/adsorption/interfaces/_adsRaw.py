@@ -52,7 +52,6 @@ class RawAdsorption(AdsorptionABC):
         assert isinstance(adsorbate_index, int) or adsorbate_index == "com"
 
         # B. get `site`
-
         at_anchor: np.ndarray = np.asarray(self.site.center)
         direction: np.ndarray = np.asarray(self.site.direction)
 

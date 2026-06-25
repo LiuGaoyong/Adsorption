@@ -26,8 +26,8 @@ def test_lj() -> None:  # noqa: D103
         try:
             calc_dict: dict[str, Calculator] = {
                 "KIM": kim_lj,  # type: ignore
-                "Our": LennardJones(),
                 "OurTorch": LennardJonesTorch(),
+                "Our": LennardJones(),
             }
             atoms_lst: list[Atoms] = [
                 Atoms(molecule("CH3CH2OH")),

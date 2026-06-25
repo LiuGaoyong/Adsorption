@@ -2,9 +2,10 @@
 from typing import override
 
 from ase import Atoms
-
+from graphatoms.geometry.mic import find_mic
+from graphatoms.geometry import distance_pairs
 from ._adsDirect import DirectAdsorption
-
+from ..experimental._pairutils import get_lj_param
 try:
     import geotorch
     import torch
@@ -121,7 +122,91 @@ class DirectAdsorptionAD(DirectAdsorption):
 #########################################################################
 
 
-def _nequip_energy(
+def _get_center_of_mass(
+    adsorbate_pos: torch.Tensor,
+    adsorbate_mass: torch.Tensor,
+) -> torch.Tensor:
+    """Calculate the center of mass of the adsorbate."""
+    return torch.matmul(adsorbate_mass, adsorbate_pos) / adsorbate_mass.sum()
+
+
+def _new_pos(
+    adsorbate_pos: torch.Tensor,
+    adsorbate_mass: torch.Tensor,
+    anchor_core: torch.Tensor,
+    quat_core: torch.Tensor,
+    quat_ads: torch.Tensor,
+    distance: torch.Tensor,
+) -> torch.Tensor:
+    """Calculate the new position of the adsorbate after rotation."""
+    return (
+        quaternion_apply(
+            quat_ads,
+            adsorbate_pos - _get_center_of_mass(adsorbate_pos, adsorbate_mass),
+        )
+        + anchor_core
+        + distance
+        * quaternion_apply(
+            quat_core,
+            torch.tensor([0, 0, 1]),
+        )
+    )
+
+
+def _energy_com2core(
+    adsorbate_pos: torch.Tensor,  # new_pos
+    adsorbate_mass: torch.Tensor,
+    anchor_core: torch.Tensor,
+    cell: torch.Tensor = torch.zeros(3, 3),
+    min_dist: float = 1.0,
+    max_dist: float = 3.0,
+    k: float = 5.0,
+) -> torch.Tensor:
+    """Convert the energy from the center of mass to the core."""
+    com = _get_center_of_mass(adsorbate_pos, adsorbate_mass)
+    _, d = find_mic(com - anchor_core, cell, pbc=True)
+    return torch.where(
+        d < min_dist,
+        -k * (min_dist - d),
+        torch.where(
+            d > max_dist,
+            k * (d - max_dist),
+            d,
+        ),
+    )
+
+
+def _energy_softcore_lj(
+    result: Atoms,
+    adsorbate_pos: torch.Tensor,  # new_pos
+    alpha: float = 0.5,
+) -> torch.Tensor:
+    """Calculate the energy of the soft-core Lennard-Jones potential."""
+    p1 = adsorbate_pos.clone().detach().numpy()
+    p2 = result.get_positions()[: len(result) - p1.shape[0]]
+    LJ_EPSILON, LJ_CUTOFF, LJ_SIGMA = get_lj_param(format="raw")
+    cell = torch.from_numpy(result.cell.array)
+    pos = torch.from_numpy(result.positions)
+    Z2 = result.numbers[: len(result) - p1.shape[0]]
+    Z1 = result.numbers[len(result) - p1.shape[0] :]
+    max_rc = float(max(LJ_CUTOFF[result.numbers]))
+
+    i, j, S = distance_pairs(quantities="ijS", p1=p1, p2=p2, cutoff=max_rc)
+    i = torch.from_numpy(i)
+    j = torch.from_numpy(j)
+    S = torch.asarray(S, dtype=float)  # type: ignore
+    epsilon = torch.sqrt(LJ_EPSILON[Z2[j]] * LJ_EPSILON[Z1[i]])
+    sigma = torch.sqrt(LJ_SIGMA[Z2[j]] * LJ_SIGMA[Z1[i]])
+
+    D = pos[j] + S @ cell - adsorbate_pos[i]
+    r2 = (D**2).sum(1)
+    c6 = (sigma**2 / (r2 + alpha * sigma**2)) ** 3
+    c12 = c6**2
+    pairwise_energies = 4 * epsilon * (c12 - c6)
+    return pairwise_energies.sum()
+
+
+def _fake_energy(
     result: Atoms,
     calc: NequIPCalculator,
     adsorbate_pos: torch.Tensor,
@@ -135,17 +220,13 @@ def _nequip_energy(
     calc.reset()
 
     # reset adsorbate position
-    _pos = (
-        quaternion_apply(
-            quat_ads,
-            adsorbate_pos - torch.mean(adsorbate_pos, dim=0),
-        )
-        + anchor_core
-        + distance
-        * quaternion_apply(
-            quat_core,
-            torch.tensor([0, 0, 1]),
-        )
+    _pos = _new_pos(
+        adsorbate_pos=adsorbate_pos,
+        adsorbate_mass=torch.from_numpy(result.get_masses()[natoms:]),
+        anchor_core=anchor_core,
+        quat_core=quat_core,
+        quat_ads=quat_ads,
+        distance=distance,
     )
     pos_ads = torch.vstack([torch.zeros(natoms, 3), _pos])
     _loc = torch.arange(len(result)) >= natoms

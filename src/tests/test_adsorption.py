@@ -9,6 +9,7 @@ from adsorption.common import AdsorptionABC
 from adsorption.interfaces import DirectAdsorption
 from ase.calculators.calculator import Calculator
 from ase.calculators.emt import EMT
+from ase.io import write
 
 
 _complex_molecule = [
@@ -95,6 +96,12 @@ def test_add_adsorption_class_and_optimize(  # noqa: D103
         result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.png")
         result.write(fname, format="png")
+        if hasattr(obj, "_atoms_lst"):
+            write(
+                result_dir.joinpath(f"{k}.xyz"),
+                obj._atoms_lst,
+                format="extxyz",
+            )
         print(f"  Write: {fname}")
     except Exception as e:
         msg = f"  No success: for {k} because of {e}"
