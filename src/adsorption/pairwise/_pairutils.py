@@ -3,77 +3,7 @@ from typing import Literal
 
 import numpy as np
 from graphatoms.arrayapi import Array, ArrayNamespace, get_namespace
-import array_api_extra as xpx
 
-
-def scatter(
-    x: Array,
-    dim: int,
-    index: Array,
-    src: Array,
-    reduce: Literal["set", "add", "multiply", "min", "max"] = "add",
-) -> Array:
-    """
-    Simulate PyTorch's scatter operation, scattering values from src into x
-    along the specified dimension according to index.
-
-    Args:
-        x: Input array (supports array API standard)
-        dim: Dimension along which to scatter (supports negative indexing)
-        index: Integer index array, must be broadcastable to the same shape as src
-        src: Value array, must be broadcastable to the same shape as index
-        reduce: Reduction method, options: 'set' (default), 'add', 'multiply', 'min', 'max'
-
-    Returns:
-        New array with the same shape as x, updated according to the scatter rules.
-    """
-    # Obtain the array namespace (supports NumPy, CuPy, PyTorch, etc.)
-    xp: ArrayNamespace = get_namespace(x)
-    index = xp.asarray(index)
-    src = xp.asarray(src)
-
-    ndim = x.ndim
-    dim = dim % ndim  # Handle negative dimension
-
-    # Broadcast index and src to the same shape
-    try:
-        broadcast_shape = xp.broadcast_arrays(index.shape, src.shape)
-        broadcast_shape: list[int] = xp.concat(broadcast_shape).tolist()
-    except ValueError:
-        raise ValueError("index and src shapes cannot be broadcast together")
-    index_b = xp.broadcast_to(index, tuple(broadcast_shape))
-    src_b = xp.broadcast_to(src, tuple(broadcast_shape))
-
-    # Build the full index tuple for at
-    indices = []
-    for d in range(ndim):
-        if d == dim:
-            # For the scatter dimension, use the broadcasted index directly
-            indices.append(index_b)
-        else:
-            # For other dimensions, generate natural indices and broadcast to target shape
-            shape = [1] * ndim
-            shape[d] = broadcast_shape[d]
-            idx = xp.arange(broadcast_shape[d], dtype=index.dtype)
-            idx = xp.reshape(idx, tuple(shape))
-            idx = xp.broadcast_to(idx, tuple(broadcast_shape))
-            indices.append(idx)
-
-    # Call at with the corresponding reduction operation
-    result = xpx.at(x, tuple(indices))  # type: ignore
-    if reduce == "set":
-        result = result.set(src_b)
-    elif reduce == "add":
-        result = result.add(src_b)
-    elif reduce == "multiply":
-        result = result.multiply(src_b)
-    elif reduce == "min":
-        result = result.min(src_b)
-    elif reduce == "max":
-        result = result.max(src_b)
-    else:
-        raise ValueError(f"Unsupported reduction method: {reduce}")
-    return result  # type: ignore
 
 
 def cutoff_function(r: Array, rc: Array, ro: Array) -> Array:

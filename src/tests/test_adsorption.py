@@ -1,7 +1,7 @@
 # ruff: noqa D103
 from pathlib import Path
 from time import perf_counter
-
+import warnings
 import pytest
 from ase import Atoms
 from adsorption.interfaces import RawAdsorption
@@ -97,11 +97,13 @@ def test_add_adsorption_class_and_optimize(  # noqa: D103
         fname = result_dir.joinpath(f"{k}.png")
         result.write(fname, format="png")
         if hasattr(obj, "_atoms_lst"):
-            write(
-                result_dir.joinpath(f"{k}.xyz"),
-                obj._atoms_lst,
-                format="extxyz",
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                write(
+                    result_dir.joinpath(f"{k}.xyz"),
+                    obj._atoms_lst,
+                    format="extxyz",
+                )
         print(f"  Write: {fname}")
     except Exception as e:
         msg = f"  No success: for {k} because of {e}"

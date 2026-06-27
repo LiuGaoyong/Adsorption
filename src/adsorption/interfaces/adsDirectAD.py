@@ -5,7 +5,7 @@ from ase import Atoms
 from graphatoms.geometry.mic import find_mic
 from graphatoms.geometry import distance_pairs
 from ._adsDirect import DirectAdsorption
-from ..experimental._pairutils import get_lj_param
+from ..pairwise._pairutils import get_lj_param
 try:
     import geotorch
     import torch

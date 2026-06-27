@@ -8,12 +8,15 @@ from ase.neighborlist import NeighborList
 from ase.stress import full_3x3_to_voigt_6_stress
 from graphatoms.arrayapi import Array, ArrayNamespace
 from graphatoms.geometry import neighbor_list  # type: ignore
+from graphatoms.geometry.mic import find_mic  # type: ignore
 
-from adsorption.experimental._pairwise import PairwiseCalculator
+from adsorption.pairwise._pairwise import PairwiseCalculator
 
 from ._pairutils import cutoff_function, d_cutoff_function, get_lj_param
 
 LJ_EPSILON, LJ_CUTOFF, LJ_SIGMA = get_lj_param(format="raw")
+find_mic
+
 
 class LennardJones1(PairwiseCalculator):
     @override
@@ -131,7 +134,6 @@ class LennardJones(_LJ):
         self.results["energies"] = energies
         self.results["free_energy"] = energy
         self.results["forces"] = forces
-
 
 
 class LennardJonesTorch(_LJ):
