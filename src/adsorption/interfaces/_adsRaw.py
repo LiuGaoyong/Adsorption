@@ -1,15 +1,16 @@
 from typing import Literal, override
 
 import numpy as np
-from ase import Atoms
+from ase import Atom, Atoms
 from ase.data import covalent_radii as COV_R
+from graphatoms.system import Gas
 
 from ..common import AdsorptionABC
 
 
 class RawAdsorption(AdsorptionABC):
     @override
-    def _try_adsorption(  # noqa: D417
+    def try_adsorption(  # noqa: D417
         self,
         adsorbate: Atoms,
         *,
@@ -99,3 +100,44 @@ class RawAdsorption(AdsorptionABC):
         result = self.atoms.copy()
         result.extend(ads)
         return result
+
+    @override
+    def __call__(
+        self,
+        *,
+        adsorbate: Atoms | Gas | Atom | str,
+        adsorbate_index: Literal["com"] | int | None = None,
+        **kwargs,
+    ) -> tuple[Atoms, Literal[-1, 0, 1, 2]]:
+        """Run the adsorption calculation.
+
+        Args:
+            adsorbate (Atoms | Gas | Atom | str): The adsorbate.
+                Must be one of the following three types:
+                    1. An atoms object (for a molecular adsorbate).
+                    2. An atom object.
+                    3. A string:
+                        the chemical symbol for a single atom.
+                        the molecule string by `ase.build`.
+                        the SMILES of the molecule.
+            adsorbate_index (int | None, optional): The index of the adsorbate.
+                Defaults to None. It means that the adsorbate's core
+                is its COM. If it is interger, it means that the
+                adsorbate's core is the atom.
+            **kwargs: The keyword arguments for the adsorption method.
+
+        Returns:
+            tuple[Atoms, Literal[-1, 0, 1, 2]]:
+                The optimized adsorption and the coveraged label.
+                -  -1, then the optimization is not coveraged for the two stages.
+                -  0, then the optimization is coveraged for the first stage.
+                -  1, then the optimization is coveraged for the second stage.
+                -  2, then the optimization is coveraged for the two stages.
+        """
+        return self.optimize_adsorption(
+            atoms=self.try_adsorption(
+                adsorbate=self.get_adsorbate(adsorbate=adsorbate),
+                adsorbate_index=adsorbate_index,
+            ),
+            natoms=len(self.atoms),
+        )

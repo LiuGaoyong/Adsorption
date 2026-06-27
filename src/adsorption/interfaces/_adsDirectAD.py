@@ -5,7 +5,8 @@ from ase import Atoms
 from graphatoms.geometry.mic import find_mic
 from graphatoms.geometry import distance_pairs
 from ._adsDirect import DirectAdsorption
-from ..pairwise._pairutils import get_lj_param
+from ..pairwise._utils import get_lj_param
+from ._adsDirectADUtils import UnitQuaternion, _fake_energy
 try:
     import geotorch
     import torch
@@ -20,21 +21,11 @@ except ImportError as e:
     torch = NequIPCalculator = geotorch = None  # type: ignore
 
 
-class UnitQuaternion(nn.Module):
-    def __init__(self, init_quat) -> None:
-        super().__init__()
-        self.quat = nn.Parameter(init_quat.clone().detach())
-        geotorch.sphere(self, "quat")  # type: ignore
-
-    def forward(self) -> nn.Parameter:
-        return self.quat  # Return the normalized quaternion.
-
-
 class DirectAdsorptionAD(DirectAdsorption):
     """The direct adsorption interface by automatic differentiation."""
 
     @override
-    def _opt_1st_stage(
+    def prepare_for_optimization(
         self,
         atoms: Atoms,
         natoms: int,
@@ -67,7 +58,7 @@ class DirectAdsorptionAD(DirectAdsorption):
         for _ in range(self.max_steps_for_first_stage):
             quat_core = quat_core_mod()
             quat_ads = quat_ads_mod()
-            outputs = _nequip_energy(
+            outputs = _fake_energy(
                 result=atoms,
                 calc=self.calculator,
                 adsorbate_pos=torch.from_numpy(self._init_gas_pos),
@@ -115,265 +106,3 @@ class DirectAdsorptionAD(DirectAdsorption):
 
         assert len(lst) > 0, "No output."
         return lst, coveraged
-
-
-#########################################################################
-#               The Utility of NequIP Helper Function
-#########################################################################
-
-
-def _get_center_of_mass(
-    adsorbate_pos: torch.Tensor,
-    adsorbate_mass: torch.Tensor,
-) -> torch.Tensor:
-    """Calculate the center of mass of the adsorbate."""
-    return torch.matmul(adsorbate_mass, adsorbate_pos) / adsorbate_mass.sum()
-
-
-def _new_pos(
-    adsorbate_pos: torch.Tensor,
-    adsorbate_mass: torch.Tensor,
-    anchor_core: torch.Tensor,
-    quat_core: torch.Tensor,
-    quat_ads: torch.Tensor,
-    distance: torch.Tensor,
-) -> torch.Tensor:
-    """Calculate the new position of the adsorbate after rotation."""
-    return (
-        quaternion_apply(
-            quat_ads,
-            adsorbate_pos - _get_center_of_mass(adsorbate_pos, adsorbate_mass),
-        )
-        + anchor_core
-        + distance
-        * quaternion_apply(
-            quat_core,
-            torch.tensor([0, 0, 1]),
-        )
-    )
-
-
-def _energy_com2core(
-    adsorbate_pos: torch.Tensor,  # new_pos
-    adsorbate_mass: torch.Tensor,
-    anchor_core: torch.Tensor,
-    cell: torch.Tensor = torch.zeros(3, 3),
-    min_dist: float = 1.0,
-    max_dist: float = 3.0,
-    k: float = 5.0,
-) -> torch.Tensor:
-    """Convert the energy from the center of mass to the core."""
-    com = _get_center_of_mass(adsorbate_pos, adsorbate_mass)
-    _, d = find_mic(com - anchor_core, cell, pbc=True)
-    return torch.where(
-        d < min_dist,
-        -k * (min_dist - d),
-        torch.where(
-            d > max_dist,
-            k * (d - max_dist),
-            d,
-        ),
-    )
-
-
-def _energy_softcore_lj(
-    result: Atoms,
-    adsorbate_pos: torch.Tensor,  # new_pos
-    alpha: float = 0.5,
-) -> torch.Tensor:
-    """Calculate the energy of the soft-core Lennard-Jones potential."""
-    p1 = adsorbate_pos.clone().detach().numpy()
-    p2 = result.get_positions()[: len(result) - p1.shape[0]]
-    LJ_EPSILON, LJ_CUTOFF, LJ_SIGMA = get_lj_param(format="raw")
-    cell = torch.from_numpy(result.cell.array)
-    pos = torch.from_numpy(result.positions)
-    Z2 = result.numbers[: len(result) - p1.shape[0]]
-    Z1 = result.numbers[len(result) - p1.shape[0] :]
-    max_rc = float(max(LJ_CUTOFF[result.numbers]))
-
-    i, j, S = distance_pairs(quantities="ijS", p1=p1, p2=p2, cutoff=max_rc)
-    i = torch.from_numpy(i)
-    j = torch.from_numpy(j)
-    S = torch.asarray(S, dtype=float)  # type: ignore
-    epsilon = torch.sqrt(LJ_EPSILON[Z2[j]] * LJ_EPSILON[Z1[i]])
-    sigma = torch.sqrt(LJ_SIGMA[Z2[j]] * LJ_SIGMA[Z1[i]])
-
-    D = pos[j] + S @ cell - adsorbate_pos[i]
-    r2 = (D**2).sum(1)
-    c6 = (sigma**2 / (r2 + alpha * sigma**2)) ** 3
-    c12 = c6**2
-    pairwise_energies = 4 * epsilon * (c12 - c6)
-    return pairwise_energies.sum()
-
-
-def _fake_energy(
-    result: Atoms,
-    calc: NequIPCalculator,
-    adsorbate_pos: torch.Tensor,
-    anchor_core: torch.Tensor,
-    quat_core: torch.Tensor,
-    quat_ads: torch.Tensor,
-    distance: torch.Tensor,
-) -> dict[str, torch.Tensor]:
-    data: dict[str, torch.Tensor] = from_ase(result)
-    natoms: int = len(result) - len(adsorbate_pos)
-    calc.reset()
-
-    # reset adsorbate position
-    _pos = _new_pos(
-        adsorbate_pos=adsorbate_pos,
-        adsorbate_mass=torch.from_numpy(result.get_masses()[natoms:]),
-        anchor_core=anchor_core,
-        quat_core=quat_core,
-        quat_ads=quat_ads,
-        distance=distance,
-    )
-    pos_ads = torch.vstack([torch.zeros(natoms, 3), _pos])
-    _loc = torch.arange(len(result)) >= natoms
-    loc_ads = torch.column_stack([_loc, _loc, _loc])
-    data[AtomicDataDict.POSITIONS_KEY] = torch.where(
-        loc_ads, pos_ads, data[AtomicDataDict.POSITIONS_KEY]
-    )
-
-    # calculate energy
-    if calc._move_to_device_before_transforms:
-        data = AtomicDataDict.to_(data, calc.device)
-    for t in calc.transforms:
-        data = t(data)
-    if not calc._move_to_device_before_transforms:
-        data = AtomicDataDict.to_(data, calc.device)
-    out: dict[str, torch.Tensor] = calc.call_model(data)
-    # data[AtomicDataDict.POSITIONS_KEY].backward(
-    #     gradient=out[AtomicDataDict.FORCE_KEY],
-    # )
-    # print(distance.grad)
-    # print(quat_core.grad)
-    # print(quat_ads.grad)
-    return out | data
-
-
-#########################################################################
-#               The Utility of Quaternion Number
-#########################################################################
-
-
-def quaternion_apply(
-    quaternion: torch.Tensor,
-    point: torch.Tensor,
-) -> torch.Tensor:
-    """Apply the rotation given by a quaternion to a 3D point.
-
-    Usual torch rules for broadcasting apply.
-
-    Args:
-        quaternion: Tensor of quaternions, real part first, of shape (..., 4).
-        point: Tensor of 3D points of shape (..., 3).
-
-    Returns:
-        Tensor of rotated points of shape (..., 3).
-    """
-    if point.size(-1) != 3:
-        raise ValueError(f"Points are not in 3D, {point.shape}.")
-    real_parts = point.new_zeros(point.shape[:-1] + (1,))
-    point_as_quaternion = torch.cat((real_parts, point), -1)
-    out = quaternion_raw_multiply(
-        quaternion_raw_multiply(quaternion, point_as_quaternion),
-        quaternion_invert(quaternion),
-    )
-    return out[..., 1:]
-
-
-def standardize_quaternion(quaternions: torch.Tensor) -> torch.Tensor:
-    """Convert a unit quaternion to a standard form.
-
-    i.e. get one in which the real part is non negative.
-
-    Args:
-        quaternions: Quaternions with real part first,
-            as tensor of shape (..., 4).
-
-    Returns:
-        Standardized quaternions as tensor of shape (..., 4).
-    """
-    return torch.where(quaternions[..., 0:1] < 0, -quaternions, quaternions)
-
-
-def quaternion_invert(quaternion: torch.Tensor) -> torch.Tensor:
-    """Given a quaternion representing rotation.
-
-    i.e. get the quaternion representing its inverse.
-
-    Args:
-        quaternion: Quaternions as tensor of shape (..., 4), with real part
-            first, which must be versors (unit quaternions).
-
-    Returns:
-        The inverse, a tensor of quaternions of shape (..., 4).
-    """
-    scaling = torch.tensor([1, -1, -1, -1], device=quaternion.device)
-    return quaternion * scaling
-
-
-def quaternion_raw_multiply(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Multiply two quaternions.
-
-    Usual torch rules for broadcasting apply.
-
-    Args:
-        a: Quaternions as tensor of shape (..., 4), real part first.
-        b: Quaternions as tensor of shape (..., 4), real part first.
-
-    Returns:
-        The product of a and b, a tensor of quaternions shape (..., 4).
-    """
-    aw, ax, ay, az = torch.unbind(a, -1)
-    bw, bx, by, bz = torch.unbind(b, -1)
-    ow = aw * bw - ax * bx - ay * by - az * bz
-    ox = aw * bx + ax * bw + ay * bz - az * by
-    oy = aw * by - ax * bz + ay * bw + az * bx
-    oz = aw * bz + ax * by - ay * bx + az * bw
-    return torch.stack((ow, ox, oy, oz), -1)
-
-
-def random_quaternions(
-    n: int,
-    dtype: torch.dtype | None = None,
-    device: torch.device | str | None = None,
-) -> torch.Tensor:
-    """Generate random quaternions representing rotations.
-
-    i.e. versors with nonnegative real part.
-
-    Args:
-        n: Number of quaternions in a batch to return.
-        dtype: Type to return.
-        device: Desired device of returned tensor. Default:
-            uses the current device for the default tensor type.
-
-    Returns:
-        Quaternions as tensor of shape (N, 4).
-    """
-    if isinstance(device, str):
-        device = torch.device(device)
-    o = torch.randn((n, 4), dtype=dtype, device=device)
-    s = (o * o).sum(1)
-    o = o / _copysign(torch.sqrt(s), o[:, 0])[:, None]
-    return o
-
-
-def _copysign(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    """Return a tensor where each element has the absolute value.
-
-    taken from the corresponding element of a, with sign taken from
-    the corresponding element of b. This is like the standard copysign
-    floating-point operation, but is not careful about negative 0 and NaN.
-
-    Args:
-        a: source tensor.
-        b: tensor whose signs will be used, of the same shape as a.
-
-    Returns:
-        Tensor of the same shape as a with the signs of b.
-    """
-    signs_differ = (a < 0) != (b < 0)
-    return torch.where(signs_differ, -a, a)

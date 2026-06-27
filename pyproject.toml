@@ -39,7 +39,10 @@ dev = [
     "pytest>=8.3",
     "pytest-xdist",
     "jupyterlab",
+    "torch>=2.0",
+    "geotorch>=0.4.0,<0.5",
     "nequip; sys_platform != 'win32'",
+    "sympy>=1.10,<2",
 ]
 
 [project.scripts]
@@ -108,5 +111,5 @@ jupyterlab = ">=4.5.8,<5"
 ipywidgets = ">=8.1.8,<9"
 array-api-compat = ">=1.15.0,<2"
 array-api-extra = ">=0.11.0,<0.12"
-sympy = ">=1.14.0,<2"
+sympy = ">=1.10,<2"
 

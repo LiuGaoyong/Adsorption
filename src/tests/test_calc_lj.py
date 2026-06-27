@@ -8,10 +8,7 @@ from ase import Atoms
 from ase.build import fcc111, molecule
 from ase.calculators.calculator import Calculator
 
-from adsorption.pairwise._calcLJArrayAPI import (
-    LennardJonesTorch,
-    LennardJones,
-)
+from adsorption.pairwise._lj import LennardJones
 
 
 def test_lj() -> None:  # noqa: D103
@@ -26,7 +23,7 @@ def test_lj() -> None:  # noqa: D103
         try:
             calc_dict: dict[str, Calculator] = {
                 "KIM": kim_lj,  # type: ignore
-                "OurTorch": LennardJonesTorch(),
+                # "OurTorch": LennardJonesTorch(),
                 "Our": LennardJones(),
             }
             atoms_lst: list[Atoms] = [

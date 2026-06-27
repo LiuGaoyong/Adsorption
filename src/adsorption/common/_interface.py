@@ -24,7 +24,151 @@ def quaternion_apply(quat, pos) -> np.ndarray:
     return rot.apply(pos)
 
 
-class AdsorptionABC(ABC):
+class AdsorptionTryABC(ABC):
+    def __init__(
+        self,
+        atoms: Atoms | System | Cluster,
+        *,
+        core: ArrayLike = 0,
+        neighbors: ArrayLike | None = None,
+        debug: bool = False,
+    ) -> None:
+        a = _site_helper(atoms=atoms, core=core, neighbors=neighbors)
+        self.atoms, self.core, self.neighbors, self._origin, self.site = a
+        assert self._origin is None or isinstance(
+            self._origin, (System, Cluster)
+        ), f"Invalid origin type({type(self._origin)})."
+        assert isinstance(self.atoms, Atoms), (
+            f"Invalid atoms type({type(self.atoms)})."
+        )
+        assert isinstance(self.site, Site), (
+            f"Invalid site type({type(self.site)})."
+        )
+        assert isinstance(self.core, np.ndarray), (
+            f"Invalid core type({type(self.core)})."
+        )
+        assert isinstance(self.neighbors, np.ndarray), (
+            f"Invalid neighbors type({type(self.neighbors)})."
+        )
+        self.debug = bool(debug)
+
+    @abstractmethod
+    def try_adsorption(
+        self,
+        adsorbate: Atoms,
+        *,
+        adsorbate_index: Literal["com"] | int | None = None,
+    ) -> Atoms:
+        """Try to ads the adsorbate to the surface or cluster."""
+        pass
+
+
+class AdsorptionOptimizeABC(ABC):
+    """Adsorption optimization calculation."""
+
+    def __init__(
+        self,
+        *,
+        calculator: Calculator | None = None,
+        max_steps_for_first_stage: int = 100,
+        max_steps_for_second_stage: int = 100,
+        max_force: float = 0.05,
+        debug: bool = False,
+    ) -> None:
+        self.max_steps_for_second_stage = int(max_steps_for_second_stage)
+        self.max_steps_for_first_stage = int(max_steps_for_first_stage)
+        self.max_force = float(max_force)
+        self.calculator = calculator
+        self.debug = bool(debug)
+
+    def prepare_for_optimization(
+        self,
+        atoms: Atoms,
+        natoms: int,
+    ) -> tuple[list[Atoms], bool]:
+        """Optimize the first stage of the adsorption."""
+        assert self.calculator is not None, (
+            "The calculator must be set before calling the method."
+        )
+        # first stage optimization
+        atoms = atoms.copy()
+        atoms.set_constraint(
+            [
+                FixAtoms(indices=list(range(natoms))),
+                FixBondLengths(
+                    np.column_stack(
+                        np.triu_indices(len(atoms) - natoms, k=1),
+                    )
+                    + natoms
+                ),
+            ]
+        )
+        try:
+            lst, coveraged = optimize(
+                atoms,
+                self.calculator,
+                logfile="-" if self.debug else None,
+                max_steps=self.max_steps_for_first_stage,
+                fmax=self.max_force,
+                trajectory=None,
+            )
+        except RuntimeError as e:
+            if "Did not converge" in str(e):
+                # FixBondLengths will cause an error:
+                #     RuntimeError: Did not converge
+                lst, coveraged = [atoms], False
+            else:
+                raise e
+        return lst, coveraged
+
+    def optimize_adsorption(
+        self,
+        atoms: Atoms,
+        natoms: int,
+    ) -> tuple[Atoms, Literal[-1, 0, 1, 2]]:
+        """Optimize the adsorption calculation.
+
+        Args:
+            atoms (Atoms): The initial try adsorption result.
+            natoms (int): The number of atoms in the substrate.
+
+        Returns:
+            tuple[Atoms, Literal[-1, 0, 1, 2]]:
+                The optimized adsorption and the coveraged label.
+                -  -1, then the optimization is not coveraged for the two stages.
+                -  0, then the optimization is coveraged for the first stage.
+                -  1, then the optimization is coveraged for the second stage.
+                -  2, then the optimization is coveraged for the two stages.
+        """  # noqa: E501
+        if self.calculator is None:
+            return atoms, -1
+
+        lst1, cvrg1 = self.prepare_for_optimization(atoms, natoms)
+        assert len(lst1) > 0, "The first stage trajectory must be not empty."
+        new_atoms = lst1[-1].copy()
+        new_atoms.set_constraint(None)
+        lst2, cvrg2 = optimize(
+            new_atoms,
+            self.calculator,
+            logfile="-" if self.debug else None,
+            max_steps=self.max_steps_for_second_stage,
+            fmax=self.max_force,
+            trajectory=None,
+        )
+        self._trajectory = result_lst = lst1[:-1] + lst2
+        if cvrg2:
+            if cvrg1:
+                return result_lst[-1], 0
+            else:
+                return result_lst[-1], 2
+        else:
+            if cvrg1:
+                return result_lst[-1], 1
+            else:
+                return atoms, -1
+
+
+class AdsorptionABC(AdsorptionTryABC, AdsorptionOptimizeABC):
     def __init__(
         self,
         atoms: Atoms | System | Cluster,
@@ -59,45 +203,29 @@ class AdsorptionABC(ABC):
             debug (bool, optional): Whether to print debug information.
                 Defaults to False
         """
-        self.calculator = calculator
-        a = _site_helper(atoms=atoms, core=core, neighbors=neighbors)
-        self.atoms, self.core, self.neighbors, self._origin, self.site = a
-        self.max_steps_for_second_stage = int(max_steps_for_second_stage)
-        self.max_steps_for_first_stage = int(max_steps_for_first_stage)
-        self.max_force = float(max_force)
-        self.debug = bool(debug)
-        assert self._origin is None or isinstance(
-            self._origin, (System, Cluster)
-        ), f"Invalid origin type({type(self._origin)})."
-        assert isinstance(self.atoms, Atoms), (
-            f"Invalid atoms type({type(self.atoms)})."
+        AdsorptionTryABC.__init__(
+            self,
+            atoms=atoms,
+            core=core,
+            neighbors=neighbors,
+            debug=debug,
         )
-        assert isinstance(self.site, Site), (
-            f"Invalid site type({type(self.site)})."
-        )
-        assert isinstance(self.core, np.ndarray), (
-            f"Invalid core type({type(self.core)})."
-        )
-        assert isinstance(self.neighbors, np.ndarray), (
-            f"Invalid neighbors type({type(self.neighbors)})."
+        AdsorptionOptimizeABC.__init__(
+            self,
+            calculator=calculator,
+            max_steps_for_first_stage=max_steps_for_first_stage,
+            max_steps_for_second_stage=max_steps_for_second_stage,
+            max_force=max_force,
+            debug=debug,
         )
 
     @abstractmethod
-    def _try_adsorption(  # noqa: D417
-        self,
-        adsorbate: Atoms,
-        *,
-        adsorbate_index: Literal["com"] | int | None = None,
-    ) -> Atoms:
-        pass
-
     def __call__(
         self,
-        adsorbate: Atoms | Gas | Atom | str,
         *,
-        adsorbate_index: Literal["com"] | int | None = None,
+        adsorbate: Atoms | Gas | Atom | str,
         **kwargs,
-    ) -> tuple[Atoms, Literal[0, 1, 2]]:
+    ) -> tuple[Atoms, Literal[-1, 0, 1, 2]]:
         """Run the adsorption calculation.
 
         Args:
@@ -109,96 +237,21 @@ class AdsorptionABC(ABC):
                         the chemical symbol for a single atom.
                         the molecule string by `ase.build`.
                         the SMILES of the molecule.
-            adsorbate_index (int | None, optional): The index of the adsorbate.
-                Defaults to None. It means that the adsorbate's core
-                is its COM. If it is interger, it means that the
-                adsorbate's core is the atom.
             **kwargs: The keyword arguments for the adsorption method.
-        """
-        return self.__opt(
-            atoms=self._try_adsorption(
-                adsorbate_index=adsorbate_index,
-                adsorbate=self._get_adsorbate(adsorbate=adsorbate),
-                **kwargs,
-            ),
-            natoms=len(self.atoms),
-        )
 
-    def _opt_1st_stage(
-        self,
-        atoms: Atoms,
-        natoms: int,
-    ) -> tuple[list[Atoms], bool]:
-        """Optimize the first stage of the adsorption."""
-        assert self.calculator is not None, (
-            "The calculator must be set before calling the method."
-        )
-        # first stage optimization
-        atoms = atoms.copy()
-        atoms.set_constraint(
-            [
-                FixAtoms(indices=list(range(natoms))),
-                FixBondLengths(
-                    np.column_stack(
-                        np.triu_indices(len(atoms) - natoms, k=1),
-                    )
-                    + natoms
-                ),
-            ]
-        )
-        try:
-            lst, coveraged = optimize(
-                atoms,
-                self.calculator,
-                logfile="-" if self.debug else None,
-                max_steps=self.max_steps_for_first_stage,
-                fmax=self.max_force,
-                trajectory=None,
-            )
-        except Exception:
-            # Sometimes, FixBondLengths will cause an error:
-            #     RuntimeError: Did not converge
-            lst, coveraged = [atoms], False
-        return lst, coveraged
-
-    def __opt(
-        self, atoms: Atoms, natoms: int
-    ) -> tuple[Atoms, Literal[0, 1, 2]]:
-        if self.calculator is None:
-            return atoms, 0
-        else:
-            lst_1, coveraged_1 = self._opt_1st_stage(
-                atoms=atoms,
-                natoms=natoms,
-            )
-
-            if len(lst_1) > 0:
-                atoms_2 = lst_1[-1].copy()
-            else:
-                atoms_2 = atoms.copy()
-            atoms_2.set_constraint(None)
-            lst_2, coveraged_2 = optimize(
-                atoms_2,
-                self.calculator,
-                logfile="-" if self.debug else None,
-                max_steps=self.max_steps_for_second_stage,
-                fmax=self.max_force,
-                trajectory=None,
-            )
-            self._atoms_lst = result_lst = lst_1 + lst_2
-            # assert coveraged_1 or coveraged_2, (
-            #     "The coveraged of the first stage or "
-            #     "the second stage must be True."
-            # )
-            coveraged = int(sum([coveraged_1, coveraged_2]))
-            if coveraged == 0:
-                return atoms, 0
-            else:
-                return result_lst[-1], coveraged  # type: ignore
+        Returns:
+            tuple[Atoms, Literal[-1, 0, 1, 2]]:
+                The optimized adsorption and the coveraged label.
+                -  -1, then the optimization is not coveraged for the two stages.
+                -  0, then the optimization is coveraged for the first stage.
+                -  1, then the optimization is coveraged for the second stage.
+                -  2, then the optimization is coveraged for the two stages.
+        """  # noqa: E501
+        raise NotImplementedError("The method __call__ must be implemented.")
 
     @staticmethod
-    def _get_adsorbate(adsorbate: Atoms | Gas | Atom | str) -> Atoms:
-        """Convert the adsorbate to an Atoms object."""
+    def get_adsorbate(adsorbate: Atoms | Gas | Atom | str) -> Atoms:
+        """Convert the adsorbate to an ase.Atoms object."""
         if isinstance(adsorbate, Atoms):
             ads = adsorbate
         elif isinstance(adsorbate, Atom):

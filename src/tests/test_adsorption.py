@@ -92,19 +92,20 @@ def test_add_adsorption_class_and_optimize(  # noqa: D103
             atoms=atoms,
             core=core,
         )
-        result = obj(adsorbate=adsorbate)[0]
+        result, svrg_label = obj(adsorbate=adsorbate)
         result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.png")
         result.write(fname, format="png")
-        if hasattr(obj, "_atoms_lst"):
+        if hasattr(obj, "_trajectory"):
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
                 write(
                     result_dir.joinpath(f"{k}.xyz"),
-                    obj._atoms_lst,
+                    obj._trajectory,
                     format="extxyz",
                 )
         print(f"  Write: {fname}")
+        print(f"  Convergence label: {svrg_label}")
     except Exception as e:
         msg = f"  No success: for {k} because of {e}"
         fname = result_dir.joinpath(f"{k}.error")

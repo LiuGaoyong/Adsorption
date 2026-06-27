@@ -72,24 +72,16 @@ class DirectAdsorption(AdsorptionABC):
         self._anchor_core = self.site.center
 
     @override
-    def _try_adsorption(  # noqa: D417
+    def try_adsorption(  # noqa: D417
         self,
         adsorbate: Atoms,
         *,
-        adsorbate_index: Literal["com"] | int | None = None,
         idx_grid_core: int | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,
         calc_quat: bool = False,
+        **kwargs,
     ) -> Atoms:
-        """Combine the substrate and adsorbate."""
-        assert adsorbate_index is None, (
-            f"The {self.__class__.__name__} does not support "
-            "`adsorbate_index`. Please remove it from the arguments "
-            "or set it to None. If you want to use it, you can use "
-            "`RawAdsorption` instead.",
-        )
-
         gas: Atoms = adsorbate
         # A. get the direction of `adsorbate`
         grid_ads: np.ndarray = self._grid_ads
@@ -205,14 +197,13 @@ class DirectAdsorption(AdsorptionABC):
     @override
     def __call__(
         self,
-        adsorbate: Atoms | Gas | Atom | str,
         *,
-        adsorbate_index: Literal["com"] | int | None = None,
+        adsorbate: Atoms | Gas | Atom | str,
         idx_grid_core: int | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,
         **kwargs,
-    ) -> tuple[Atoms, Literal[0, 1, 2]]:
+    ) -> tuple[Atoms, Literal[-1, 0, 1, 2]]:
         """Run the adsorption calculation.
 
         Args:
@@ -224,10 +215,6 @@ class DirectAdsorption(AdsorptionABC):
                         the chemical symbol for a single atom.
                         the molecule string by `ase.build`.
                         the SMILES of the molecule.
-            adsorbate_index (int | None, optional): The index of the adsorbate.
-                Defaults to None. It means that the adsorbate's core
-                is its COM. If it is interger, it means that the
-                adsorbate's core is the atom.
             idx_grid_core (int | None, optional): The index of the core.
                 Defaults to None. It means that the core is chosen randomly.
             idx_grid_ads (int | None, optional): The index of the adsorbate.
@@ -237,12 +224,22 @@ class DirectAdsorption(AdsorptionABC):
                 the adsorbate and the core. Defaults to None. It means that
                 the distance is chosen automatically.
             **kwargs: The keyword arguments for the adsorption method.
-        """
-        return super().__call__(
-            adsorbate=adsorbate,
-            adsorbate_index=adsorbate_index,
-            idx_grid_core=idx_grid_core,
-            idx_grid_ads=idx_grid_ads,
-            distance=distance,
-            **kwargs,
+
+        Returns:
+            tuple[Atoms, Literal[-1, 0, 1, 2]]:
+                The optimized adsorption and the coveraged label.
+                -  -1, then the optimization is not coveraged for the two stages.
+                -  0, then the optimization is coveraged for the first stage.
+                -  1, then the optimization is coveraged for the second stage.
+                -  2, then the optimization is coveraged for the two stages.
+        """  # noqa: E501
+        return self.optimize_adsorption(
+            atoms=self.try_adsorption(
+                adsorbate=self.get_adsorbate(adsorbate=adsorbate),
+                idx_grid_core=idx_grid_core,
+                idx_grid_ads=idx_grid_ads,
+                distance=distance,
+                **kwargs,
+            ),
+            natoms=len(self.atoms),
         )
