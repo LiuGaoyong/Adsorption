@@ -12,9 +12,10 @@ class RawAdsorption(AdsorptionABC):
     @override
     def try_adsorption(  # noqa: D417
         self,
-        adsorbate: Atoms,
         *,
+        adsorbate: Atoms,
         adsorbate_index: Literal["com"] | int | None = None,
+        **kwargs,
     ) -> Atoms:
         # A. get `adsorbate_index` & `ad_anchor`
         ads: Atoms = adsorbate

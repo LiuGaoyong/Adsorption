@@ -74,8 +74,8 @@ class DirectAdsorption(AdsorptionABC):
     @override
     def try_adsorption(  # noqa: D417
         self,
-        adsorbate: Atoms,
         *,
+        adsorbate: Atoms,
         idx_grid_core: int | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,

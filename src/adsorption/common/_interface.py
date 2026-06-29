@@ -55,12 +55,21 @@ class AdsorptionTryABC(ABC):
     @abstractmethod
     def try_adsorption(
         self,
-        adsorbate: Atoms,
         *,
-        adsorbate_index: Literal["com"] | int | None = None,
+        adsorbate: Atoms,
+        adsorbate_com: tuple[float, float, float] | np.ndarray,
+        adsorbate_rotation: tuple[float, float, float, float] | np.ndarray,
     ) -> Atoms:
         """Try to ads the adsorbate to the surface or cluster."""
-        pass
+        com = adsorbate.get_center_of_mass()
+        new_pos = adsorbate.positions - com
+        ads = Atoms(adsorbate.numbers, positions=new_pos)
+        ads.set_positions(ads.get_positions() - adsorbate_com)
+        com = ads.get_center_of_mass()
+        ads.set_positions(ads.get_positions() - com)
+        ads.set_cell(
+            quaternion_apply(quaternion(adsorbate_rotation), ads.cell.array)
+        )
 
 
 class AdsorptionOptimizeABC(ABC):
