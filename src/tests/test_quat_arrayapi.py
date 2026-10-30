@@ -2,7 +2,7 @@
 
 import torch
 
-from adsorption.interfaces import _quat, _quat_arrayapi
+from adsorption.common import _quat
 
 
 class TestQuaternionApply:
@@ -26,7 +26,7 @@ class TestQuaternionApply:
         result_original = _quat.quaternion_apply(quaternion, point)
 
         # Test array API version
-        result_arrayapi = _quat_arrayapi.quaternion_apply(quaternion, point)
+        result_arrayapi = _quat.quaternion_apply(quaternion, point)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
         # Expected: point rotated 90° around z-axis should be close to (0, 1, 0)
@@ -58,7 +58,7 @@ class TestQuaternionApply:
         result_original = _quat.quaternion_apply(quaternion, points)
 
         # Test array API version
-        result_arrayapi = _quat_arrayapi.quaternion_apply(quaternion, points)
+        result_arrayapi = _quat.quaternion_apply(quaternion, points)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
 
@@ -91,7 +91,7 @@ class TestQuaternionApply:
         result_original = _quat.quaternion_apply(quaternions, points)
 
         # Test array API version
-        result_arrayapi = _quat_arrayapi.quaternion_apply(quaternions, points)
+        result_arrayapi = _quat.quaternion_apply(quaternions, points)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
 
@@ -104,7 +104,7 @@ class TestStandardizeQuaternion:
         quaternion = torch.tensor([0.5, 0.5, 0.5, 0.5])
 
         result_original = _quat.standardize_quaternion(quaternion)
-        result_arrayapi = _quat_arrayapi.standardize_quaternion(quaternion)
+        result_arrayapi = _quat.standardize_quaternion(quaternion)
 
         assert torch.allclose(result_original, result_arrayapi)
         # Should remain unchanged
@@ -115,7 +115,7 @@ class TestStandardizeQuaternion:
         quaternion = torch.tensor([-0.5, 0.5, 0.5, 0.5])
 
         result_original = _quat.standardize_quaternion(quaternion)
-        result_arrayapi = _quat_arrayapi.standardize_quaternion(quaternion)
+        result_arrayapi = _quat.standardize_quaternion(quaternion)
 
         assert torch.allclose(result_original, result_arrayapi)
         # Should be negated
@@ -132,7 +132,7 @@ class TestStandardizeQuaternion:
         )
 
         result_original = _quat.standardize_quaternion(quaternions)
-        result_arrayapi = _quat_arrayapi.standardize_quaternion(quaternions)
+        result_arrayapi = _quat.standardize_quaternion(quaternions)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
 
@@ -145,7 +145,7 @@ class TestQuaternionInvert:
         quaternion = torch.tensor([0.707, 0.0, 0.707, 0.0])
 
         result_original = _quat.quaternion_invert(quaternion)
-        result_arrayapi = _quat_arrayapi.quaternion_invert(quaternion)
+        result_arrayapi = _quat.quaternion_invert(quaternion)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
         # Inverse should be [w, -x, -y, -z]
@@ -163,7 +163,7 @@ class TestQuaternionInvert:
         )
 
         result_original = _quat.quaternion_invert(quaternions)
-        result_arrayapi = _quat_arrayapi.quaternion_invert(quaternions)
+        result_arrayapi = _quat.quaternion_invert(quaternions)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
 
@@ -177,9 +177,7 @@ class TestQuaternionRawMultiply:
         quaternion = torch.tensor([0.707, 0.0, 0.707, 0.0])
 
         result_original = _quat.quaternion_raw_multiply(identity, quaternion)
-        result_arrayapi = _quat_arrayapi.quaternion_raw_multiply(
-            identity, quaternion
-        )
+        result_arrayapi = _quat.quaternion_raw_multiply(identity, quaternion)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
         # Multiplying by identity should return the original quaternion
@@ -210,7 +208,7 @@ class TestQuaternionRawMultiply:
         )
 
         result_original = _quat.quaternion_raw_multiply(q1, q2)
-        result_arrayapi = _quat_arrayapi.quaternion_raw_multiply(q1, q2)
+        result_arrayapi = _quat.quaternion_raw_multiply(q1, q2)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
 
@@ -230,9 +228,7 @@ class TestQuaternionRawMultiply:
         )
 
         result_original = _quat.quaternion_raw_multiply(q_batch1, q_batch2)
-        result_arrayapi = _quat_arrayapi.quaternion_raw_multiply(
-            q_batch1, q_batch2
-        )
+        result_arrayapi = _quat.quaternion_raw_multiply(q_batch1, q_batch2)
 
         assert torch.allclose(result_original, result_arrayapi, atol=1e-6)
 
@@ -244,7 +240,7 @@ class TestRandomQuaternions:
         """Test that output has correct shape."""
         n = 10
         result_original = _quat.random_quaternions(n)
-        result_arrayapi = _quat_arrayapi.random_quaternions(n, xp=torch)
+        result_arrayapi = _quat.random_quaternions(n, xp=torch)
 
         assert result_original.shape == (n, 4)
         assert result_arrayapi.shape == (n, 4)
@@ -252,7 +248,7 @@ class TestRandomQuaternions:
     def test_unit_quaternions(self):
         """Test that generated quaternions are unit quaternions."""
         n = 100
-        result = _quat_arrayapi.random_quaternions(n, xp=torch)
+        result = _quat.random_quaternions(n, xp=torch)
 
         # Check that all quaternions have unit norm
         norms = torch.sqrt(torch.sum(result * result, dim=1))
@@ -261,7 +257,7 @@ class TestRandomQuaternions:
     def test_nonnegative_real_part(self):
         """Test that all quaternions have nonnegative real part."""
         n = 100
-        result = _quat_arrayapi.random_quaternions(n, xp=torch)
+        result = _quat.random_quaternions(n, xp=torch)
 
         # Check that all real parts are nonnegative
         assert torch.all(result[:, 0] >= 0)
@@ -270,7 +266,7 @@ class TestRandomQuaternions:
         """Test that dtype and device are respected."""
         n = 10
         dtype = torch.float64
-        result = _quat_arrayapi.random_quaternions(n, xp=torch)
+        result = _quat.random_quaternions(n, xp=torch)
 
         assert result.dtype == dtype
 
@@ -284,7 +280,7 @@ class TestCopysign:
         b = torch.tensor([1.0, 1.0, 1.0])
 
         result_original = _quat._copysign(a, b)
-        result_arrayapi = _quat_arrayapi._copysign(a, b)
+        result_arrayapi = _quat._copysign(a, b)
 
         assert torch.allclose(result_original, result_arrayapi)
         # When signs are same, result should be same as a
@@ -296,7 +292,7 @@ class TestCopysign:
         b = torch.tensor([-1.0, -1.0, -1.0])
 
         result_original = _quat._copysign(a, b)
-        result_arrayapi = _quat_arrayapi._copysign(a, b)
+        result_arrayapi = _quat._copysign(a, b)
 
         assert torch.allclose(result_original, result_arrayapi)
         # When signs differ, result should be -a
@@ -308,6 +304,6 @@ class TestCopysign:
         b = torch.tensor([[-1.0, 1.0], [1.0, -1.0]])
 
         result_original = _quat._copysign(a, b)
-        result_arrayapi = _quat_arrayapi._copysign(a, b)
+        result_arrayapi = _quat._copysign(a, b)
 
         assert torch.allclose(result_original, result_arrayapi)

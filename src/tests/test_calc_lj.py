@@ -8,7 +8,7 @@ from ase import Atoms
 from ase.build import fcc111, molecule
 from ase.calculators.calculator import Calculator
 
-from adsorption.pairwise._lj import LennardJones
+from adsorption.pairwise import LennardJones
 
 
 def test_lj() -> None:  # noqa: D103
