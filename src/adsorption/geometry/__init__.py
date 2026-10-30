@@ -42,6 +42,7 @@ from .grids import (
 from .mic import displacements_mic, distances_mic, is_periodic
 from .placement import Anchor, ResolvedAnchor, place, resolve_anchor
 from .rotation import apply_rotation, shortest_arc_rotation, unit_vector
+from .rotations import FixedRotation, RotationSet, ShortestArcSet
 from .shell import first_neighbor_shell, mean_mic, outward_normal
 from .site import SiteGeometry, build_site
 
@@ -57,8 +58,10 @@ __all__ = [
     "Anchor",
     "DirectionGrid",
     "FibonacciGrid",
+    "FixedRotation",
     "LatLonGrid",
     "ResolvedAnchor",
+    "RotationSet",
     "SeededRandomGrid",
     "SiteGeometry",
     "admissible_directions",
@@ -76,6 +79,7 @@ __all__ = [
     "outward_normal",
     "place",
     "resolve_anchor",
+    "ShortestArcSet",
     "shortest_arc_rotation",
     "unit_vector",
 ]
