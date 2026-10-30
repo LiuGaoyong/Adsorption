@@ -26,7 +26,6 @@ license = "GPL-3.0-or-later"
 dependencies = [
     "ase",
     "arrayff",
-    "autograd",
     "joblib",
     "numpy",
     "scipy",
@@ -96,7 +95,6 @@ test = "pytest -s -vv"
 python = ">=3.12, <3.14"
 ase = ">=3.28.0,<4"
 arrayff = ">=0.0"
-autograd = ">=0.0"
 joblib = ">=0.0"
 numpy = ">=0.0"
 scipy = ">=0.0"

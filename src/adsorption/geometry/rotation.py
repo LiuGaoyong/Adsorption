@@ -13,6 +13,7 @@ import numpy as np
 __all__ = [
     "apply_rotation",
     "axis_angle_rotation",
+    "matrix_to_quaternion",
     "quaternion_to_rotation",
     "shortest_arc_rotation",
     "unit_vector",
@@ -131,6 +132,53 @@ def quaternion_to_rotation(quaternion: np.ndarray) -> np.ndarray:
              1.0 - 2.0 * (x * x + y * y)],
         ]
     )
+
+
+def matrix_to_quaternion(rotation: np.ndarray) -> np.ndarray:
+    """Convert a rotation matrix to a unit quaternion (real part first).
+
+    The branch with the largest diagonal element is used for numerical
+    stability.
+
+    Args:
+        rotation: A ``(3, 3)`` rotation matrix.
+
+    Returns:
+        np.ndarray: The quaternion ``(w, x, y, z)``.
+
+    Raises:
+        ValueError: If the matrix has the wrong shape.
+    """
+    matrix = np.asarray(rotation, dtype=float)
+    if matrix.shape != (3, 3):
+        raise ValueError(f"rotation must be (3, 3), got {matrix.shape}.")
+    trace = float(np.trace(matrix))
+    if trace > 0.0:
+        scale = np.sqrt(trace + 1.0) * 2.0
+        w = 0.25 * scale
+        x = (matrix[2, 1] - matrix[1, 2]) / scale
+        y = (matrix[0, 2] - matrix[2, 0]) / scale
+        z = (matrix[1, 0] - matrix[0, 1]) / scale
+    elif matrix[0, 0] > matrix[1, 1] and matrix[0, 0] > matrix[2, 2]:
+        scale = np.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]) * 2.0
+        w = (matrix[2, 1] - matrix[1, 2]) / scale
+        x = 0.25 * scale
+        y = (matrix[0, 1] + matrix[1, 0]) / scale
+        z = (matrix[0, 2] + matrix[2, 0]) / scale
+    elif matrix[1, 1] > matrix[2, 2]:
+        scale = np.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]) * 2.0
+        w = (matrix[0, 2] - matrix[2, 0]) / scale
+        x = (matrix[0, 1] + matrix[1, 0]) / scale
+        y = 0.25 * scale
+        z = (matrix[1, 2] + matrix[2, 1]) / scale
+    else:
+        scale = np.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]) * 2.0
+        w = (matrix[1, 0] - matrix[0, 1]) / scale
+        x = (matrix[0, 2] + matrix[2, 0]) / scale
+        y = (matrix[1, 2] + matrix[2, 1]) / scale
+        z = 0.25 * scale
+    quaternion = np.array([w, x, y, z], dtype=float)
+    return quaternion / np.linalg.norm(quaternion)
 
 
 def apply_rotation(

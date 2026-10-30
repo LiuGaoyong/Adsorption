@@ -46,7 +46,13 @@ from .grids import (
 )
 from .mic import displacements_mic, distances_mic, is_periodic
 from .placement import Anchor, ResolvedAnchor, place, resolve_anchor
-from .rotation import apply_rotation, shortest_arc_rotation, unit_vector
+from .rotation import (
+    apply_rotation,
+    matrix_to_quaternion,
+    quaternion_to_rotation,
+    shortest_arc_rotation,
+    unit_vector,
+)
 from .rotations import (
     DirectionRollSet,
     FixedRotation,
@@ -89,11 +95,13 @@ __all__ = [
     "generate_conformers",
     "first_neighbor_shell",
     "is_periodic",
+    "matrix_to_quaternion",
     "mean_mic",
     "near_congruent",
     "outward_normal",
     "place",
     "prune_by_energy",
+    "quaternion_to_rotation",
     "resolve_anchor",
     "ShortestArcSet",
     "shortest_arc_rotation",

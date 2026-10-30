@@ -118,6 +118,7 @@ src/adsorption/
 ├── protocol/      # budget, kappa index, streaming campaigns, sidecar
 ├── screen/        # Lennard-Jones steric tier and cascade
 ├── evaluation/    # single-point and two-stage relaxation
+├── metrics/       # coverage, ranking, cascade, and site metrics
 ├── pairwise/      # Lennard-Jones calculator (arrayff backend)
 └── runner/        # adsorption-campaign CLI
 ```
@@ -176,9 +177,11 @@ hash), and `manifest.json`. Orientation sets are available on `S²`
 
 ## Roadmap
 
-Remaining work: the reusable campaign metrics and the equal-budget baselines
-(`bench/`), and the `graphatoms` adapters for graph-based site enumeration and
-the six-class labels. The manuscript in `paper-1/` is updated with the code.
+The reusable evaluation metrics live in `adsorption.metrics`; the equal-budget
+baselines B1-B7 and the driver notes are in `bench/`. Graph-based site
+enumeration and the six-class labels are provided by the companion `graphatoms`
+library through the adapters in `adsorption.providers`; this package does not
+reimplement them. The manuscript in `paper-1/` is updated with the code.
 
 ## Development
 
