@@ -56,7 +56,7 @@ class Site(BaseModel):
             center0 = center0 @ complete_cell(self.cell)
             center0 = center0 - self.core[0]
             core = self.core + center0  # move core to the center
-            core = wrap_positions(core, self.cell, pbc)  # wrap core to the cell
+            core = wrap_positions(core, self.cell, pbc)  # type: ignore
             return np.mean(core, axis=0) - center0
         else:
             return np.mean(self.core, axis=0)

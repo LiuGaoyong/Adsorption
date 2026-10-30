@@ -1,14 +1,23 @@
 # ruff: noqa D103
 from pathlib import Path
 from time import perf_counter
-
+import warnings
 import pytest
 from ase import Atoms
 from adsorption.interfaces import RawAdsorption
 from adsorption.common import AdsorptionABC
-from adsorption.interfaces import DirectAdsorption, DirectAdsorptionAD
+from adsorption.interfaces import DirectAdsorption
 from ase.calculators.calculator import Calculator
 from ase.calculators.emt import EMT
+from ase.io import write
+
+
+_complex_molecule = [
+    "C6H6",
+    "C2H6",
+    "CH3CH2OH",
+    "CH3OH",
+]
 
 
 @pytest.mark.parametrize(
@@ -18,8 +27,8 @@ from ase.calculators.emt import EMT
         "CO",
         "H2O",
         "CH4",
-        # "C6H6",
-    ],
+    ]
+    + _complex_molecule,
 )
 @pytest.mark.parametrize(
     "core,name,use_pbc",
@@ -59,6 +68,9 @@ def test_add_adsorption_class_and_optimize(  # noqa: D103
     calc: Calculator | None,
     name: str,
 ) -> None:  # noqa: D103
+    if "raw" in sub_dir and adsorbate in _complex_molecule:
+        return
+
     print()
     k = f"{adsorbate}_{name}"
     k = f"pbc_{k}" if use_pbc else f"nopbc_{k}"
@@ -80,11 +92,20 @@ def test_add_adsorption_class_and_optimize(  # noqa: D103
             atoms=atoms,
             core=core,
         )
-        result = obj(adsorbate=adsorbate)[0]
+        result, svrg_label = obj(adsorbate=adsorbate)
         result.numbers[core] = 79
         fname = result_dir.joinpath(f"{k}.png")
         result.write(fname, format="png")
+        if hasattr(obj, "_trajectory"):
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                write(
+                    result_dir.joinpath(f"{k}.xyz"),
+                    obj._trajectory,
+                    format="extxyz",
+                )
         print(f"  Write: {fname}")
+        print(f"  Convergence label: {svrg_label}")
     except Exception as e:
         msg = f"  No success: for {k} because of {e}"
         fname = result_dir.joinpath(f"{k}.error")
