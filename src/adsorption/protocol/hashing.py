@@ -15,10 +15,19 @@ from typing import Any
 
 import numpy as np
 
-__all__ = ["parameter_hash", "stable_hash"]
+__all__ = ["parameter_hash", "software_versions", "stable_hash"]
 
 
 _PACKAGES = ("adsorption", "ase", "numpy", "graphatoms")
+
+
+def software_versions() -> dict[str, str]:
+    """Return the recorded software versions.
+
+    Returns:
+        dict[str, str]: Package name to version (``"unknown"`` when absent).
+    """
+    return _software_versions()
 
 
 def _software_versions() -> dict[str, str]:

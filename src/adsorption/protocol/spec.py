@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Sequence
+from typing import Literal, runtime_checkable
+from typing import Protocol as TypingProtocol
 
 import numpy as np
 from ase import Atoms
@@ -25,12 +27,14 @@ from ..geometry import (
 
 __all__ = [
     "AdsorbateSpec",
+    "CoreSetProvider",
     "ConformerSpec",
     "DistanceSpec",
     "FilterSpec",
     "GridSpec",
     "OrientationSpec",
     "Protocol",
+    "SiteLabeller",
     "SiteSpec",
 ]
 
@@ -363,3 +367,29 @@ class Protocol(BaseModel):
         if int(value) < 1:
             raise ValueError(f"n must be positive, got {value}.")
         return int(value)
+
+
+@runtime_checkable
+class CoreSetProvider(TypingProtocol):
+    """A provider of candidate core sets (implemented by ``graphatoms``).
+
+    The package does not implement graph-based site enumeration. A provider
+    receives the substrate and returns the pre-registered site list.
+    """
+
+    def propose(self, atoms: Atoms) -> Sequence[SiteSpec]:
+        """Return candidate sites for a substrate."""
+        ...
+
+
+@runtime_checkable
+class SiteLabeller(TypingProtocol):
+    """A six-class site labeller (implemented by ``graphatoms``).
+
+    Labels describe the local environment and are used only for coverage
+    statistics; they never enter the geometric construction.
+    """
+
+    def label(self, atoms: Atoms, site: SiteSpec) -> str | None:
+        """Return the class label of a site, or ``None`` when undefined."""
+        ...

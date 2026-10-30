@@ -115,8 +115,11 @@ src/adsorption/
 ├── geometry/      # site, grids, admissibility, rotation, distance, placement
 ├── common/        # AdsorptionABC, Site (legacy wrapper), optimize()
 ├── interfaces/    # RawAdsorption, DirectAdsorption
+├── protocol/      # budget, kappa index, streaming campaigns, sidecar
+├── screen/        # Lennard-Jones steric tier and cascade
+├── evaluation/    # single-point and two-stage relaxation
 ├── pairwise/      # Lennard-Jones calculator (arrayff backend)
-└── runner/        # campaign runner (protocol layer, under construction)
+└── runner/        # adsorption-campaign CLI
 ```
 
 The `geometry` subpackage is calculator-free: nothing in it imports ASE
@@ -129,13 +132,53 @@ and the `adsorption-tune` command) has been removed. `adsorption.common.Site`
 and `Site.get_direction_grid` remain as wrappers around the `geometry` layer and
 will be removed after the protocol layer lands.
 
+## Fixed-budget campaigns
+
+The protocol layer turns the geometry into a deterministic candidate stream
+with a bijective index `kappa`, a sidecar record per candidate, an optional
+Lennard-Jones screen, and an optional evaluation tier. A campaign is described
+by a YAML file:
+
+```yaml
+name: co-on-cu111
+output: runs/co-on-cu111
+substrate:
+  target: ase.build.fcc111
+  kwargs: {symbol: Cu, size: [4, 4, 3], vacuum: 12, orthogonal: true}
+adsorbate:
+  reference: {target: ase.build.molecule, kwargs: {name: CO}}
+sites:
+  - {core: [0]}
+protocol:
+  n: 200
+  orientation: {kind: shortest_arc, n_ab: 200}
+  distances: {d_min: 1.2, d_max: 3.0, step: 0.2}
+screen:
+  kim: true
+  r_min: 1.0
+  e_cut: 50.0
+evaluation:
+  mode: single_point
+  calculator: {target: ase.calculators.emt.EMT}
+```
+
+```bash
+adsorption-campaign enumerate campaign.yaml   # budget, no files written
+adsorption-campaign run campaign.yaml --workers 4 --shard 0/4
+adsorption-campaign run campaign.yaml --resume
+```
+
+A run writes `structures/<kappa>.xyz`, `sidecar.jsonl` (one JSON record per
+candidate: index, radices, screen verdict, energy, converged stages, parameter
+hash), and `manifest.json`. Orientation sets are available on `S²`
+(`shortest_arc`), `S² × S¹` (`direction_roll`, with `n_roll`), and `SO(3)`
+(`so3`); conformers are enumerated per `(site, conformer)` variant.
+
 ## Roadmap
 
-The fixed-budget protocol layer is being implemented on
-`refactor/paper1-protocol-layer`: the κ index bijection, the distance array in
-the public API, the Lennard-Jones steric screen, sidecar records, the campaign
-CLI, and orientation sets on `S²`, `S² × S¹`, and `SO(3)`. The manuscript in
-`paper-1/` is updated together with the code.
+Remaining work: the reusable campaign metrics and the equal-budget baselines
+(`bench/`), and the `graphatoms` adapters for graph-based site enumeration and
+the six-class labels. The manuscript in `paper-1/` is updated with the code.
 
 ## Development
 

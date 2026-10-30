@@ -34,7 +34,13 @@ from .hashing import parameter_hash
 from .index import Event
 from .plan import BudgetPlan, SiteVariant
 from .sidecar import SidecarRecord
-from .spec import AdsorbateSpec, Protocol, SiteSpec
+from .spec import (
+    AdsorbateSpec,
+    CoreSetProvider,
+    Protocol,
+    SiteLabeller,
+    SiteSpec,
+)
 
 __all__ = ["Campaign", "Candidate", "prepare_campaign"]
 
@@ -249,6 +255,9 @@ def prepare_campaign(
     adsorbate: AdsorbateSpec,
     sites: Sequence[SiteSpec],
     protocol: Protocol,
+    *,
+    core_provider: CoreSetProvider | None = None,
+    labeller: SiteLabeller | None = None,
 ) -> Campaign:
     """Build the budget plan and the geometric sets of a campaign.
 
@@ -260,21 +269,41 @@ def prepare_campaign(
     Args:
         atoms: Substrate structure.
         adsorbate: Reference adsorbate specification.
-        sites: Pre-registered site list.
+        sites: Pre-registered site list. When empty, ``core_provider``
+            supplies the list.
         protocol: Fixed-budget protocol.
+        core_provider: Optional upstream site enumerator (``graphatoms``).
+        labeller: Optional upstream six-class labeller (``graphatoms``). The
+            labels are recorded on the site list and never used by the
+            geometry.
 
     Returns:
         Campaign: The prepared campaign.
 
     Raises:
         TypeError: If ``atoms`` is not an ASE ``Atoms``.
-        ValueError: If the site list is empty or a rotation set is empty.
+        ValueError: If no site is available or a rotation set is empty.
     """
     if not isinstance(atoms, Atoms):
         raise TypeError(f"atoms must be an ase.Atoms, got {type(atoms)}.")
     site_list = tuple(sites)
     if not site_list:
-        raise ValueError("The site list must not be empty.")
+        if core_provider is None:
+            raise ValueError(
+                "The site list must not be empty; supply sites or a "
+                "CoreSetProvider."
+            )
+        site_list = tuple(core_provider.propose(atoms))
+        if not site_list:
+            raise ValueError(
+                "The core-set provider returned no site; a site list must "
+                "not be empty."
+            )
+    if labeller is not None:
+        site_list = tuple(
+            site.model_copy(update={"label": labeller.label(atoms, site)})
+            for site in site_list
+        )
 
     grid = protocol.grid.build()
     distances = protocol.distances.array()

@@ -33,6 +33,7 @@ dependencies = [
     "scikit-learn",
     "typing-extensions",
     "graphatoms>=3.0",
+    "pyyaml>=6",
 ]
 [dependency-groups]
 dev = [
@@ -41,6 +42,9 @@ dev = [
     "pytest-xdist",
     "jupyterlab",
 ]
+
+[project.scripts]
+adsorption-campaign = "adsorption.runner.cli:main"
 
 # uv config
 [tool.uv]
@@ -99,6 +103,7 @@ scipy = ">=0.0"
 scikit-learn = ">=0.0"
 typing-extensions = ">=0.0"
 graphatoms = ">=3.0"
+pyyaml = ">=6"
 ruff = ">=0.11"
 pytest = ">=8.3"
 pytest-xdist = ">=3.8.0"
