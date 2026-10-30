@@ -42,9 +42,6 @@ dev = [
     "jupyterlab",
 ]
 
-[project.scripts]
-adsorption-tune = "adsorption.runner._cli:main"
-
 # uv config
 [tool.uv]
 package = true
@@ -90,7 +87,6 @@ dev = { features = ["dev"], solve-group = "default" }
 
 [tool.pixi.tasks]
 test = "pytest -s -vv"
-test-tune = "adsorption-tune"
 
 [tool.pixi.dependencies]
 python = ">=3.12, <3.14"
