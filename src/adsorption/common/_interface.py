@@ -13,15 +13,9 @@ from ase.data import chemical_symbols as SYMBOLS
 from graphatoms.system import Cluster, Gas, System
 from graphatoms.utils.rdutils import rdmol2ase, smiles2rdmol
 from numpy.typing import ArrayLike
-from scipy.spatial.transform import Rotation
 
 from ..common._site import Site, _site_helper
 from .optimize import optimize
-
-
-def quaternion_apply(quat, pos) -> np.ndarray:
-    rot = Rotation.from_quat(quat)
-    return rot.apply(pos)
 
 
 class AdsorptionTryABC(ABC):
@@ -57,18 +51,22 @@ class AdsorptionTryABC(ABC):
         self,
         *,
         adsorbate: Atoms,
-        adsorbate_com: tuple[float, float, float] | np.ndarray,
-        adsorbate_rotation: tuple[float, float, float, float] | np.ndarray,
+        **kwargs,
     ) -> Atoms:
-        """Try to ads the adsorbate to the surface or cluster."""
-        com = adsorbate.get_center_of_mass()
-        new_pos = adsorbate.positions - com
-        ads = Atoms(adsorbate.numbers, positions=new_pos)
-        ads.set_positions(ads.get_positions() - adsorbate_com)
-        com = ads.get_center_of_mass()
-        ads.set_positions(ads.get_positions() - com)
-        ads.set_cell(
-            quaternion_apply(quaternion(adsorbate_rotation), ads.cell.array)
+        """Try to ads the adsorbate to the surface or cluster.
+
+        Subclasses decide how the adsorbate is oriented and placed on the
+        adsorption site.
+
+        Args:
+            adsorbate (Atoms): The adsorbate atoms.
+            **kwargs: The keyword arguments for the adsorption method.
+
+        Returns:
+            Atoms: The structure before relaxation.
+        """
+        raise NotImplementedError(
+            "The method try_adsorption must be implemented."
         )
 
 

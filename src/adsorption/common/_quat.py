@@ -76,7 +76,6 @@ def quaternion_raw_multiply(a: Array, b: Array) -> Array:
     Args:
         a: Quaternions as array of shape (..., 4), real part first.
         b: Quaternions as array of shape (..., 4), real part first.
-        xp: Array namespace (optional, inferred from inputs if not provided).
 
     Returns:
         The product of a and b, an array of quaternions shape (..., 4).
@@ -125,7 +124,6 @@ def _copysign(a: Array, b: Array) -> Array:
     Args:
         a: source array.
         b: array whose signs will be used, of the same shape as a.
-        xp: Array namespace (optional, inferred from inputs if not provided).
 
     Returns:
         Array of the same shape as a with the signs of b.
