@@ -10,7 +10,13 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["apply_rotation", "shortest_arc_rotation", "unit_vector"]
+__all__ = [
+    "apply_rotation",
+    "axis_angle_rotation",
+    "quaternion_to_rotation",
+    "shortest_arc_rotation",
+    "unit_vector",
+]
 
 
 def unit_vector(vector: np.ndarray) -> np.ndarray:
@@ -74,6 +80,57 @@ def shortest_arc_rotation(u: np.ndarray, v: np.ndarray) -> np.ndarray:
         ]
     )
     return np.eye(3) + sine * skew + (1.0 - cosine) * (skew @ skew)
+
+
+def axis_angle_rotation(axis: np.ndarray, angle: float) -> np.ndarray:
+    """Return the rotation matrix of a rotation about an axis.
+
+    Args:
+        axis: Rotation axis of shape ``(3,)`` (normalised internally).
+        angle: Rotation angle in radians.
+
+    Returns:
+        np.ndarray: A ``(3, 3)`` rotation matrix.
+    """
+    k = unit_vector(axis)
+    cosine = float(np.cos(angle))
+    sine = float(np.sin(angle))
+    skew = np.array(
+        [
+            [0.0, -k[2], k[1]],
+            [k[2], 0.0, -k[0]],
+            [-k[1], k[0], 0.0],
+        ]
+    )
+    return np.eye(3) + sine * skew + (1.0 - cosine) * (skew @ skew)
+
+
+def quaternion_to_rotation(quaternion: np.ndarray) -> np.ndarray:
+    """Convert a unit quaternion (real part first) to a rotation matrix.
+
+    Args:
+        quaternion: Quaternion ``(w, x, y, z)``, normalised internally.
+
+    Returns:
+        np.ndarray: The ``(3, 3)`` rotation matrix.
+    """
+    q = np.asarray(quaternion, dtype=float)
+    if q.shape != (4,):
+        raise ValueError(f"quaternion must be (4,), got {q.shape}.")
+    norm = float(np.linalg.norm(q))
+    if norm < 1e-12:
+        raise ValueError("Cannot normalise a zero-length quaternion.")
+    w, x, y, z = q / norm
+    return np.array(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z),
+             2.0 * (x * z + w * y)],
+            [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z),
+             2.0 * (y * z - w * x)],
+            [2.0 * (x * z - w * y), 2.0 * (y * z + w * x),
+             1.0 - 2.0 * (x * x + y * y)],
+        ]
+    )
 
 
 def apply_rotation(

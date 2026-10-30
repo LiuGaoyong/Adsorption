@@ -1,10 +1,15 @@
 """Fixed-budget campaigns: preparation, streaming enumeration, sharding.
 
-A campaign binds a substrate, a reference adsorbate, a pre-registered site
-list, and a protocol. Preparation builds the site geometries and their
-admissible direction sets once; enumeration is then a pure function of the
-candidate index, so candidates stream with O(1) memory and any partition of
-the index range reproduces the same multiset.
+A campaign binds a substrate, a reference adsorbate (one or more conformers),
+a pre-registered site list, and a protocol. Preparation builds the site
+geometries and their admissible direction sets once; enumeration is then a
+pure function of the candidate index, so candidates stream with O(1) memory
+and any partition of the index range reproduces the same multiset.
+
+A conformer is folded into the site variant: every ``(site, conformer)`` pair
+has its own radices and offset, so Eq. (15) keeps its form and the conformer
+label travels in the sidecar record. The steric filter is conformer
+independent in this version: ``N_OA(s, c) = N_OA(s)``.
 """
 
 from __future__ import annotations
@@ -68,6 +73,11 @@ class Campaign:
 
     Instances are created by :func:`prepare_campaign`; the constructor is an
     implementation detail.
+
+    Attributes:
+        references: The reference geometry of each conformer.
+        anchors: The resolved anchor of each conformer.
+        rotations: The orientation set of each conformer.
     """
 
     def __init__(
@@ -79,10 +89,11 @@ class Campaign:
         sites: Sequence[SiteSpec],
         geometries: Sequence[SiteGeometry],
         admissible: Sequence[AdmissibleSet],
-        rotations: RotationSet,
+        references: Sequence[Atoms],
+        anchors: Sequence[ResolvedAnchor],
+        rotations: Sequence[RotationSet],
         distances: np.ndarray,
         plan: BudgetPlan,
-        anchor: ResolvedAnchor,
         param_hash: str,
     ) -> None:
         """Store the prepared campaign."""
@@ -92,10 +103,11 @@ class Campaign:
         self.sites = tuple(sites)
         self.geometries = tuple(geometries)
         self.admissible = tuple(admissible)
-        self.rotations = rotations
+        self.references = tuple(references)
+        self.anchors = tuple(anchors)
+        self.rotations = tuple(rotations)
         self.distances = np.asarray(distances, dtype=float)
         self.plan = plan
-        self.anchor = anchor
         self.param_hash = param_hash
 
     def __len__(self) -> int:
@@ -106,6 +118,11 @@ class Campaign:
     def n_candidates(self) -> int:
         """Return the total number of candidates."""
         return self.plan.total
+
+    @property
+    def n_conformers(self) -> int:
+        """Return the number of conformers."""
+        return len(self.references)
 
     def support(self, kappa: int) -> Candidate:
         """Generate the candidate of one index.
@@ -123,13 +140,16 @@ class Campaign:
         variant = self.plan.variants[event.variant]
         geometry = self.geometries[variant.site_index]
         directions = self.admissible[variant.site_index]
+        conformer = variant.conformer
         unit = np.asarray(directions.unit[event.i - 1], dtype=float)
         distance = float(self.distances[event.k - 1])
-        rotation = np.asarray(self.rotations.rotation(event.j - 1), dtype=float)
+        rotation = np.asarray(
+            self.rotations[conformer].rotation(event.j - 1), dtype=float
+        )
         target = np.asarray(geometry.center, dtype=float) + distance * unit
         placed = place(
-            self.adsorbate.reference,
-            anchor=self.anchor,
+            self.references[conformer],
+            anchor=self.anchors[conformer],
             target=target,
             rotation=rotation,
         )
@@ -139,7 +159,7 @@ class Campaign:
             kappa=int(kappa),
             event=event,
             site_index=variant.site_index,
-            conformer=variant.conformer,
+            conformer=conformer,
             atoms=structure,
             distance=distance,
             n_oa=variant.n_oa,
@@ -232,6 +252,11 @@ def prepare_campaign(
 ) -> Campaign:
     """Build the budget plan and the geometric sets of a campaign.
 
+    The index space is the ordered product of the site list and the conformer
+    list: for every site, each conformer contributes
+    ``N_OA(s) * N_AB(c) * M`` candidates, where the admissible directions are
+    shared and the orientation set is built from the conformer's own axis.
+
     Args:
         atoms: Substrate structure.
         adsorbate: Reference adsorbate specification.
@@ -243,7 +268,7 @@ def prepare_campaign(
 
     Raises:
         TypeError: If ``atoms`` is not an ASE ``Atoms``.
-        ValueError: If the site list is empty.
+        ValueError: If the site list is empty or a rotation set is empty.
     """
     if not isinstance(atoms, Atoms):
         raise TypeError(f"atoms must be an ase.Atoms, got {type(atoms)}.")
@@ -253,15 +278,24 @@ def prepare_campaign(
 
     grid = protocol.grid.build()
     distances = protocol.distances.array()
-    rotations = protocol.orientation.build()
-    n_rot = int(rotations.count())
-    if n_rot < 1:
-        raise ValueError("The rotation set must not be empty.")
+
+    conformer_specs = adsorbate.conformer_specs
+    references = tuple(spec.reference for spec in conformer_specs)
+    anchors = tuple(
+        resolve_anchor(spec.reference, spec.anchor)
+        for spec in conformer_specs
+    )
+    rotations: list[RotationSet] = []
+    for spec in conformer_specs:
+        rotation_set = protocol.orientation.build(axis=spec.axis)
+        if rotation_set.count() < 1:
+            raise ValueError("The rotation set must not be empty.")
+        rotations.append(rotation_set)
 
     geometries: list[SiteGeometry] = []
     admissible: list[AdmissibleSet] = []
     variants: list[SiteVariant] = []
-    for index, site in enumerate(site_list):
+    for site_index, site in enumerate(site_list):
         geometry = build_site(
             atoms,
             site.core,
@@ -277,18 +311,18 @@ def prepare_campaign(
         )
         geometries.append(geometry)
         admissible.append(directions)
-        variants.append(
-            SiteVariant(
-                site_index=index,
-                conformer=0,
-                n_oa=directions.n_oa,
-                n_rot=n_rot,
-                n_d=len(distances),
+        for conformer, rotation_set in enumerate(rotations):
+            variants.append(
+                SiteVariant(
+                    site_index=site_index,
+                    conformer=conformer,
+                    n_oa=directions.n_oa,
+                    n_rot=rotation_set.count(),
+                    n_d=len(distances),
+                )
             )
-        )
 
     plan = BudgetPlan(variants)
-    anchor = resolve_anchor(adsorbate.reference, adsorbate.anchor)
     return Campaign(
         atoms=atoms,
         adsorbate=adsorbate,
@@ -296,9 +330,10 @@ def prepare_campaign(
         sites=site_list,
         geometries=geometries,
         admissible=admissible,
+        references=references,
+        anchors=anchors,
         rotations=rotations,
         distances=distances,
         plan=plan,
-        anchor=anchor,
         param_hash=parameter_hash(protocol, site_list, adsorbate),
     )

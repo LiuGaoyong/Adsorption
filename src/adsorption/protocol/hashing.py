@@ -98,11 +98,28 @@ def parameter_hash(
     Returns:
         str: The hexadecimal SHA-256 digest.
     """
-    reference = getattr(adsorbate, "reference", None)
-    if reference is None:
-        raise TypeError("adsorbate must expose a 'reference' Atoms object.")
-    anchor = getattr(adsorbate, "anchor", "com")
-    axis = getattr(adsorbate, "axis", (0.0, 0.0, 1.0))
+    specs = getattr(adsorbate, "conformer_specs", None)
+    if specs is None:
+        specs = (adsorbate,)
+    conformer_records = []
+    for spec in specs:
+        reference = getattr(spec, "reference", None)
+        if reference is None:
+            raise TypeError(
+                "each conformer must expose a 'reference' Atoms object."
+            )
+        conformer_records.append(
+            {
+                "numbers": np.asarray(
+                    reference.numbers, dtype=int
+                ).tolist(),
+                "positions": np.asarray(
+                    reference.positions, dtype=float
+                ).tolist(),
+                "anchor": getattr(spec, "anchor", "com"),
+                "axis": getattr(spec, "axis", (0.0, 0.0, 1.0)),
+            }
+        )
     site_records = [
         {
             "core": list(getattr(site, "core", ())),
@@ -117,12 +134,7 @@ def parameter_hash(
     payload = {
         "protocol": protocol,
         "sites": site_records,
-        "adsorbate": {
-            "numbers": np.asarray(reference.numbers, dtype=int).tolist(),
-            "positions": np.asarray(reference.positions, dtype=float).tolist(),
-            "anchor": anchor,
-            "axis": axis,
-        },
+        "adsorbate": {"conformers": conformer_records},
         "software": _software_versions(),
     }
     return stable_hash(payload)

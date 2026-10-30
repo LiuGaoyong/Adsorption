@@ -12,10 +12,12 @@ from ..geometry import (
     DELTA_NBR,
     MAX_CORE_SIZE,
     DirectionGrid,
+    DirectionRollSet,
     FibonacciGrid,
     FixedRotation,
     LatLonGrid,
     RotationSet,
+    SO3Set,
     SeededRandomGrid,
     ShortestArcSet,
     distance_array,
@@ -23,6 +25,7 @@ from ..geometry import (
 
 __all__ = [
     "AdsorbateSpec",
+    "ConformerSpec",
     "DistanceSpec",
     "FilterSpec",
     "GridSpec",
@@ -41,6 +44,32 @@ def _finite_tuple(value: tuple[float, ...]) -> tuple[float, ...]:
     if float(np.linalg.norm(array)) < 1e-12:
         raise ValueError("A 3-vector must not be zero.")
     return tuple(float(x) for x in array)
+
+
+def _check_reference(value: Atoms) -> Atoms:
+    if len(value) == 0:
+        raise ValueError("The reference adsorbate must not be empty.")
+    return value
+
+
+def _check_anchor(
+    value: str | int | tuple[float, float, float],
+) -> str | int | tuple[float, float, float]:
+    if isinstance(value, str):
+        if value != "com":
+            raise ValueError(
+                f"The only accepted string anchor is 'com', got {value!r}."
+            )
+        return value
+    if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+        if int(value) < 0:
+            raise ValueError(
+                f"An atom anchor must be non-negative, got {value}."
+            )
+        return int(value)
+    if isinstance(value, (tuple, list)):
+        return _finite_tuple(tuple(float(x) for x in value))
+    raise TypeError(f"Unsupported anchor declaration: {value!r}.")
 
 
 class GridSpec(BaseModel):
@@ -128,12 +157,25 @@ class DistanceSpec(BaseModel):
 
 
 class OrientationSpec(BaseModel):
-    """The orientation-set choice."""
+    """The orientation-set choice.
+
+    ``shortest_arc`` samples the reference axis on the sphere and applies the
+    minimal rotation (the roll is not sampled). ``direction_roll`` adds an
+    equally spaced roll grid on top. ``so3`` samples full rotations with a
+    deterministic Kronecker/Shoemake construction. ``fixed`` is the identity,
+    used when orientation does not matter.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    kind: Literal["shortest_arc", "fixed"] = "shortest_arc"
+    kind: Literal[
+        "shortest_arc",
+        "direction_roll",
+        "so3",
+        "fixed",
+    ] = "shortest_arc"
     n_ab: int = 1000
+    n_roll: int = 1
     axis: tuple[float, float, float] = (0.0, 0.0, 1.0)
 
     @field_validator("n_ab")
@@ -143,6 +185,13 @@ class OrientationSpec(BaseModel):
             raise ValueError(f"n_ab must be positive, got {value}.")
         return int(value)
 
+    @field_validator("n_roll")
+    @classmethod
+    def _n_roll(cls, value: int) -> int:
+        if int(value) < 1:
+            raise ValueError(f"n_roll must be positive, got {value}.")
+        return int(value)
+
     @field_validator("axis")
     @classmethod
     def _axis(
@@ -150,15 +199,29 @@ class OrientationSpec(BaseModel):
     ) -> tuple[float, float, float]:
         return _finite_tuple(value)
 
-    def build(self) -> RotationSet:
+    def build(self, *, axis: np.ndarray | None = None) -> RotationSet:
         """Return the corresponding rotation set.
+
+        Args:
+            axis: Optional per-conformer body-frame axis override.
 
         Returns:
             RotationSet: The rotation set.
         """
+        body_axis = np.asarray(
+            self.axis if axis is None else axis, dtype=float
+        )
         if self.kind == "fixed":
             return FixedRotation()
-        return ShortestArcSet(np.asarray(self.axis, dtype=float), self.n_ab)
+        if self.kind == "direction_roll":
+            return DirectionRollSet(
+                body_axis,
+                self.n_ab,
+                n_roll=self.n_roll,
+            )
+        if self.kind == "so3":
+            return SO3Set(self.n_ab)
+        return ShortestArcSet(body_axis, self.n_ab)
 
 
 class SiteSpec(BaseModel):
@@ -203,8 +266,12 @@ class SiteSpec(BaseModel):
         return neighbors
 
 
-class AdsorbateSpec(BaseModel):
-    """The reference adsorbate and its anchor declaration."""
+class ConformerSpec(BaseModel):
+    """One member of a conformational ensemble.
+
+    The reference axis and the anchor are redeclared per conformer, because a
+    principal axis of one conformer need not be one of another (Section 2.6).
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
@@ -215,30 +282,14 @@ class AdsorbateSpec(BaseModel):
     @field_validator("reference")
     @classmethod
     def _reference(cls, value: Atoms) -> Atoms:
-        if len(value) == 0:
-            raise ValueError("The reference adsorbate must not be empty.")
-        return value
+        return _check_reference(value)
 
     @field_validator("anchor")
     @classmethod
     def _anchor(
         cls, value: str | int | tuple[float, float, float]
     ) -> str | int | tuple[float, float, float]:
-        if isinstance(value, str):
-            if value != "com":
-                raise ValueError(
-                    f"The only accepted string anchor is 'com', got {value!r}."
-                )
-            return value
-        if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
-            if int(value) < 0:
-                raise ValueError(
-                    f"An atom anchor must be non-negative, got {value}."
-                )
-            return int(value)
-        if isinstance(value, (tuple, list)):
-            return _finite_tuple(tuple(float(x) for x in value))
-        raise TypeError(f"Unsupported anchor declaration: {value!r}.")
+        return _check_anchor(value)
 
     @field_validator("axis")
     @classmethod
@@ -246,6 +297,52 @@ class AdsorbateSpec(BaseModel):
         cls, value: tuple[float, float, float]
     ) -> tuple[float, float, float]:
         return _finite_tuple(value)
+
+
+class AdsorbateSpec(BaseModel):
+    """The reference adsorbate, its anchor, and an optional conformer set.
+
+    ``reference`` is the default conformer. Additional members are declared in
+    ``conformers``; the campaign enumerates every conformer separately (Eq. 12,
+    Proposition 5). The construction does not generate conformers; an optional
+    utility can do so, but the campaign only consumes the declared set.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    reference: Atoms
+    anchor: str | int | tuple[float, float, float] = "com"
+    axis: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    conformers: tuple[ConformerSpec, ...] = ()
+
+    @field_validator("reference")
+    @classmethod
+    def _reference(cls, value: Atoms) -> Atoms:
+        return _check_reference(value)
+
+    @field_validator("anchor")
+    @classmethod
+    def _anchor(
+        cls, value: str | int | tuple[float, float, float]
+    ) -> str | int | tuple[float, float, float]:
+        return _check_anchor(value)
+
+    @field_validator("axis")
+    @classmethod
+    def _axis(
+        cls, value: tuple[float, float, float]
+    ) -> tuple[float, float, float]:
+        return _finite_tuple(value)
+
+    @property
+    def conformer_specs(self) -> tuple[ConformerSpec, ...]:
+        """Return the full conformer list, default conformer first."""
+        default = ConformerSpec(
+            reference=self.reference,
+            anchor=self.anchor,
+            axis=self.axis,
+        )
+        return (default, *self.conformers)
 
 
 class Protocol(BaseModel):

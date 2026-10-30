@@ -12,6 +12,7 @@ from ase.build import fcc111, molecule
 from adsorption.protocol import (
     AdsorbateSpec,
     BudgetPlan,
+    ConformerSpec,
     DistanceSpec,
     Event,
     FilterSpec,
@@ -191,7 +192,7 @@ def test_campaign_resume_matches_slice(slab: Atoms, adsorbate: AdsorbateSpec) ->
 def test_fixed_orientation(slab: Atoms, adsorbate: AdsorbateSpec) -> None:
     proto = protocol(orientation=OrientationSpec(kind="fixed"))
     campaign = prepare_campaign(slab, adsorbate, [SiteSpec(core=(0,))], proto)
-    assert campaign.rotations.count() == 1
+    assert campaign.rotations[0].count() == 1
     expected = campaign.admissible[0].n_oa * len(proto.distances.array())
     assert len(campaign) == expected
 
@@ -256,3 +257,35 @@ def test_grid_spec_seed_requirement() -> None:
         GridSpec(kind="random").build()
     assert GridSpec(kind="random", seed=5).build().size(10) == 10
     assert GridSpec(kind="latlon").build().size(10) >= 4
+
+
+def test_orientation_spec_kinds() -> None:
+    assert OrientationSpec(kind="fixed").build().count() == 1
+    assert OrientationSpec(kind="shortest_arc", n_ab=7).build().count() == 7
+    assert (
+        OrientationSpec(kind="direction_roll", n_ab=5, n_roll=3).build().count()
+        == 15
+    )
+    assert OrientationSpec(kind="so3", n_ab=11).build().count() == 11
+
+
+def test_campaign_conformers(slab: Atoms, adsorbate: AdsorbateSpec) -> None:
+    rotated = adsorbate.reference.copy()
+    rotated.rotate(90.0, "x")
+    multi = AdsorbateSpec(
+        reference=adsorbate.reference,
+        conformers=(ConformerSpec(reference=rotated, anchor=0),),
+    )
+    proto = protocol()
+    sites = [SiteSpec(core=(0,))]
+    single = prepare_campaign(slab, adsorbate, sites, proto)
+    campaign = prepare_campaign(slab, multi, sites, proto)
+    assert campaign.n_conformers == 2
+    assert len(campaign) == 2 * len(single)
+    conformers = {candidate.conformer for candidate in campaign.candidates()}
+    assert conformers == {0, 1}
+    record = campaign.sidecar_record(campaign.support(1))
+    assert record.conformer in {0, 1}
+    assert parameter_hash(proto, sites, multi) != parameter_hash(
+        proto, sites, adsorbate
+    )

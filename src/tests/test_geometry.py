@@ -12,8 +12,10 @@ from ase.geometry import find_mic
 from adsorption.geometry import (
     DELTA_NBR,
     AdmissibleSet,
+    DirectionRollSet,
     FibonacciGrid,
     LatLonGrid,
+    SO3Set,
     SeededRandomGrid,
     admissible_directions,
     build_site,
@@ -23,9 +25,12 @@ from adsorption.geometry import (
     distance_array,
     distances_mic,
     first_neighbor_shell,
+    generate_conformers,
     mean_mic,
+    near_congruent,
     outward_normal,
     place,
+    prune_by_energy,
     resolve_anchor,
     shortest_arc_rotation,
     unit_vector,
@@ -362,3 +367,67 @@ def test_raw_adsorption_uses_outward_normal(slab: Atoms) -> None:
     direction = position - obj.site_geometry.center
     direction = direction / np.linalg.norm(direction)
     assert np.allclose(direction, obj.site_geometry.outward_normal)
+
+
+def test_direction_roll_set() -> None:
+    axis = np.array([0.0, 0.0, 1.0])
+    orientations = DirectionRollSet(axis, 8, n_roll=4)
+    assert orientations.count() == 32
+    for index in (0, 1, 5, 31):
+        rotation = orientations.rotation(index)
+        assert np.allclose(rotation @ rotation.T, np.eye(3))
+        assert np.isclose(np.linalg.det(rotation), 1.0)
+    # the first direction carries four rolls, one per roll index
+    first = orientations.rotation(0)
+    second = orientations.rotation(1)
+    relative = second @ first.T
+    angle = np.arccos(np.clip((np.trace(relative) - 1.0) / 2.0, -1.0, 1.0))
+    assert np.isclose(angle, 2.0 * np.pi / 4)
+    image = orientations.image(0)
+    assert np.allclose(relative @ image, image)
+    # the roll leaves the placed axis invariant
+    assert np.allclose(orientations.image(7), orientations.image(4))
+
+
+def test_so3_set_is_uniform_and_deterministic() -> None:
+    orientations = SO3Set(1024)
+    assert orientations.count() == 1024
+    assert np.array_equal(orientations.quaternions, SO3Set(1024).quaternions)
+    for index in (0, 1, 500, 1023):
+        rotation = orientations.rotation(index)
+        assert np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-10)
+        assert np.isclose(np.linalg.det(rotation), 1.0, atol=1e-10)
+    axis = np.array([0.0, 0.0, 1.0])
+    images = np.array([orientations.rotation(i) @ axis for i in range(1024)])
+    assert np.linalg.norm(images.mean(axis=0)) < 0.02
+    covariance = np.cov(images.T)
+    assert np.allclose(np.diag(covariance), 1.0 / 3.0, atol=0.02)
+    assert np.allclose(covariance - np.diag(np.diag(covariance)), 0.0, atol=0.01)
+
+
+def test_conformer_generation_is_deterministic() -> None:
+    first = generate_conformers("CCCC", n_conformers=3, seed=7)
+    second = generate_conformers("CCCC", n_conformers=3, seed=7)
+    assert 1 <= len(first) <= 3
+    assert len(first) == len(second)
+    for left, right in zip(first, second):
+        assert left.get_chemical_formula() == "C4H10"
+        assert np.allclose(left.positions, right.positions, atol=1e-6)
+
+
+def test_conformer_pruning_and_congruence() -> None:
+    water = molecule("H2O")
+    rotated = water.copy()
+    rotated.rotate(37.0, "z")
+    rotated.positions += np.array([1.0, 2.0, 3.0])
+    assert near_congruent(water, rotated, tolerance=1e-6)
+    methane = molecule("CH4")
+    with pytest.raises(ValueError):
+        near_congruent(water, methane)
+
+    references = [water, rotated, molecule("H2O")]
+    kept = prune_by_energy(references, [0.0, 0.05, 0.2], window=0.1)
+    assert len(kept) == 2
+    assert kept[0] is water and kept[1] is rotated
+    with pytest.raises(ValueError):
+        prune_by_energy(references, [0.0], window=0.1)

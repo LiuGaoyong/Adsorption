@@ -21,6 +21,11 @@ Example:
 from __future__ import annotations
 
 from .admissibility import AdmissibleSet, admissible_directions, filter_grid
+from .conformers import (
+    generate_conformers,
+    near_congruent,
+    prune_by_energy,
+)
 from .constants import (
     DELTA_NBR,
     GOLDEN_RATIO,
@@ -42,7 +47,13 @@ from .grids import (
 from .mic import displacements_mic, distances_mic, is_periodic
 from .placement import Anchor, ResolvedAnchor, place, resolve_anchor
 from .rotation import apply_rotation, shortest_arc_rotation, unit_vector
-from .rotations import FixedRotation, RotationSet, ShortestArcSet
+from .rotations import (
+    DirectionRollSet,
+    FixedRotation,
+    RotationSet,
+    SO3Set,
+    ShortestArcSet,
+)
 from .shell import first_neighbor_shell, mean_mic, outward_normal
 from .site import SiteGeometry, build_site
 
@@ -57,11 +68,13 @@ __all__ = [
     "AdmissibleSet",
     "Anchor",
     "DirectionGrid",
+    "DirectionRollSet",
     "FibonacciGrid",
     "FixedRotation",
     "LatLonGrid",
     "ResolvedAnchor",
     "RotationSet",
+    "SO3Set",
     "SeededRandomGrid",
     "SiteGeometry",
     "admissible_directions",
@@ -73,11 +86,14 @@ __all__ = [
     "distance_array",
     "distances_mic",
     "filter_grid",
+    "generate_conformers",
     "first_neighbor_shell",
     "is_periodic",
     "mean_mic",
+    "near_congruent",
     "outward_normal",
     "place",
+    "prune_by_energy",
     "resolve_anchor",
     "ShortestArcSet",
     "shortest_arc_rotation",

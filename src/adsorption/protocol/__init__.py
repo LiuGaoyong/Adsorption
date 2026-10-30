@@ -15,6 +15,7 @@ from .plan import BudgetPlan, SiteVariant
 from .sidecar import SidecarRecord, SidecarWriter, read_sidecar
 from .spec import (
     AdsorbateSpec,
+    ConformerSpec,
     DistanceSpec,
     FilterSpec,
     GridSpec,
@@ -28,6 +29,7 @@ __all__ = [
     "BudgetPlan",
     "Campaign",
     "Candidate",
+    "ConformerSpec",
     "DistanceSpec",
     "Event",
     "FilterSpec",
