@@ -1,20 +1,48 @@
-import warnings
+"""Direct adsorption: Fibonacci-grid placement of a rigid adsorbate."""
+
 from typing import Literal, override
 
 import numpy as np
 from ase import Atom, Atoms
 from ase.calculators.calculator import Calculator
 from ase.data import covalent_radii as COV_R
-from ase.geometry import find_mic
-from graphatoms.geometry.sample import fibonacci_lattice
 from graphatoms.system import Cluster, Gas, System
 from numpy.typing import ArrayLike
-from scipy.spatial.transform import Rotation
 
 from ..common import AdsorptionABC
+from ..geometry import (
+    DELTA_NBR,
+    AdmissibleSet,
+    Anchor,
+    FibonacciGrid,
+    admissible_directions,
+    displacements_mic,
+    place,
+    resolve_anchor,
+    shortest_arc_rotation,
+)
 
 
 class DirectAdsorption(AdsorptionABC):
+    """Place an adsorbate with a spherical Fibonacci direction grid.
+
+    The admissible approach directions are computed once, from the site
+    geometry. For every call the construction picks one admissible direction
+    (``OA``), one molecular reference direction (``AB``) and one anchor
+    distance, rotates the rigid adsorbate with the shortest-arc rotation, and
+    translates it so that the anchor lands on ``O_s + d * u_OA``.
+
+    When no grid index is supplied the construction is deterministic and uses
+    index ``0``. Pass ``seed`` to draw the indices from a seeded generator
+    instead; the deterministic path never touches a random number generator.
+
+    Attributes:
+        nfibonacci: Number of points of the direction grid.
+        anchor: Anchor declaration (``"com"``, an atom index, or a point).
+        seed: Seed of the stochastic index mode, or ``None``.
+        admissible: The admissible approach directions of the site.
+    """
+
     def __init__(
         self,
         atoms: Atoms | System | Cluster,
@@ -26,31 +54,45 @@ class DirectAdsorption(AdsorptionABC):
         max_steps_for_first_stage: int = 100,
         max_steps_for_second_stage: int = 100,
         max_force: float = 0.05,
+        scale: float | None = None,
+        skin: float | None = None,
+        delta_nbr: float = DELTA_NBR,
+        anchor: Anchor = "com",
+        seed: int | None = None,
         debug: bool = False,
     ) -> None:
         """Initialize the direct adsorption calculation.
 
         Args:
-            atoms (Atoms | System | Cluster): The surface or
-                cluster onto which the adsorbate should be added.
-            core (npt.ArrayLike | list[int] | int, optional):
-                The central atoms (core) which will place at.
-                Defaults to the first atom, i.e. the 0-th atom.
-            nfibonacci (int, optional): The number of fibonacci
-                lattice points. Defaults to 1000.
-            neighbors (npt.ArrayLike | list[int] |None, optional):
-                The first hop neighbor of core atoms.
-                If None, the code will generated automated.
-            calculator (Calculator | None, optional): The calculator to use.
-                Defaults to None.
-            max_steps_for_first_stage (int, optional): The maximum number of
-                steps for the first stage optimization. Defaults to 100.
-            max_steps_for_second_stage (int, optional): The maximum number of
-                steps for the second stage optimization. Defaults to 100.
-            max_force (float, optional): The maximum force to use.
-                Defaults to 0.05 eV/\u212b.
+            atoms (Atoms | System | Cluster): The surface or cluster onto
+                which the adsorbate should be added.
+            core (ArrayLike, optional): The core atom indices.
+                Defaults to the first atom.
+            nfibonacci (int, optional): The number of points of the direction
+                grid. Defaults to 1000.
+            neighbors (ArrayLike | None, optional): The first-neighbour shell.
+                Detected automatically when None. Defaults to None.
+            calculator (Calculator | None, optional): The ASE calculator used
+                by the optional two-stage relaxation. Defaults to None.
+            max_steps_for_first_stage (int, optional): Step limit of the first
+                relaxation stage. Defaults to 100.
+            max_steps_for_second_stage (int, optional): Step limit of the
+                second relaxation stage. Defaults to 100.
+            max_force (float, optional): Force criterion in eV/Angstrom.
+                Defaults to 0.05.
+            scale (float | None, optional): The direction-sphere scale.
+                Defaults to the value tabulated for the core size.
+            skin (float | None, optional): The steric margin in Angstrom.
+                Defaults to the value tabulated for the core size.
+            delta_nbr (float, optional): The neighbour-detection tolerance.
+                Defaults to 0.3 Angstrom.
+            anchor (Anchor, optional): The anchor declaration: ``"com"`` (the
+                centre of mass), an atom index, or an explicit point.
+                Defaults to ``"com"``.
+            seed (int | None, optional): Seed of the stochastic index mode.
+                When None the placement is deterministic. Defaults to None.
             debug (bool, optional): Whether to print debug information.
-                Defaults to False
+                Defaults to False.
         """
         super().__init__(
             atoms=atoms,
@@ -59,17 +101,89 @@ class DirectAdsorption(AdsorptionABC):
             max_steps_for_first_stage=max_steps_for_first_stage,
             max_steps_for_second_stage=max_steps_for_second_stage,
             max_force=max_force,
+            scale=scale,
+            skin=skin,
+            delta_nbr=delta_nbr,
             debug=debug,
             core=core,
         )
         self.nfibonacci = int(nfibonacci)
-        self._grid_core = self.site.get_direction_grid(
-            core_numbers=self.atoms.numbers[self.core],
-            neighbor_numbers=self.atoms.numbers[self.neighbors],
-            nfibonacci=self.nfibonacci,
+        if self.nfibonacci < 1:
+            raise ValueError(
+                f"nfibonacci must be positive, got {self.nfibonacci}."
+            )
+        if isinstance(anchor, str) and anchor != "com":
+            raise ValueError(
+                "The only accepted string anchor is 'com', got "
+                f"{anchor!r}."
+            )
+        self.anchor = anchor
+        self.seed = None if seed is None else int(seed)
+        self._rng: np.random.Generator | None = (
+            None if self.seed is None else np.random.default_rng(self.seed)
         )
-        self._grid_ads = fibonacci_lattice(self.nfibonacci)
-        self._anchor_core = self.site.center
+        self._grid_ads = FibonacciGrid().points(self.nfibonacci)
+        self.admissible: AdmissibleSet = admissible_directions(
+            self.site_geometry,
+            self.nfibonacci,
+        )
+        self._anchor_core: np.ndarray = np.asarray(
+            self.site_geometry.center, dtype=float
+        )
+
+    def _draw_index(self, size: int) -> int:
+        """Return a deterministic or seeded grid index.
+
+        Args:
+            size: Number of available indices.
+
+        Returns:
+            int: Index ``0`` in the deterministic mode, otherwise a seeded
+            draw from ``[0, size)``.
+        """
+        if size < 1:
+            raise ValueError(f"The index space must be positive, got {size}.")
+        if self._rng is None:
+            return 0
+        return int(self._rng.integers(size))
+
+    @staticmethod
+    def _check_index(index: int, size: int, name: str) -> int:
+        value = int(index)
+        if value < 0 or value >= size:
+            raise ValueError(f"{name} must be in [0, {size}), got {index}.")
+        return value
+
+    def _default_distance(
+        self,
+        adsorbate: Atoms,
+        anchor: np.ndarray,
+    ) -> float:
+        """Return the hard-sphere heuristic distance used when none is given.
+
+        Args:
+            adsorbate: Reference adsorbate.
+            anchor: Anchor position in the reference frame.
+
+        Returns:
+            float: The heuristic anchor-centre distance in Angstrom.
+        """
+        relative = np.asarray(adsorbate.positions, dtype=float) - anchor
+        radius = float(np.linalg.norm(relative, axis=1).max())
+        contract = float(np.max(COV_R[np.asarray(adsorbate.numbers, int)]))
+        direction_sphere = self.site_geometry.radius
+        vectors = (
+            np.asarray(self.admissible.unit, dtype=float) * direction_sphere
+        )
+        if len(vectors) == 0:
+            return direction_sphere + 0.5 * contract
+        micro = displacements_mic(
+            vectors,
+            self.site_geometry.cell_array(),
+            self.site_geometry.pbc_array(),
+        )
+        core_distance = float(np.linalg.norm(micro, axis=1).mean())
+        return core_distance + contract + 0.5 * (radius - contract)
 
     @override
     def try_adsorption(  # noqa: D417
@@ -79,120 +193,89 @@ class DirectAdsorption(AdsorptionABC):
         idx_grid_core: int | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,
-        calc_quat: bool = False,
+        anchor: Anchor | None = None,
         **kwargs,
     ) -> Atoms:
-        gas: Atoms = adsorbate
-        # A. get the direction of `adsorbate`
-        grid_ads: np.ndarray = self._grid_ads
-        anchor_ads = np.mean(adsorbate.positions, axis=0)
-        assert grid_ads.ndim == 2 and grid_ads.shape[1] == 3
-        assert len(grid_ads) == self.nfibonacci
-        if idx_grid_ads is None:
-            idx_grid_ads = np.random.randint(len(grid_ads))
-        idx_grid_ads = int(idx_grid_ads)
-        # B. rotate adsorbate
-        adsorbate.rotate(
-            anchor_ads + [0, 0, 1],
-            grid_ads[idx_grid_ads],
-            rotate_cell=False,
-            center=anchor_ads,
-        )
+        """Place the adsorbate once and return the unrelaxed structure.
 
-        # C get the direction of core
-        anchor_core = self._anchor_core
-        grid_core: np.ndarray = self._grid_core
-        assert grid_core.ndim == 2 and grid_core.shape[1] == 3
-        if idx_grid_core is None:
-            idx_grid_core = np.random.randint(len(grid_core))
-        idx_grid_core = int(idx_grid_core)
-        direction_core = grid_core[idx_grid_core] - anchor_core
-        direction_core /= np.linalg.norm(direction_core)
-
-        # place gas into
-        if distance is None:
-            d_gas = gas.positions - gas.positions.mean(axis=0)
-            d_gas_max: float = np.max(np.linalg.norm(d_gas, axis=0))
-            d_gas_min: float = np.max(COV_R[gas.numbers])
-            v_core = grid_core - anchor_core
-            _, d_core = find_mic(v_core, self.atoms.cell)
-            distance = np.mean(d_core) + d_gas_min  # type: ignore
-            distance += 0.5 * (d_gas_max - d_gas_min)  # type: ignore
-        assert isinstance(distance, float)
-
-        adsorbate.set_positions(
-            adsorbate.positions
-            - anchor_ads  # 1. move adsorbate to the zero position
-            + anchor_core  # 2. move adsorbate to the core position
-            + direction_core * distance  # 3. move adsorbate
-        )
-
-        # save some information
-        self._adsorbate_pos = adsorbate.positions.copy()
-        self._direction_core = direction_core
-        self._anchor_core = anchor_core
-        self._anchor_ads = anchor_ads
-        self._distance = distance
-        if calc_quat:
-            self._quat_core, self._quat_ads = self.__calculate_rotation(gas)
-            # Note: the quaternions are saved in `scalar_first=True` format.
-            self._quat_core /= np.linalg.norm(self._quat_core)
-            self._quat_ads /= np.linalg.norm(self._quat_ads)
-
-            self._init_gas_pos = gas.positions.copy()
-        result = self.atoms.copy()
-        result.extend(gas)
-        return result
-
-    def __calculate_rotation(self, gas: Atoms) -> tuple[np.ndarray, np.ndarray]:
-        """Calculate two quaternions.
+        Args:
+            adsorbate (Atoms): The reference adsorbate.
+            idx_grid_core (int | None, optional): Index of the admissible
+                approach direction. Drawn from the deterministic/seeded mode
+                when None.
+            idx_grid_ads (int | None, optional): Index of the molecular
+                reference direction. Drawn from the deterministic/seeded mode
+                when None.
+            distance (float | None, optional): The anchor-centre distance.
+                When None a hard-sphere heuristic is used.
+            anchor (Anchor | None, optional): Per-call anchor override.
+                Defaults to the constructor value.
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: The quaternions.
-             The first one is for core direction rotation;
-             the other is for adsorbate rotation.
+            Atoms: The substrate with the placed adsorbate.
         """
-        # calculate two quaternions: one for core and one for adsorbate
-        #   1. the quaternion for adsorbate rotation
-        np.set_printoptions(precision=5)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning)
-            if len(gas) == 1:
-                quat_ads: np.ndarray = np.array([0, 0, 0, 1], dtype=float)
-            else:
-                rot_estimated, rssd = Rotation.align_vectors(
-                    self._adsorbate_pos - self._adsorbate_pos.mean(axis=0),
-                    gas.positions - gas.positions.mean(axis=0),
-                )
-                quat_ads: np.ndarray = rot_estimated.as_quat(scalar_first=True)
-                assert quat_ads.shape == (4,), (
-                    f"Rot estimated shape is not 4, but: {quat_ads.shape}"
-                )
-                assert np.allclose(np.linalg.norm(quat_ads), 1.0), (
-                    f"Rot estimated norm is not 1.0, "
-                    f"but: {np.linalg.norm(quat_ads)}"
-                )
-                assert rssd < 1e-4, f"RSSD is not < 1e-4, but: {rssd:.3e}"
-        # rot_estimated.apply(gas.positions - gas.positions.mean(axis=0))
-        #   2. the quaternion for core direction rotation
-        assert np.allclose(np.linalg.norm(self._direction_core), 1.0), (
-            f"Core direction is not normalized, but: "
-            f"{np.linalg.norm(self._direction_core)}"
+        gas = adsorbate
+        if len(gas) == 0:
+            raise ValueError("The adsorbate must have at least one atom.")
+        resolved = resolve_anchor(
+            gas, self.anchor if anchor is None else anchor
         )
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning)
-            rot_estimated_2, rssd = Rotation.align_vectors(
-                self._direction_core, [0, 0, 1]
+
+        n_admissible = self.admissible.n_oa
+        if n_admissible == 0:
+            raise ValueError(
+                "The site has no admissible approach direction; relax the "
+                "filter parameters (scale/skin) or choose another site."
             )
-        quat_core: np.ndarray = rot_estimated_2.as_quat(scalar_first=True)
-        assert quat_core.shape == (4,), (
-            f"Rot estimated shape is not 4, but: {quat_core.shape}"
+        index_core = (
+            self._draw_index(n_admissible)
+            if idx_grid_core is None
+            else self._check_index(
+                idx_grid_core, n_admissible, "idx_grid_core"
+            )
         )
-        assert np.allclose(np.linalg.norm(quat_core), 1.0), (
-            f"Rot estimated norm is not 1.0, but: {np.linalg.norm(quat_core)}"
+        index_ads = (
+            self._draw_index(len(self._grid_ads))
+            if idx_grid_ads is None
+            else self._check_index(
+                idx_grid_ads, len(self._grid_ads), "idx_grid_ads"
+            )
         )
-        assert rssd < 1e-4, f"RSSD is not < 1e-4, but: {rssd:.3e}"
-        return quat_core, quat_ads
+
+        direction_core = np.asarray(
+            self.admissible.unit[index_core], dtype=float
+        )
+        direction_ads = np.asarray(self._grid_ads[index_ads], dtype=float)
+        rotation = shortest_arc_rotation(
+            np.array([0.0, 0.0, 1.0]), direction_ads
+        )
+
+        if distance is None:
+            distance_value = self._default_distance(gas, resolved.position)
+        else:
+            distance_value = float(distance)
+            if not np.isfinite(distance_value) or distance_value <= 0.0:
+                raise ValueError(
+                    f"distance must be positive and finite, got {distance!r}."
+                )
+
+        target = self._anchor_core + distance_value * direction_core
+        placed = place(
+            gas,
+            anchor=resolved,
+            target=target,
+            rotation=rotation,
+        )
+
+        self._distance = distance_value
+        self._direction_core = direction_core
+        self._direction_ads = direction_ads
+        self._anchor_ref = resolved
+        self._adsorbate_pos = np.asarray(placed.positions, dtype=float).copy()
+
+        result = self.atoms.copy()
+        result.extend(placed)
+        return result
 
     @override
     def __call__(
@@ -202,43 +285,39 @@ class DirectAdsorption(AdsorptionABC):
         idx_grid_core: int | None = None,
         idx_grid_ads: int | None = None,
         distance: float | None = None,
+        anchor: Anchor | None = None,
         **kwargs,
     ) -> tuple[Atoms, Literal[-1, 0, 1, 2]]:
-        """Run the adsorption calculation.
+        """Run the direct adsorption calculation.
 
         Args:
-            adsorbate (Atoms | Gas | Atom | str): The adsorbate.
-                Must be one of the following three types:
-                    1. An atoms object (for a molecular adsorbate).
-                    2. An atom object.
-                    3. A string:
-                        the chemical symbol for a single atom.
-                        the molecule string by `ase.build`.
-                        the SMILES of the molecule.
-            idx_grid_core (int | None, optional): The index of the core.
-                Defaults to None. It means that the core is chosen randomly.
-            idx_grid_ads (int | None, optional): The index of the adsorbate.
-                Defaults to None. It means that the adsorbate is
-                chosen randomly.
-            distance (float | None, optional): The distance between
-                the adsorbate and the core. Defaults to None. It means that
-                the distance is chosen automatically.
-            **kwargs: The keyword arguments for the adsorption method.
+            adsorbate (Atoms | Gas | Atom | str): The adsorbate: an Atoms
+                object, an Atom object, a chemical symbol, an ASE molecule
+                name, or a SMILES string.
+            idx_grid_core (int | None, optional): Index of the admissible
+                approach direction. Deterministic/seeded when None.
+            idx_grid_ads (int | None, optional): Index of the molecular
+                reference direction. Deterministic/seeded when None.
+            distance (float | None, optional): The anchor-centre distance.
+                A hard-sphere heuristic is used when None.
+            anchor (Anchor | None, optional): Per-call anchor override.
+            **kwargs: Additional keyword arguments for `try_adsorption`.
 
         Returns:
             tuple[Atoms, Literal[-1, 0, 1, 2]]:
-                The optimized adsorption and the coveraged label.
-                -  -1, then the optimization is not coveraged for the two stages.
-                -  0, then the optimization is coveraged for the first stage.
-                -  1, then the optimization is coveraged for the second stage.
-                -  2, then the optimization is coveraged for the two stages.
-        """  # noqa: E501
+                The optimized adsorption and the convergence label.
+                -   -1: neither stage converged (or no calculator).
+                -    0: both stages converged.
+                -    1: only the second stage converged.
+                -    2: only the first stage converged.
+        """
         return self.optimize_adsorption(
             atoms=self.try_adsorption(
                 adsorbate=self.get_adsorbate(adsorbate=adsorbate),
                 idx_grid_core=idx_grid_core,
                 idx_grid_ads=idx_grid_ads,
                 distance=distance,
+                anchor=anchor,
                 **kwargs,
             ),
             natoms=len(self.atoms),
