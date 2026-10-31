@@ -5,44 +5,19 @@
 [![Pypi version](https://img.shields.io/pypi/v/adsorption)](https://pypi.org/project/adsorption/)
 [![PyPI Downloads](https://static.pepy.tech/badge/adsorption)](https://pepy.tech/projects/adsorption)
 
-A Python package for simulating molecular adsorption on clusters or surfaces, built on top of ASE (Atomic Simulation Environment).
+Geometric pre-screening of molecular adsorption configurations on clusters and
+periodic surfaces, built on [ASE](https://ase-lib.org).
 
-## Overview
+The package places an adsorbate on a site defined by a core set of substrate
+atoms. The placement is described by four quantities — the site centre `O`, the
+approach direction `OA`, the molecular orientation `AB`, and the anchor
+distance `d` — and the geometric stage never evaluates an energy. A downstream
+ASE calculator (EMT, a machine-learned potential, or DFT) performs the optional
+relaxation.
 
-The `adsorption` package provides tools for placing and optimizing adsorbates (molecules or atoms) on surface or cluster substrates. It automates the process of:
-
-- Generating adsorption sites on surfaces/clusters
-- Placing adsorbates at optimal positions and orientations
-- Performing geometry optimization using two-stage relaxation
-- Running transition state searches (dimer and NEB methods)
-- Running high-throughput adsorption studies with Ray Tune
-
-## Features
-
-- **Multiple Adsorption Strategies**:
-  - `RawAdsorption`: Places adsorbates based on geometric site analysis (top, bridge, hollow sites)
-  - `DirectAdsorption`: Uses Fibonacci lattice sampling for comprehensive orientation exploration
-  - `DirectAdsorptionAD`: Extends `DirectAdsorption` with NequIP-based torch autodiff optimization for GPU-accelerated relaxation
-
-- **Flexible Adsorbate Input**:
-  - ASE `Atoms` objects
-  - Chemical symbols (e.g., `"O"`, `"C"`)
-  - Molecule names recognized by ASE (e.g., `"H2O"`, `"CO"`)
-  - SMILES strings (e.g., `"C=C-C-C-C-C"`)
-
-- **Two-Stage Optimization**:
-  1. First stage: Fixed substrate + bond length constraints on adsorbate
-  2. Second stage: Full relaxation of the entire system
-
-- **Transition State Search**:
-  - Dimer method (`call_dimer`) for saddle point searches
-  - NEB / DyNEB method (`call_neb`) for minimum energy path searches
-  - Built-in trajectory recording with per-step energy snapshots
-
-- **High-Throughput Screening**:
-  - Integration with Ray Tune for parallel optimization
-  - Automatic grid generation for systematic adsorption site exploration
-  - Unified `Helper` interface for iterating over both raw and direct adsorption paths
+The method and its pre-registered validation protocol are described in
+`paper-1/` (the live manuscript) and `paper/` (an earlier archived version of
+the manuscript).
 
 ## Installation
 
@@ -50,337 +25,175 @@ The `adsorption` package provides tools for placing and optimizing adsorbates (m
 pip install adsorption
 ```
 
-Or using pixi:
+Or with pixi:
 
 ```bash
 pixi install
 ```
 
-## Quick Start
+Requires Python 3.12–3.13, ASE, NumPy, SciPy, and
+[graphatoms](https://github.com/LiuGaoyong/graphatoms).
 
-### Basic Usage
-
-```python
-from ase.cluster import Octahedron
-from adsorption import RawAdsorption, DirectAdsorption
-
-# Create a copper cluster
-cluster = Octahedron("Cu", 10)
-
-# Method 1: RawAdsorption (geometric site-based)
-ads = RawAdsorption(calculator=None)  # Replace with actual calculator
-result, stage = ads(
-    atoms=cluster,
-    adsorbate="CO",
-    core=[303, 334, 464],  # FCC hollow site
-)
-
-# Method 2: DirectAdsorption (Fibonacci lattice sampling)
-ads = DirectAdsorption(calculator=None, nfibonacci=100)
-result, stage = ads(
-    atoms=cluster,
-    adsorbate="C6H6",  # Benzene
-    core=[454],  # Top site
-)
-```
-
-### NequIP-Based Autodiff Optimization
+## Quick start
 
 ```python
-from ase.cluster import Octahedron
-from adsorption.interfaces import DirectAdsorptionAD
-from nequip.ase import NequIPCalculator
-
-cluster = Octahedron("Cu", 10)
-calc = NequIPCalculator.from_compiled_model("path/to/model.pth")
-
-ads = DirectAdsorptionAD(calculator=calc, nfibonacci=100)
-result, stage = ads(atoms=cluster, adsorbate="CO", core=[454])
-```
-
-### Unified Helper Interface
-
-```python
-from ase.cluster import Octahedron
-from adsorption.interfaces import Helper
+from ase.build import fcc111
 from ase.calculators.emt import EMT
+from adsorption import DirectAdsorption, RawAdsorption
 
-cluster = Octahedron("Cu", 10)
+slab = fcc111("Cu", size=(4, 4, 3), vacuum=12, orthogonal=True)
+site = [0, 1, 2]  # core atoms; top = 1 atom, bridge = 2, hollow = 3
 
-helper = Helper(
-    calculator=EMT(),
-    atoms=cluster,
-    adsorbate="CO",
-    core=[454],
-    use_direct=True,
-    use_raw=True,
+# Fibonacci-grid placement: scan the approach directions, then relax.
+direct = DirectAdsorption(
+    atoms=slab,
+    core=site,
+    calculator=EMT(),   # None keeps the unrelaxed structure
+    nfibonacci=200,
+    distance=2.0,       # optional; a hard-sphere heuristic is used by default
 )
+atoms, stage = direct(adsorbate="CO")
+# stage: -1 not converged, 0/1/2 the number of converged stages
 
-# Run raw adsorption path
-result = helper(irun=0, outdir="./results")
-
-# Run direct adsorption path (iterates over orientation grids)
-for i in range(1, helper.nrun):
-    result = helper(irun=i, outdir="./results")
+# Conventional placement: anchor on an atom (or the centre of mass).
+raw = RawAdsorption(atoms=slab, core=site, calculator=None)
+atoms, stage = raw(adsorbate="CO", adsorbate_index=0)
 ```
 
-### Transition State Search
+`DirectAdsorption` accepts `nfibonacci`, `distance`, `anchor` (`"com"`, an atom
+index, or an explicit point), `scale`, `skin`, `delta_nbr`, and an optional
+`seed`. Without a seed the placement is deterministic: the grid index defaults
+to `0`; pass a seed only when stochastic index selection is wanted.
+
+## Geometry primitives
+
+The geometric layer is available directly, without building an adsorption
+object:
 
 ```python
-from ase.build import fcc100
-from adsorption.common.optimize import call_dimer, call_neb
-from ase.calculators.emt import EMT
-
-# Create a slab
-slab = fcc100("Cu", size=(3, 3, 3), vacuum=10)
-
-# Dimer method for saddle point search
-trajectory, converged = call_dimer(
-    slab, EMT(), displacement=..., max_steps=1000, fmax=0.02
+import numpy as np
+from adsorption.geometry import (
+    FibonacciGrid,
+    admissible_directions,
+    build_site,
+    distance_array,
+    resolve_anchor,
+    shortest_arc_rotation,
 )
 
-# NEB method for minimum energy path
-initial = slab.copy()
-final = slab.copy()
-# ... set up initial and final states ...
-trajectory, converged = call_neb(
-    initial, EMT(), final, nimages=5, climb=True
-)
+site = build_site(slab, core=[0, 1, 2], scale=1.5, skin=0.5)
+grid = admissible_directions(site, n=200, grid=FibonacciGrid())
+print(site.center, site.radius, grid.n_oa, grid.fraction)
+
+# d_min, d_max, step -> M anchor distances (paper Eq. 11)
+d = distance_array(0.8, 3.0, 0.2)  # length 12
+
+# Shortest-arc rotation maps a body axis onto a grid direction.
+rotation = shortest_arc_rotation([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
+anchor = resolve_anchor(atoms, anchor="com")
 ```
 
-### Command Line Interface
+An `AdmissibleSet` keeps both the surviving unit vectors and their original
+grid indices, so a candidate can be regenerated from its index alone.
 
-The package provides a CLI tool for running high-throughput adsorption studies:
+## Relaxation
 
-```bash
-adsorption-tune -cn config.yaml
-```
+`AdsorptionOptimizeABC.optimize_adsorption` performs the two-stage protocol: the
+substrate is frozen and the intra-adsorbate distances are constrained in stage
+one, and the whole system is relaxed in stage two. Supply an ASE calculator to
+enable it; without a calculator the unrelaxed structure is returned with stage
+label `-1`.
 
-Example configuration (`config.yaml`):
+`adsorption.common.optimize` also provides `optimize`, `call_dimer`, and
+`call_neb` for plain optimization, dimer saddle-point search, and NEB/DyNEB
+minimum-energy paths.
 
-```yaml
-output: ./outputs
-calculator:
-  _target_: ase.calculators.emt.EMT
-adsorption:
-  nfibonacci: 100
-  max_steps_for_first_stage: 100
-  max_steps_for_second_stage: 100
-  max_force: 0.05
-system:
-  atoms:
-    _target_: ase.build.fcc111
-    symbol: Cu
-    size: [10, 10, 5]
-    vacuum: 15
-  core: [454]
-gas: C6H6
-```
-
-## Architecture
-
-### Core Components
+## Package layout
 
 ```
 src/adsorption/
-├── common/
-│   ├── __init__.py       # Exports AdsorptionABC, Point, Vector, Site
-│   ├── _interface.py     # Abstract base class (AdsorptionABC)
-│   ├── _dataclass.py     # Data structures (Point, Vector, Site)
-│   └── optimize.py       # optimize(), call_dimer(), call_neb()
-├── interfaces/
-│   ├── __init__.py       # Exports RawAdsorption, DirectAdsorption, DirectAdsorptionAD
-│   ├── _raw.py           # RawAdsorption implementation
-│   ├── _direct.py        # DirectAdsorption implementation
-│   ├── _directAD.py      # DirectAdsorptionAD (NequIP + torch autodiff)
-│   └── helper.py         # Helper class + plot() visualization
-└── runner/
-    ├── _cli.py           # Hydra-based CLI (adsorption-tune entry point)
-    ├── _cli.yaml         # Default Hydra configuration
-    └── _tune.py          # Ray Tune integration
+├── geometry/      # site, grids, admissibility, rotation, distance, placement
+├── common/        # AdsorptionABC, Site (legacy wrapper), optimize()
+├── interfaces/    # RawAdsorption, DirectAdsorption
+├── protocol/      # budget, kappa index, streaming campaigns, sidecar
+├── screen/        # Lennard-Jones steric tier and cascade
+├── evaluation/    # single-point and two-stage relaxation
+├── metrics/       # coverage, ranking, cascade, and site metrics
+├── pairwise/      # Lennard-Jones calculator (arrayff backend)
+└── runner/        # adsorption-campaign CLI
 ```
 
-### Key Classes
+The `geometry` subpackage is calculator-free: nothing in it imports ASE
+calculators, so candidate generation is engine-independent.
 
-#### `AdsorptionABC` (Abstract Base Class)
+## Deprecations
 
-The abstract base class that defines the common interface and optimization workflow:
+The Torch/autodiff path (`DirectAdsorptionAD`, `Helper`, the Ray Tune runner,
+and the `adsorption-tune` command) has been removed. `adsorption.common.Site`
+and `Site.get_direction_grid` remain as wrappers around the `geometry` layer and
+will be removed after the protocol layer lands.
 
-- **Two-stage optimization**:
-  - Stage 1: Fixes substrate atoms, applies bond length constraints to adsorbate
-  - Stage 2: Full relaxation without constraints
+## Fixed-budget campaigns
 
-- **Adsorbate parsing**: Converts various input types (string, Atom, Atoms, Gas) to ASE Atoms
+The protocol layer turns the geometry into a deterministic candidate stream
+with a bijective index `kappa`, a sidecar record per candidate, an optional
+Lennard-Jones screen, and an optional evaluation tier. A campaign is described
+by a YAML file:
 
-#### `RawAdsorption`
-
-Places adsorbates based on geometric analysis of adsorption sites:
-
-- Automatically identifies neighbor atoms around the core site
-- Calculates optimal adsorption direction based on site geometry
-- Supports top, bridge, and hollow sites
-
-**Parameters**:
-- `adsorbate_index`: Index of anchoring atom in adsorbate (or `"com"` for center of mass)
-- `neighbors`: First-neighbor shell indices (auto-detected if not provided)
-- `core`: Core atom indices defining the adsorption site
-
-#### `DirectAdsorption`
-
-Uses Fibonacci lattice sampling for comprehensive orientation exploration:
-
-- Generates uniform sampling points on a sphere
-- Supports custom grid definitions for both adsorbate and substrate
-- Ideal for high-throughput screening
-
-**Parameters**:
-- `nfibonacci`: Number of Fibonacci lattice points (default: 1000)
-- `grid_core`: Custom grid for substrate orientations
-- `grid_ads`: Custom grid for adsorbate orientations
-- `distance`: Adsorbate-substrate distance
-
-#### `DirectAdsorptionAD`
-
-Extends `DirectAdsorption` with NequIP-based torch autodiff optimization:
-
-- Requires a `NequIPCalculator` instance
-- Uses `torch.optim.LBFGS` for GPU-accelerated relaxation
-- Optimizes distance, quaternion rotations via autodiff gradients
-- Early stopping with configurable patience and tolerance
-
-#### `Helper`
-
-Unified interface that wraps both `RawAdsorption` and `DirectAdsorption`:
-
-- Initializes grids and configurations for both adsorption paths
-- `irun=0`: Runs the raw adsorption path
-- `irun>=1`: Runs the direct adsorption path (iterates over orientation x distance grids)
-- Returns structured results with energy, convergence stage, and structure
-
-### Data Structures
-
-All defined in `common/_dataclass.py` as Pydantic models:
-
-- **`Point`**: 3D point with arithmetic operations
-- **`Vector`**: 3D vector with `length` and `normalize` properties
-- **`Site`**: Adsorption site with `neighbor`, `core`, computed `center` and `direction`
-
-### Optimization Utilities
-
-`common/optimize.py` provides:
-
-- **`optimize(atoms, calc, method, max_steps, fmax)`**: General ASE structure optimization with trajectory recording. Returns `(trajectory, converged)`.
-- **`call_dimer(atoms, calc, displacement, mask, max_steps, fmax)`**: Dimer method for transition state search. Returns `(trajectory, converged)`.
-- **`call_neb(atoms, calc, final_atoms, nimages, climb, ...)`**: DyNEB method for minimum energy path search. Returns `(trajectory, converged)`.
-
-## Examples
-
-### Example 1: Benzene on Cu(111) Surface
-
-```python
-from ase.build import fcc111
-from adsorption import DirectAdsorption
-from ase.calculators.emt import EMT
-
-# Create Cu(111) surface
-surface = fcc111("Cu", size=(10, 10, 5), vacuum=15, orthogonal=True)
-
-# Initialize adsorption calculator
-ads = DirectAdsorption(
-    calculator=EMT(),
-    nfibonacci=100,
-    max_steps_for_first_stage=100,
-    max_steps_for_second_stage=100,
-)
-
-# Place benzene on surface
-result, stage = ads(
-    atoms=surface,
-    adsorbate="C6H6",
-    core=[454],  # Surface site index
-)
+```yaml
+name: co-on-cu111
+output: runs/co-on-cu111
+substrate:
+  target: ase.build.fcc111
+  kwargs: {symbol: Cu, size: [4, 4, 3], vacuum: 12, orthogonal: true}
+adsorbate:
+  reference: {target: ase.build.molecule, kwargs: {name: CO}}
+sites:
+  - {core: [0]}
+protocol:
+  n: 200
+  orientation: {kind: shortest_arc, n_ab: 200}
+  distances: {d_min: 1.2, d_max: 3.0, step: 0.2}
+screen:
+  kim: true
+  r_min: 1.0
+  e_cut: 50.0
+evaluation:
+  mode: single_point
+  calculator: {target: ase.calculators.emt.EMT}
 ```
 
-### Example 2: CO on Copper Cluster
-
-```python
-from ase.cluster import Octahedron
-from adsorption import RawAdsorption
-
-# Create octahedral Cu cluster
-cluster = Octahedron("Cu", 10)
-
-# Place CO on FCC hollow site
-ads = RawAdsorption(calculator=None)
-result, stage = ads(
-    atoms=cluster,
-    adsorbate="CO",
-    core=[303, 334, 464],  # FCC hollow site
-    adsorbate_index=0,  # Anchor on carbon atom
-)
+```bash
+adsorption-campaign enumerate campaign.yaml   # budget, no files written
+adsorption-campaign run campaign.yaml --workers 4 --shard 0/4
+adsorption-campaign run campaign.yaml --resume
 ```
 
-## High-Throughput Screening
+A run writes `structures/<kappa>.xyz`, `sidecar.jsonl` (one JSON record per
+candidate: index, radices, screen verdict, energy, converged stages, parameter
+hash), and `manifest.json`. Orientation sets are available on `S²`
+(`shortest_arc`), `S² × S¹` (`direction_roll`, with `n_roll`), and `SO(3)`
+(`so3`); conformers are enumerated per `(site, conformer)` variant.
 
-The `tune_adsorption` function enables parallel exploration of multiple adsorption configurations:
+## Roadmap
 
-```python
-from pathlib import Path
-from adsorption.runner._tune import tune_adsorption
-from ase.build import fcc111
-
-surface = fcc111("Cu", size=(10, 10, 5), vacuum=15)
-
-results = tune_adsorption(
-    cfg=config,  # DictConfig with calculator and adsorption settings
-    atoms=surface,
-    adsorbate="C6H6",
-    core=[454],
-    nsamples=100,  # Number of random samples
-    output=Path("./results"),
-)
-```
-
-Results are saved as:
-- `.xyz` files with energy and optimization stage in filename
-- `.png` visualization files with multiple viewing angles
-
-## Dependencies
-
-- **ASE**: Atomic Simulation Environment for atom manipulation
-- **graphatoms**: Graph-based atom system utilities
-- **Ray[default, tune]**: Distributed hyperparameter optimization
-- **Hydra-core**: Configuration management
-- **typing-extensions**: Type hints support
-- **NequIP** (optional): Neural network interatomic potential for `DirectAdsorptionAD`
+The reusable evaluation metrics live in `adsorption.metrics`; the equal-budget
+baselines B1-B7 and the driver notes are in `bench/`. Graph-based site
+enumeration and the six-class labels are provided by the companion `graphatoms`
+library through the adapters in `adsorption.providers`; this package does not
+reimplement them. The manuscript in `paper-1/` is updated with the code.
 
 ## Development
 
-### Running Tests
-
 ```bash
-pixi run test
-# or
-pytest -s -vv
+pixi run test        # pytest -s -vv
+pytest src/tests     # or with an existing virtual environment
 ```
 
-### Code Style
+The test suite includes the geometric primitives (`src/tests/test_geometry.py`),
+the adsorption interfaces, and the quaternion module.
 
-The project uses:
-- **Ruff** for linting and formatting
-- **Google-style docstrings**
-- Line length: 80 characters
+## Citation and license
 
-## License
-
-GPL-3.0-or-later
-
-## Author
-
-LiuGaoyong (liugaoyong_88@163.com)
-
-## Links
-
-- [Homepage](https://github.com/LiuGaoyong/Adsorption)
-- [Repository](https://github.com/LiuGaoyong/Adsorption)
-- [Issues](https://github.com/LiuGaoyong/Adsorption/issues/)
+Code: <https://github.com/LiuGaoyong/Adsorption>, GPL-3.0-or-later. See
+`paper-1/` for the method and the pre-registered evaluation protocol.

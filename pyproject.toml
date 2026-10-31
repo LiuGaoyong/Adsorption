@@ -26,13 +26,13 @@ license = "GPL-3.0-or-later"
 dependencies = [
     "ase",
     "arrayff",
-    "autograd",
     "joblib",
     "numpy",
     "scipy",
     "scikit-learn",
     "typing-extensions",
     "graphatoms>=3.0",
+    "pyyaml>=6",
 ]
 [dependency-groups]
 dev = [
@@ -43,7 +43,7 @@ dev = [
 ]
 
 [project.scripts]
-adsorption-tune = "adsorption.runner._cli:main"
+adsorption-campaign = "adsorption.runner.cli:main"
 
 # uv config
 [tool.uv]
@@ -90,19 +90,18 @@ dev = { features = ["dev"], solve-group = "default" }
 
 [tool.pixi.tasks]
 test = "pytest -s -vv"
-test-tune = "adsorption-tune"
 
 [tool.pixi.dependencies]
 python = ">=3.12, <3.14"
 ase = ">=3.28.0,<4"
 arrayff = ">=0.0"
-autograd = ">=0.0"
 joblib = ">=0.0"
 numpy = ">=0.0"
 scipy = ">=0.0"
 scikit-learn = ">=0.0"
 typing-extensions = ">=0.0"
 graphatoms = ">=3.0"
+pyyaml = ">=6"
 ruff = ">=0.11"
 pytest = ">=8.3"
 pytest-xdist = ">=3.8.0"

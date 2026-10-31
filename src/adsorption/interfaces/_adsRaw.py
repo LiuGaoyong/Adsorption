@@ -54,8 +54,8 @@ class RawAdsorption(AdsorptionABC):
         assert isinstance(adsorbate_index, int) or adsorbate_index == "com"
 
         # B. get `site`
-        at_anchor: np.ndarray = np.asarray(self.site.center)
-        direction: np.ndarray = np.asarray(self.site.direction)
+        at_anchor: np.ndarray = np.asarray(self.site_geometry.center)
+        direction: np.ndarray = np.asarray(self.site_geometry.outward_normal)
 
         # C. get `distance_of_two_anchor`
         if isinstance(adsorbate_index, int):
@@ -130,8 +130,8 @@ class RawAdsorption(AdsorptionABC):
         Returns:
             tuple[Atoms, Literal[-1, 0, 1, 2]]:
                 The optimized adsorption and the coveraged label.
-                -  -1, then the optimization is not coveraged for the two stages.
-                -  0, then the optimization is coveraged for the first stage.
+                -  -1: neither stage converged.
+                -  0: both stages converged.
                 -  1, then the optimization is coveraged for the second stage.
                 -  2, then the optimization is coveraged for the two stages.
         """

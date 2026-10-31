@@ -15,6 +15,7 @@ from graphatoms.utils.rdutils import rdmol2ase, smiles2rdmol
 from numpy.typing import ArrayLike
 
 from ..common._site import Site, _site_helper
+from ..geometry import DELTA_NBR, SiteGeometry, build_site
 from .optimize import optimize
 
 
@@ -25,8 +26,28 @@ class AdsorptionTryABC(ABC):
         *,
         core: ArrayLike = 0,
         neighbors: ArrayLike | None = None,
+        scale: float | None = None,
+        skin: float | None = None,
+        delta_nbr: float = DELTA_NBR,
         debug: bool = False,
     ) -> None:
+        """Build the site geometry.
+
+        Args:
+            atoms (Atoms | System | Cluster): The substrate.
+            core (ArrayLike, optional): The core atom indices.
+                Defaults to the first atom.
+            neighbors (ArrayLike | None, optional): The first-neighbour
+                shell. Detected automatically when None. Defaults to None.
+            scale (float | None, optional): The direction-sphere scale.
+                Defaults to the value tabulated for the core size.
+            skin (float | None, optional): The steric margin in Angstrom.
+                Defaults to the value tabulated for the core size.
+            delta_nbr (float, optional): The neighbour-detection tolerance.
+                Defaults to 0.3 Angstrom.
+            debug (bool, optional): Whether to print debug information.
+                Defaults to False.
+        """
         a = _site_helper(atoms=atoms, core=core, neighbors=neighbors)
         self.atoms, self.core, self.neighbors, self._origin, self.site = a
         assert self._origin is None or isinstance(
@@ -43,6 +64,15 @@ class AdsorptionTryABC(ABC):
         )
         assert isinstance(self.neighbors, np.ndarray), (
             f"Invalid neighbors type({type(self.neighbors)})."
+        )
+        self.site_geometry: SiteGeometry = build_site(
+            self.atoms,
+            self.core,
+            neighbors=self.neighbors,
+            origin=self._origin,
+            scale=scale,
+            skin=skin,
+            delta_nbr=delta_nbr,
         )
         self.debug = bool(debug)
 
@@ -186,6 +216,9 @@ class AdsorptionABC(AdsorptionTryABC, AdsorptionOptimizeABC):
         max_steps_for_first_stage: int = 100,
         max_steps_for_second_stage: int = 100,
         max_force: float = 0.05,
+        scale: float | None = None,
+        skin: float | None = None,
+        delta_nbr: float = DELTA_NBR,
         debug: bool = False,
     ) -> None:
         """Initialize the adsorption calculation.
@@ -207,6 +240,12 @@ class AdsorptionABC(AdsorptionTryABC, AdsorptionOptimizeABC):
                 steps for the second stage optimization. Defaults to 100.
             max_force (float, optional): The maximum force to use.
                 Defaults to 0.05 eV/\u212b.
+            scale (float | None, optional): The direction-sphere scale.
+                Defaults to the value tabulated for the core size.
+            skin (float | None, optional): The steric margin in Angstrom.
+                Defaults to the value tabulated for the core size.
+            delta_nbr (float, optional): The neighbour-detection tolerance.
+                Defaults to 0.3 Angstrom.
             debug (bool, optional): Whether to print debug information.
                 Defaults to False
         """
@@ -215,6 +254,9 @@ class AdsorptionABC(AdsorptionTryABC, AdsorptionOptimizeABC):
             atoms=atoms,
             core=core,
             neighbors=neighbors,
+            scale=scale,
+            skin=skin,
+            delta_nbr=delta_nbr,
             debug=debug,
         )
         AdsorptionOptimizeABC.__init__(

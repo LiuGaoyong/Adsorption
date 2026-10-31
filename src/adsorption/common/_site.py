@@ -1,6 +1,12 @@
-"""The core data classes by pydantic."""
+"""Legacy position-based site wrapper.
 
-from functools import cached_property, reduce
+The geometric construction lives in :mod:`adsorption.geometry`. This module
+keeps the historical ``Site`` model and the ``_site_helper`` function working
+for existing user code. New code should use ``build_site`` /
+``admissible_directions`` from :mod:`adsorption.geometry`.
+"""
+
+from functools import cached_property
 from typing import Annotated, Self
 
 import numpy as np
@@ -9,13 +15,20 @@ from ase import Atoms
 from ase.data import covalent_radii as COV_R
 from ase.geometry import complete_cell, find_mic, wrap_positions
 from graphatoms.dataclasses import NDArray, numpy_validator
-from graphatoms.geometry.sample import fibonacci_lattice
 from graphatoms.system import Cluster, System
 from pydantic import BaseModel, ConfigDict
 
+from ..geometry import (
+    MAX_CORE_SIZE,
+    default_scale,
+    default_skin,
+    filter_grid,
+    first_neighbor_shell,
+)
+
 
 class Site(BaseModel):
-    """The site for adsorption."""
+    """The site for adsorption (legacy position-based wrapper)."""
 
     model_config = ConfigDict(frozen=True)
     core: Annotated[NDArray, numpy_validator(float, (-1, 3))]
@@ -49,7 +62,7 @@ class Site(BaseModel):
 
     @cached_property
     def center(self) -> np.ndarray:
-        """The center for adsoption."""
+        """The center for adsorption."""
         if self.cell is not None and np.abs(np.linalg.det(self.cell)) > 1e-5:
             pbc = np.any(self.cell, axis=1)
             center0 = np.array([0.5, 0.5, 0.5])
@@ -63,7 +76,7 @@ class Site(BaseModel):
 
     @cached_property
     def direction(self) -> np.ndarray:
-        """The normalized direction vector for adsorption."""
+        """The normalized direction vector for adsorption (legacy)."""
         cell = self.cell if self.cell is not None else np.zeros([3, 3])
         n2c, n2c_norm = find_mic(self.center - self.neighbor, cell)
         n2c_eye = n2c / n2c_norm[:, None]  # the unit vector of n2c
@@ -80,7 +93,20 @@ class Site(BaseModel):
         neighbor_numbers: np.ndarray | list[int],
         nfibonacci: int = 1000,
     ) -> np.ndarray:
-        """The direction grid for adsorption."""
+        """Return the admissible probe points of the direction sphere.
+
+        This wrapper is kept for backward compatibility. New code should use
+        ``adsorption.geometry.admissible_directions``.
+
+        Args:
+            core_numbers: Atomic numbers of the core atoms.
+            neighbor_numbers: Atomic numbers of the neighbour shell.
+            nfibonacci: Number of Fibonacci lattice points. Defaults to 1000.
+
+        Returns:
+            np.ndarray: Probe points that pass the steric filter, shape
+                ``(N_OA, 3)``.
+        """
         core_numbers = np.asarray(core_numbers, dtype=int)
         assert core_numbers.shape[0] == self.core.shape[0], (
             f"Invalid core_numbers: {core_numbers}."  #
@@ -93,50 +119,34 @@ class Site(BaseModel):
             f"The number of neighbor_numbers={neighbor_numbers.shape[0]}. "
             f"The number of neighbor atoms={self.neighbor.shape[0]}. "
         )
-
-        # The following parameters are for the direction grid.
-        # Please do not change them unless you know what you are doing.
-        skin = 0.5
-        scale = 1.5
-        neighbors_exclude_core = False
-        if len(self.core) == 1:
-            neighbors_exclude_core = True
-            skin, scale = 1.0, 1.2
-        # elif len(core) == 2:
-        #     skin, scale = 1.0, 1.6
-
-        cov_core = COV_R[core_numbers].max()
-        if neighbors_exclude_core:
-            pos_nbrs = self.neighbor.copy()
-            num_nbrs = neighbor_numbers.copy()
+        core_size = len(self.core)
+        skin = default_skin(core_size)
+        scale = default_scale(core_size)
+        if core_size == 1:
+            filter_positions = np.asarray(self.neighbor, dtype=float)
+            filter_numbers = neighbor_numbers
         else:
-            pos_nbrs = np.vstack([self.core, self.neighbor])
-            num_nbrs = np.append(core_numbers, neighbor_numbers)
-        cov_nbrs = COV_R[num_nbrs]
-
-        grid_unit = fibonacci_lattice(nfibonacci)
-        grid = grid_unit * cov_core * float(scale) + self.center
-        v = pos_nbrs[:, np.newaxis, :] - grid[np.newaxis, :, :]
-        _, vlen = find_mic(v.reshape(-1, 3), self.cell, True)
-        d = vlen.reshape(v.shape[:2])
-        matrix_cov_r = np.column_stack([cov_nbrs] * len(grid))
-        cond = np.all(matrix_cov_r + float(skin) < d, axis=0)
-        return grid[cond]
+            filter_positions = np.vstack(
+                (np.asarray(self.core, dtype=float), self.neighbor)
+            )
+            filter_numbers = np.concatenate((core_numbers, neighbor_numbers))
+        radius = float(np.max(COV_R[core_numbers])) * float(scale)
+        admissible = filter_grid(
+            center=np.asarray(self.center, dtype=float),
+            radius=radius,
+            filter_positions=filter_positions,
+            filter_radii=np.asarray(COV_R[filter_numbers], dtype=float),
+            cell=None if self.cell is None else np.asarray(self.cell),
+            pbc=None,
+            n=nfibonacci,
+            skin=skin,
+        )
+        return admissible.unit * radius + np.asarray(self.center, dtype=float)
 
     @staticmethod
     def get_1order_nbr(atoms: Atoms, core: npt.ArrayLike) -> np.ndarray:
         """Get the 1-order neighbors of the core atoms."""
-        return _get_1order_nbr(atoms, core)
-
-
-def _get_1order_nbr(atoms: Atoms, core: npt.ArrayLike) -> np.ndarray:
-    """Get the 1-order neighbors of the core atoms."""
-    core, all = np.unique(core), np.arange(len(atoms))
-    i = np.repeat(core, len(all))
-    j = np.tile(all, len(core))
-    d = atoms.get_distances(i, j, mic=True)
-    d_ij = COV_R[atoms.numbers[i]] + COV_R[atoms.numbers[j]] + 0.3
-    return j[d < d_ij]
+        return first_neighbor_shell(atoms, core)
 
 
 def _site_helper(
@@ -156,29 +166,29 @@ def _site_helper(
         _origin: System | Cluster | None = None
     assert isinstance(_origin, (System, Cluster)) or _origin is None
     assert isinstance(atoms, Atoms), f"Invalid atoms type({type(atoms)})."
-    # B. Convert the core atoms to a list of integers (np.ndarray)
-    core = np.asarray([core] if isinstance(core, int) else core, int)
-    if len(core) > 6:
+    core_array = np.asarray(
+        [core] if isinstance(core, int) else core, dtype=int
+    )
+    if len(core_array) > MAX_CORE_SIZE:
         raise ValueError(
             "The core size must be less than or equal"
-            f" to 6. The value of core: {core}."
+            f" to {MAX_CORE_SIZE}. The value of core: {core_array}."
         )
     if neighbors is None:
-        if _origin is not None:
-            assert isinstance(_origin, (System, Cluster))
-            lst = [_origin.get_neighbors(i) for i in core]
-            neighbors = reduce(np.append, lst)
-        else:
-            neighbors = _get_1order_nbr(atoms, core)
+        neighbor_array = first_neighbor_shell(
+            atoms, core_array, origin=_origin
+        )
     else:
-        neighbors = np.asarray(neighbors, int).ravel()
-    neighbors = np.setdiff1d(neighbors, core).ravel()
-    assert len(neighbors) > 0, (
-        f"No 1-hop neighbors found for the core of {core}."
-    )
+        neighbor_array = np.setdiff1d(
+            np.asarray(neighbors, dtype=int).ravel(), core_array
+        )
+    if len(neighbor_array) == 0:
+        raise ValueError(
+            f"No 1-hop neighbors found for the core of {core_array}."
+        )
     site = Site(
-        neighbor=atoms.positions[neighbors],
-        core=atoms.positions[core],
+        neighbor=atoms.positions[neighbor_array],
+        core=atoms.positions[core_array],
         cell=atoms.cell.array,
     )
-    return (atoms, core, neighbors, _origin, site)
+    return (atoms, core_array, neighbor_array, _origin, site)

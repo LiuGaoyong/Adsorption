@@ -9571,11 +9571,11 @@ packages:
   requires_dist:
   - ase
   - arrayff
-  - autograd
   - joblib
   - numpy
   - scipy
   - scikit-learn
   - typing-extensions
   - graphatoms>=3.0
+  - pyyaml>=6
   requires_python: '>=3.12,<3.14'
