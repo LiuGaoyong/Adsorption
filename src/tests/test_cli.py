@@ -11,6 +11,7 @@ from ase.io import read
 
 from adsorption.protocol import read_sidecar
 from adsorption.runner.cli import main
+from adsorption.runner.config import CampaignConfig
 from adsorption.runner.engine import parse_shard
 
 
@@ -198,3 +199,72 @@ def test_calculator_entry_point() -> None:
 
     calculator = build_calculator("ase.calculators.emt.EMT")
     assert calculator is not None
+
+
+def test_generated_conformers_share_reference_formula(tmp_path: Path) -> None:
+    data = config_dict(
+        tmp_path / "run",
+        adsorbate={
+            "smiles": "CCCC",
+            "generate": True,
+            "n_conformers": 2,
+            "conformer_seed": 5,
+        },
+    )
+    config = CampaignConfig.model_validate(data)
+    campaign = config.to_campaign()
+    formulas = {atoms.get_chemical_formula() for atoms in campaign.references}
+    assert formulas == {"C4H10"}
+    assert campaign.n_conformers == len(campaign.references)
+    assert campaign.n_conformers >= 2
+
+
+def test_kim_screen_covers_adsorbate_elements(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    output = tmp_path / "run"
+    path = write_config(
+        tmp_path,
+        output,
+        screen={
+            "enabled": True,
+            "kim": True,
+            "r_min": 0.0,
+            "e_cut": 1.0e12,
+        },
+    )
+    assert main(["run", str(path), "--limit", "1"]) == 0
+    records = read_sidecar(output / "sidecar.jsonl")
+    assert len(records) == 1
+    assert records[0].lj_pass is not None
+
+
+def test_run_selected_indices(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    output = tmp_path / "run"
+    path = write_config(tmp_path, output)
+    indices = tmp_path / "indices.json"
+    indices.write_text(json.dumps({"kappa": [1, 2]}), encoding="utf-8")
+    assert main(["run", str(path), "--indices", str(indices)]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["processed"] == 2
+    records = read_sidecar(output / "sidecar.jsonl")
+    assert [record.kappa for record in records] == [1, 2]
+    capsys.readouterr()
+    assert (
+        main(["run", str(path), "--indices", str(indices), "--limit", "1"])
+        == 1
+    )
+    assert "limit" in capsys.readouterr().err
+
+
+def test_indices_out_of_range(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    output = tmp_path / "run"
+    path = write_config(tmp_path, output)
+    indices = tmp_path / "indices.json"
+    indices.write_text(json.dumps([99999]), encoding="utf-8")
+    assert main(["run", str(path), "--indices", str(indices)]) == 1
+    assert "indices" in capsys.readouterr().err

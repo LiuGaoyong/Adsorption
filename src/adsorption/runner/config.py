@@ -175,11 +175,6 @@ class AdsorbateConfig(BaseModel):
         Returns:
             AdsorbateSpec: The specification.
         """
-        if self.smiles is not None:
-            reference = build_from_smiles(self.smiles)
-        else:
-            assert self.reference is not None
-            reference = self.reference.build()
         conformers: list[ConformerSpec] = []
         if self.generate:
             assert self.smiles is not None
@@ -189,15 +184,24 @@ class AdsorbateConfig(BaseModel):
                 seed=self.conformer_seed,
                 prune_rmsd=self.prune_rmsd,
             )
+            # The generated ensemble defines the reference too, so the
+            # reference and the conformers share one composition (with
+            # explicit hydrogens). The first member is the default.
+            reference = generated[0]
             conformers = [
                 ConformerSpec(
                     reference=atoms,
                     anchor=self.anchor,
                     axis=self.axis,
                 )
-                for atoms in generated
+                for atoms in generated[1:]
             ]
         else:
+            if self.smiles is not None:
+                reference = build_from_smiles(self.smiles)
+            else:
+                assert self.reference is not None
+                reference = self.reference.build()
             conformers = [
                 ConformerSpec(
                     reference=spec.build(),

@@ -86,8 +86,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="skip indices already present in the merged sidecar",
     )
     run_parser.add_argument("--limit", type=int, default=None)
+    run_parser.add_argument(
+        "--indices",
+        type=Path,
+        default=None,
+        help=(
+            "JSON file of one-based indices (a list or a {\"kappa\": [...]} "
+            "object), e.g. the Tier-3 subset; overrides --shard/--start/--stop"
+        ),
+    )
     run_parser.add_argument("--output", default=None)
     return parser
+
+
+def _load_indices(path: Path | None) -> list[int] | None:
+    """Load an explicit index list from a JSON file."""
+    if path is None:
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        payload = payload.get("kappa", payload.get("indices"))
+    if not isinstance(payload, list):
+        raise ValueError(
+            "The indices file must contain a list or a {'kappa': [...]} "
+            f"object, got {type(payload)}."
+        )
+    return [int(value) for value in payload]
 
 
 def _print_plan(plan: dict[str, Any]) -> None:
@@ -132,12 +156,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             stop=arguments.stop,
             resume=arguments.resume,
             limit=arguments.limit,
+            indices=_load_indices(arguments.indices),
             output=arguments.output,
         )
         print(json.dumps(summary.to_dict(), indent=2))
         return 0
     except (
         ValueError,
+        IndexError,
         TypeError,
         FileNotFoundError,
         ImportError,

@@ -222,6 +222,60 @@ def test_cascade_without_evaluator(campaign) -> None:
 
 def test_adsorbate_diagnostic(campaign) -> None:
     screen = RepulsiveScreen(parameters(r_min=0.0, e_cut=1.0e12))
-    decision = screen.evaluate(campaign.support(1).atoms, n_substrate=len(campaign.atoms))
-    assert decision.e_rep_adsorbate is not None
-    assert 0.0 <= decision.e_rep_adsorbate <= decision.e_rep
+    decision = screen.evaluate(
+        campaign.support(1).atoms,
+        n_substrate=len(campaign.atoms),
+    )
+    assert decision.e_rep_adsorbate == decision.e_rep
+
+
+def test_contact_mode_excludes_intramolecular_pairs() -> None:
+    # Cu at 0, C at 5, O at 6: the C-O bond is 1 A, the contacts are > r_cut.
+    atoms = Atoms(
+        "CuCO",
+        positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 5.0], [0.0, 0.0, 6.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    screen = RepulsiveScreen(
+        LJParameters(
+            epsilon={29: 1.0, 6: 1.0, 8: 1.0},
+            sigma={29: 2.0, 6: 2.0, 8: 2.0},
+            r_cut=3.0,
+            r_min=0.0,
+            e_cut=1.0e9,
+        )
+    )
+    contact = screen.evaluate(atoms, n_substrate=1)
+    assert contact.n_pairs == 0
+    assert contact.e_rep == 0.0
+    assert contact.r_close == float("inf")
+    assert contact.passed
+    total = screen.evaluate(atoms)
+    assert total.n_pairs == 1
+    assert total.e_rep > 0.0
+
+
+def test_contact_mode_uses_only_substrate_adsorbate_pairs() -> None:
+    atoms = Atoms(
+        "CuC",
+        positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 2.0]],
+        cell=np.zeros((3, 3)),
+        pbc=False,
+    )
+    table = LJParameters(
+        epsilon={29: 1.0, 6: 1.0, 8: 1.0},
+        sigma={29: 2.0, 6: 2.0, 8: 2.0},
+        r_cut=5.0,
+        r_min=0.0,
+        e_cut=1.0e9,
+    )
+    decision = RepulsiveScreen(table).evaluate(atoms, n_substrate=1)
+    assert decision.n_pairs == 1
+    expected_epsilon = 1.0
+    expected_sigma = 2.0
+    expected = 4.0 * expected_epsilon * (expected_sigma / 2.0) ** 12
+    assert decision.e_rep == pytest.approx(expected)
+    assert decision.r_close == pytest.approx(2.0)
+    with pytest.raises(ValueError):
+        RepulsiveScreen(table).evaluate(atoms, n_substrate=0)

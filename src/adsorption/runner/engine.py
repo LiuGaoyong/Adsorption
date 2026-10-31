@@ -124,30 +124,33 @@ def _read_done(path: Path) -> set[int]:
 
 def _run_interval(
     payload: dict[str, Any],
-    start: int,
-    stop: int,
+    kappas: Sequence[int],
     output: str,
     sidecar: str,
     resume: bool,
 ) -> dict[str, int]:
-    """Process one inclusive index interval.
+    """Process one collection of candidate indices.
 
     Args:
         payload: The serialised campaign configuration.
-        start: First one-based index.
-        stop: Last one-based index.
+        kappas: One-based candidate indices, in processing order.
         output: Output directory.
-        sidecar: Sidecar destination for this interval.
+        sidecar: Sidecar destination for this work share.
         resume: Whether to skip indices already present in the merged sidecar.
 
     Returns:
-        dict[str, int]: Counters for the interval.
+        dict[str, int]: Counters for this work share.
     """
     config = CampaignConfig.model_validate(payload)
     campaign = config.to_campaign()
     screen = None
     if config.screen is not None:
-        parameters = config.screen.build(campaign.atoms.numbers)
+        element_numbers = [np.asarray(campaign.atoms.numbers, dtype=int)]
+        element_numbers.extend(
+            np.asarray(reference.numbers, dtype=int)
+            for reference in campaign.references
+        )
+        parameters = config.screen.build(np.concatenate(element_numbers))
         if parameters is not None:
             screen = RepulsiveScreen(parameters)
     relaxation: Relaxation | None = config.evaluation.build()
@@ -155,7 +158,7 @@ def _run_interval(
     n_substrate = len(campaign.atoms)
     counters = {"processed": 0, "screened": 0, "evaluated": 0, "converged": 0}
     with SidecarWriter(sidecar) as writer:
-        for kappa in range(int(start), int(stop) + 1):
+        for kappa in kappas:
             if kappa in done:
                 continue
             candidate = campaign.support(kappa)
@@ -231,6 +234,20 @@ def _split(first: int, last: int, world: int) -> list[tuple[int, int]]:
         if start <= stop:
             chunks.append((start, stop))
     return chunks
+
+
+def _split_indices(
+    indices: Sequence[int],
+    world: int,
+) -> list[list[int]]:
+    """Split an explicit index list into at most ``world`` chunks."""
+    values = [int(index) for index in indices]
+    size = (len(values) + world - 1) // world
+    return [
+        values[rank * size : (rank + 1) * size]
+        for rank in range(world)
+        if values[rank * size : (rank + 1) * size]
+    ]
 
 
 def _merge_sidecars(output: Path, n_shards: int) -> int:
@@ -331,6 +348,7 @@ def run_campaign(
     stop: int | None = None,
     resume: bool = False,
     limit: int | None = None,
+    indices: Sequence[int] | None = None,
     output: str | Path | None = None,
 ) -> RunSummary:
     """Run a campaign.
@@ -343,6 +361,9 @@ def run_campaign(
         stop: Optional last index (overrides the shard end when smaller).
         resume: Whether to skip indices already present in the merged sidecar.
         limit: Optional cap on the number of indices processed.
+        indices: Optional explicit one-based indices (for example the
+            pre-registered DFT subset). Overrides the shard/start/stop
+            interval and cannot be combined with ``limit``.
         output: Optional output directory override.
 
     Returns:
@@ -356,43 +377,60 @@ def run_campaign(
     rank, world = parse_shard(shard)
     campaign = config.to_campaign()
     total = len(campaign)
-    blocks = list(campaign.plan.intervals(world, rank=rank))
-    if not blocks:
-        return RunSummary(
-            name=config.name,
-            param_hash=campaign.param_hash,
-            total=total,
-            processed=0,
-            screened=0,
-            evaluated=0,
-            converged=0,
-            records=0,
-            output=str(output or config.output_path),
+    if indices is not None:
+        if limit is not None:
+            raise ValueError("limit cannot be combined with indices.")
+        selected = sorted({int(index) for index in indices})
+        if not selected:
+            raise ValueError("indices must not be empty.")
+        if selected[0] < 1 or selected[-1] > total:
+            raise IndexError(
+                f"indices must lie in [1, {total}], got "
+                f"[{selected[0]}, {selected[-1]}]."
+            )
+        work_chunks: list[Sequence[int]] = list(
+            _split_indices(selected, int(workers))
         )
-    first, last_exclusive = blocks[0]
-    first = max(first, 1 if start is None else int(start))
-    last = (
-        min(last_exclusive - 1, total)
-        if stop is None
-        else min(last_exclusive - 1, total, int(stop))
-    )
-    if limit is not None:
-        last = min(last, first + int(limit) - 1)
-    if first > last:
-        raise ValueError(
-            f"Empty index interval: start={first} is after stop={last}."
+    else:
+        blocks = list(campaign.plan.intervals(world, rank=rank))
+        if not blocks:
+            return RunSummary(
+                name=config.name,
+                param_hash=campaign.param_hash,
+                total=total,
+                processed=0,
+                screened=0,
+                evaluated=0,
+                converged=0,
+                records=0,
+                output=str(output or config.output_path),
+            )
+        first, last_exclusive = blocks[0]
+        first = max(first, 1 if start is None else int(start))
+        last = (
+            min(last_exclusive - 1, total)
+            if stop is None
+            else min(last_exclusive - 1, total, int(stop))
         )
+        if limit is not None:
+            last = min(last, first + int(limit) - 1)
+        if first > last:
+            raise ValueError(
+                f"Empty index interval: start={first} is after stop={last}."
+            )
+        work_chunks = [
+            range(start_index, stop_index + 1)
+            for start_index, stop_index in _split(first, last, int(workers))
+        ]
 
     destination = Path(output) if output is not None else config.output_path
     destination.mkdir(parents=True, exist_ok=True)
     payload = config.model_dump(mode="python")
-    chunks = _split(first, last, int(workers))
     counters = {"processed": 0, "screened": 0, "evaluated": 0, "converged": 0}
-    if len(chunks) == 1:
+    if len(work_chunks) == 1:
         counts = _run_interval(
             payload,
-            chunks[0][0],
-            chunks[0][1],
+            work_chunks[0],
             str(destination),
             str(destination / "sidecar.0.jsonl"),
             resume,
@@ -405,13 +443,12 @@ def run_campaign(
         tasks = [
             delayed(_run_interval)(
                 payload,
-                chunk[0],
-                chunk[1],
+                chunk,
                 str(destination),
                 str(destination / f"sidecar.{index}.jsonl"),
                 resume,
             )
-            for index, chunk in enumerate(chunks)
+            for index, chunk in enumerate(work_chunks)
         ]
         results: Sequence[dict[str, int]] = Parallel(
             n_jobs=int(workers),
@@ -420,7 +457,7 @@ def run_campaign(
         for counts in results:
             for key in counters:
                 counters[key] += counts[key]
-    records = _merge_sidecars(destination, len(chunks))
+    records = _merge_sidecars(destination, len(work_chunks))
     summary = RunSummary(
         name=config.name,
         param_hash=campaign.param_hash,

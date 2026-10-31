@@ -24,11 +24,13 @@ class LJDecision:
     """The screen verdict for one candidate.
 
     Attributes:
-        e_rep: Total repulsive energy in eV over all pairs within the cutoff.
-        e_rep_adsorbate: Repulsive energy of the pairs that touch an adsorbate
-            atom, or ``None`` when the split was not requested. Diagnostic
-            only; the decision uses ``e_rep``.
-        r_close: Closest interatomic distance in Angstrom.
+        e_rep: Repulsive energy in eV. In contact mode (``n_substrate``
+            given) it is the sum over substrate-adsorbate contacts; otherwise
+            over every pair within the cutoff.
+        e_rep_adsorbate: Same as ``e_rep`` in contact mode, ``None`` otherwise.
+            Kept for the record schema.
+        r_close: Closest distance in Angstrom over the pairs that entered the
+            sum.
         passed: Whether both thresholds were satisfied.
         n_pairs: Number of pairs within the cutoff.
     """
@@ -231,20 +233,37 @@ class RepulsiveScreen:
         """Evaluate one candidate.
 
         Args:
-            atoms: The candidate structure.
-            n_substrate: Number of substrate atoms. When given, the repulsive
-                energy of the pairs touching an adsorbate atom is reported as
-                a diagnostic; the decision always uses the total.
+            atoms: The candidate structure with the substrate atoms first.
+            n_substrate: Number of substrate atoms. When given, only
+                substrate-adsorbate contact pairs enter the sum: the
+                substrate-substrate baseline is a constant and the
+                intramolecular pairs are chemical bonds, not Lennard-Jones
+                contacts. When ``None`` every pair within the cutoff enters.
 
         Returns:
             LJDecision: The verdict.
+
+        Raises:
+            ValueError: If ``n_substrate`` does not leave an adsorbate atom.
         """
         parameters = self.parameters
         first, second, distance = _pair_list(atoms, parameters.r_cut)
+        contact_mode = n_substrate is not None
+        if contact_mode:
+            n_substrate = int(n_substrate)  # type: ignore[arg-type]
+            if not 1 <= n_substrate <= len(atoms) - 1:
+                raise ValueError(
+                    "n_substrate must leave at least one adsorbate atom, got "
+                    f"{n_substrate} for {len(atoms)} atoms."
+                )
+            contact = (first < n_substrate) & (second >= n_substrate)
+            first = first[contact]
+            second = second[contact]
+            distance = distance[contact]
         if len(first) == 0:
             return LJDecision(
                 e_rep=0.0,
-                e_rep_adsorbate=0.0 if n_substrate is not None else None,
+                e_rep_adsorbate=0.0 if contact_mode else None,
                 r_close=float("inf"),
                 passed=True,
                 n_pairs=0,
@@ -260,12 +279,7 @@ class RepulsiveScreen:
         terms = 4.0 * epsilon * ratio**12
         e_rep = float(terms.sum())
         r_close = float(distance.min())
-        e_rep_adsorbate: float | None = None
-        if n_substrate is not None:
-            touching = (first >= int(n_substrate)) | (
-                second >= int(n_substrate)
-            )
-            e_rep_adsorbate = float(terms[touching].sum())
+        e_rep_adsorbate = e_rep if contact_mode else None
         passed = bool(
             r_close >= parameters.r_min and e_rep <= parameters.e_cut
         )
