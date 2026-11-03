@@ -13,6 +13,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Any, Literal
 
 from ase import Atoms
@@ -40,7 +41,6 @@ class Trial:
     atoms: Atoms
     index: int
     n_total: int
-    natoms_adsorbate: int
     meta: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -68,6 +68,41 @@ class Trial:
                 "n_total must be at least index, got "
                 f"{self.n_total} < {self.index}."
             )
+
+    @cached_property
+    def natoms_substrate(self) -> int:
+        """Return the substrate size recorded in the trial metadata.
+
+        Args:
+            trial: The trial.
+
+        Returns:
+            int: The number of substrate atoms.
+
+        Raises:
+            ValueError: If the metadata does not carry a valid size.
+        """
+        value = self.meta.get("n_substrate")
+        if not isinstance(value, int) or value < 1:
+            raise ValueError(
+                "The trial metadata must carry a positive integer "
+                f"'n_substrate', but got {value!r}."
+            )
+        if value >= len(self.atoms):
+            raise ValueError(
+                f"n_substrate must be at most "
+                f"{len(self.atoms)}, but got {value}."
+            )
+        return value
+
+    @cached_property
+    def natoms_adsorbate(self) -> int:
+        """Return the number of adsorbate atoms in the trial structure.
+
+        Returns:
+            int: The number of adsorbate atoms in the trial structure.
+        """
+        return len(self.atoms) - self.natoms_substrate
 
 
 @dataclass(frozen=True)

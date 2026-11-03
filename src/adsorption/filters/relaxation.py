@@ -8,72 +8,71 @@ the energy and the result itself, so a caller never relaxes twice.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Any, Literal
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
+from arrayff.optimize import call_optimization
+from ase import Atoms
+from ase.calculators.calculator import Calculator
+from ase.constraints import FixAtoms, FixBondLengths
+from graphatoms.system.sysGas import Gas
 
-from ....deprecated.src.adsorption.evaluation import EvalResult
-from ..process import AdsConfFilterABC, Trial, Verdict
+from adsorption.base import AdsorptionConfigurationFilterABC, Trial, Verdict
 
-__all__ = ["EnergyFilter"]
+__all__ = ["OptimizedEnergyFilter"]
 
 
-class EnergyFilter(AdsConfFilterABC):
-    """Reject trials above the energy ceiling or without convergence.
-
-    Attributes:
-        relaxation: The evaluation callable.
-        e_cut: Energy ceiling in eV.
-        on_unconverged: ``"reject"`` (default) or ``"keep"``.
-    """
+class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
+    """Reject trials above the energy ceiling or without convergence."""
 
     def __init__(
         self,
-        relaxation: Callable[..., EvalResult],
-        *,
         e_cut: float,
-        on_unconverged: Literal["reject", "keep"] = "reject",
+        calculator: Calculator,
+        *,
+        fmax: float = 0.01,
+        max_steps: int = 100,
+        method: str = "LBFGS",
+        fix_substrate: bool = True,
+        fix_adsorbate_bonds: bool = True,
+        reject_on_unconverged: bool = True,
+        **kwargs,
     ) -> None:
         """Store the evaluator and the acceptance policy.
 
         Args:
-            relaxation: Callable ``(atoms, *, n_substrate) -> EvalResult``.
             e_cut: Energy ceiling in eV.
-            on_unconverged: Whether a non-converged relaxation is rejected.
-
-        Raises:
-            ValueError: If ``e_cut`` is not finite or the policy is unknown.
+            calculator: The ASE calculator to use.
+            fmax: Force tolerance in eV/A.
+            max_steps: Maximum number of steps.
+            method: Optimization method.
+            fix_substrate: Whether to fix the substrate atoms.
+                Only effective if ``fix_adsorbate_bonds`` is ``False``.
+            fix_adsorbate_bonds: Whether to fix the adsorbate bonds.
+            reject_on_unconverged: Whether to reject trials on unconverged
+                optimizations.
+            **kwargs: unused arguments.
         """
+        if self.fix_adsorbate_bonds:
+            self.fix_adsorbate_bonds = True
+            self.fix_substrate = True
+        elif self.fix_substrate:
+            self.fix_adsorbate_bonds = False
+            self.fix_substrate = True
+        else:
+            self.fix_adsorbate_bonds = False
+            self.fix_substrate = False
         if not np.isfinite(e_cut):
             raise ValueError(f"e_cut must be finite, got {e_cut}.")
-        if on_unconverged not in {"reject", "keep"}:
-            raise ValueError(
-                f"Unknown on_unconverged policy: {on_unconverged!r}."
-            )
-        self.relaxation = relaxation
         self.e_cut = float(e_cut)
-        self.on_unconverged = on_unconverged
-
-    def _n_substrate(self, trial: Trial) -> int:
-        """Return the substrate size recorded in the trial metadata.
-
-        Args:
-            trial: The trial.
-
-        Returns:
-            int: The number of substrate atoms.
-
-        Raises:
-            ValueError: If the metadata does not carry a valid size.
-        """
-        value = trial.meta.get("n_substrate")
-        if not isinstance(value, int) or value < 1:
-            raise ValueError(
-                "The trial metadata must carry a positive integer "
-                f"'n_substrate', got {value!r}."
-            )
-        return value
+        self.fix_substrate = fix_substrate
+        self.fix_adsorbate_bonds = fix_adsorbate_bonds
+        self.reject_on_unconverged = reject_on_unconverged
+        self.calculator = calculator
+        self.max_steps = max_steps
+        self.method = method
+        self.fmax = fmax
 
     def evaluate(self, trial: Trial) -> Verdict:
         """Evaluate one trial with the wrapped relaxation.
@@ -85,15 +84,36 @@ class EnergyFilter(AdsConfFilterABC):
             Verdict: Accepted when the energy is finite, at most ``e_cut``
             and the convergence policy allows it.
         """
-        result = self.relaxation(
-            trial.atoms, n_substrate=self._n_substrate(trial)
+        self.calculator.reset()
+        atoms = trial.atoms.copy()
+        if self.fix_substrate:
+            ids = list(range(trial.natoms_substrate))
+            atoms.constraints = [FixAtoms(indices=ids)]
+        if self.fix_adsorbate_bonds:
+            z = atoms.numbers[-trial.natoms_substrate :]
+            r = atoms.positions[-trial.natoms_substrate :]
+            gas_atoms = Atoms(numbers=z, positions=r)
+            edges = Gas.from_ase(gas_atoms).pair
+            assert isinstance(edges, np.ndarray)
+            edges += trial.natoms_substrate
+            atoms.constraints = [
+                *atoms.constraints,
+                FixBondLengths(pairs=edges),
+            ]
+
+        result = call_optimization(
+            calc=self.calculator,
+            atoms=atoms,
+            fmax=self.fmax,
+            max_steps=self.max_steps,
+            method=self.method,
         )
-        energy = float(result.energy)
+        energy = result.latest.get_potential_energy()
         if not np.isfinite(energy):
             return Verdict(False, energy, "nan", result)
         if energy > self.e_cut:
             return Verdict(False, energy, "e_cut", result)
-        if result.converged is False and self.on_unconverged == "reject":
+        if not result.converged and self.reject_on_unconverged:
             return Verdict(False, energy, "unconverged", result)
         return Verdict(True, energy, "ok", result)
 
@@ -103,10 +123,14 @@ class EnergyFilter(AdsConfFilterABC):
         Returns:
             Mapping[str, Any]: A JSON-serialisable description.
         """
-        name = getattr(self.relaxation, "__class__", type(None)).__name__
         return {
-            "kind": "energy",
+            "kind": "optimized_energy",
+            "calculator": self.calculator.todict(),
             "e_cut": self.e_cut,
-            "on_unconverged": self.on_unconverged,
-            "relaxation": name,
+            "fmax": self.fmax,
+            "max_steps": self.max_steps,
+            "method": self.method,
+            "fix_substrate": self.fix_substrate,
+            "fix_adsorbate_bonds": self.fix_adsorbate_bonds,
+            "reject_on_unconverged": self.reject_on_unconverged,
         }
