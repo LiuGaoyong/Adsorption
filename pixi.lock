@@ -9577,5 +9577,6 @@ packages:
   - scikit-learn
   - typing-extensions
   - graphatoms>=3.0
+  - hydra-core
   - pyyaml>=6
   requires_python: '>=3.12,<3.14'
