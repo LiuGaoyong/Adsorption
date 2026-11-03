@@ -2,8 +2,8 @@
 
 A grid is a deterministic point set: for a given lattice size ``n`` it returns
 the same points in the same order. The protocol layer uses ``size(n)`` as the
-radix of the direction dimension, and the admissibility filter keeps the
-original grid indices so that a candidate can be regenerated from its index.
+radix of the direction dimension, and the original grid indices are kept so
+that a candidate can be regenerated from its index.
 """
 
 from __future__ import annotations

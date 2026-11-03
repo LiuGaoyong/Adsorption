@@ -205,7 +205,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/argon2-cffi-25.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/array-api-compat-1.16.0-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/array-api-extra-0.11.5-pyhc364b38_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.1-pyhc364b38_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.2-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/arrow-1.4.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ase-3.29.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/asttokens-3.0.1-pyhd8ed1ab_0.conda
@@ -364,7 +364,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/argon2-cffi-25.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/array-api-compat-1.16.0-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/array-api-extra-0.11.5-pyhc364b38_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.1-pyhc364b38_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.2-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/arrow-1.4.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ase-3.29.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/asttokens-3.0.1-pyhd8ed1ab_0.conda
@@ -874,7 +874,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/argon2-cffi-25.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/array-api-compat-1.16.0-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/array-api-extra-0.11.5-pyhc364b38_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.1-pyhc364b38_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.2-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/arrow-1.4.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ase-3.29.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/asttokens-3.0.1-pyhd8ed1ab_0.conda
@@ -1033,7 +1033,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/argon2-cffi-25.1.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/array-api-compat-1.16.0-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/array-api-extra-0.11.5-pyhc364b38_0.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.1-pyhc364b38_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.2-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/arrow-1.4.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/ase-3.29.0-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/asttokens-3.0.1-pyhd8ed1ab_0.conda
@@ -4583,9 +4583,9 @@ packages:
   run_exports: {}
   size: 99310
   timestamp: 1792931967600
-- conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.1-pyhc364b38_0.conda
-  sha256: 580ab562f1ac697d2aa85f5fc33fabe20b0bee471aa9e6bf829e452f5c1d8998
-  md5: 54f140d12e1d8591ea0246312e7c1bbe
+- conda: https://conda.anaconda.org/conda-forge/noarch/arrayff-0.0.2-pyhc364b38_0.conda
+  sha256: f1d93dc8067374eb8ff815a6f5bc37a3799a8ab18f63535a9f8da33428840df5
+  md5: c0f0d85e36913fa206d10388bf233c00
   depends:
   - python >=3.12
   - ase >=3.20
@@ -4599,8 +4599,8 @@ packages:
   purls:
   - pkg:pypi/arrayff?source=hash-mapping
   run_exports: {}
-  size: 78126
-  timestamp: 1793277764605
+  size: 82160
+  timestamp: 1793672485360
 - conda: https://conda.anaconda.org/conda-forge/noarch/arrow-1.4.0-pyhcf101f3_0.conda
   sha256: 792da8131b1b53ff667bd6fc617ea9087b570305ccb9913deb36b8e12b3b5141
   md5: 85c4f19f377424eafc4ed7911b291642
@@ -9570,7 +9570,7 @@ packages:
   name: adsorption
   requires_dist:
   - ase
-  - arrayff
+  - arrayff>=0.0.2
   - joblib
   - numpy
   - scipy

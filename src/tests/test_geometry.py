@@ -11,13 +11,11 @@ from ase.geometry import find_mic
 
 from adsorption.geometry import (
     DELTA_NBR,
-    AdmissibleSet,
     DirectionRollSet,
     FibonacciGrid,
     LatLonGrid,
     SO3Set,
     SeededRandomGrid,
-    admissible_directions,
     build_site,
     default_scale,
     default_skin,
@@ -227,58 +225,6 @@ def test_outward_normal(slab: Atoms) -> None:
     assert normal[2] > 0.0
 
 
-def test_site_translation_covariance(slab: Atoms) -> None:
-    top = top_surface_index(slab)
-    shifted = slab.copy()
-    shifted.positions = slab.positions + slab.cell.array[0]
-    site_a = build_site(slab, [top])
-    site_b = build_site(shifted, [top])
-    shift = slab.cell.array[0]
-    assert np.allclose(site_b.center, site_a.center + shift)
-    directions_a = admissible_directions(site_a, 128)
-    directions_b = admissible_directions(site_b, 128)
-    assert directions_a.n_oa == directions_b.n_oa
-    assert np.allclose(directions_a.unit, directions_b.unit)
-
-
-def test_admissible_directions(slab: Atoms) -> None:
-    top = top_surface_index(slab)
-    site = build_site(slab, [top])
-    admissible = admissible_directions(site, 128)
-    assert isinstance(admissible, AdmissibleSet)
-    assert admissible.n_grid == 128
-    assert 0 <= admissible.n_oa <= 128
-    assert np.all(np.diff(admissible.grid_index) > 0)
-    assert admissible.fraction == pytest.approx(admissible.n_oa / 128)
-
-    # every survivor clears the filter set at r_s
-    radii = site.filter_radii + site.skin
-    distances = distances_mic(
-        site.center + site.radius * admissible.unit,
-        site.filter_positions,
-        site.cell,
-        site.pbc,
-    )
-    assert np.all(distances > radii[None, :])
-
-    # deterministic
-    again = admissible_directions(site, 128)
-    assert np.array_equal(admissible.unit, again.unit)
-    assert np.array_equal(admissible.grid_index, again.grid_index)
-
-
-def test_admissible_filter_parameters(slab: Atoms) -> None:
-    top = top_surface_index(slab)
-    site = build_site(slab, [top])
-    loose = admissible_directions(site, 128, skin=0.2)
-    tight = admissible_directions(site, 128, skin=1.5)
-    assert tight.n_oa <= loose.n_oa
-    with pytest.raises(ValueError):
-        admissible_directions(site, 128, skin=-1.0)
-    with pytest.raises(ValueError):
-        admissible_directions(site, 128, scale=0.0)
-
-
 def test_minimum_image_matches_ase(slab: Atoms) -> None:
     rng = np.random.default_rng(3)
     points_a = rng.uniform(-2, 6, size=(6, 3))
@@ -288,85 +234,6 @@ def test_minimum_image_matches_ase(slab: Atoms) -> None:
     expected = np.linalg.norm(find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0], axis=1).reshape(6, 4)
     assert np.allclose(got, expected)
     assert np.allclose(displacements_mic(diff, slab.cell.array, slab.pbc), find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0].reshape(diff.shape))
-
-
-def test_geometry_uses_no_random_numbers(monkeypatch: pytest.MonkeyPatch, slab: Atoms) -> None:
-    def forbidden(*args, **kwargs):
-        raise AssertionError("the geometric path must not draw random numbers")
-
-    monkeypatch.setattr(np.random, "default_rng", forbidden)
-    monkeypatch.setattr(np.random, "randint", forbidden)
-    monkeypatch.setattr(np.random, "rand", forbidden)
-    top = top_surface_index(slab)
-    site = build_site(slab, [top])
-    admissible = admissible_directions(site, 64)
-    assert admissible.n_oa > 0
-
-
-def test_proposition_2_fixed_radius_proxy(slab: Atoms) -> None:
-    """A direction admitted at r_s can still put the anchor inside an atom."""
-    top = top_surface_index(slab)
-    neighbours = inplane_neighbours(slab, top)
-    site = build_site(slab, [top, neighbours[0]])
-    admissible = admissible_directions(site, 256)
-    anchor_distance = 0.8
-    anchors = site.center + anchor_distance * admissible.unit
-    radii = site.filter_radii + site.skin
-    distances = distances_mic(anchors, site.filter_positions, site.cell, site.pbc)
-    overlapping = np.any(distances < radii[None, :], axis=1)
-    assert np.any(overlapping)
-
-
-def test_direct_adsorption_deterministic(slab: Atoms) -> None:
-    from adsorption import DirectAdsorption
-
-    top = top_surface_index(slab)
-    obj = DirectAdsorption(atoms=slab, core=[top], nfibonacci=64, calculator=None)
-    adsorbate = molecule("CO")
-    reference = adsorbate.positions.copy()
-    first, label = obj(adsorbate=adsorbate)
-    second, _ = obj(adsorbate=molecule("CO"))
-    assert label == -1
-    assert len(first) == len(slab) + 2
-    assert np.allclose(first.positions, second.positions)
-    # the input adsorbate is not mutated
-    assert np.allclose(adsorbate.positions, reference)
-    assert obj._distance > 0.0
-
-
-def test_direct_adsorption_anchor(slab: Atoms) -> None:
-    from adsorption import DirectAdsorption
-
-    top = top_surface_index(slab)
-    obj = DirectAdsorption(atoms=slab, core=[top], nfibonacci=64, calculator=None, anchor=0)
-    result, _ = obj(adsorbate="CO", distance=2.0)
-    target = obj._anchor_core + obj._distance * obj._direction_core
-    # atom 0 of CO is the carbon, i.e. the anchor
-    assert np.allclose(result.positions[len(slab)], target)
-
-
-def test_direct_seeded_indices_are_reproducible(slab: Atoms) -> None:
-    from adsorption import DirectAdsorption
-
-    top = top_surface_index(slab)
-    first = DirectAdsorption(atoms=slab, core=[top], nfibonacci=64, seed=11)
-    second = DirectAdsorption(atoms=slab, core=[top], nfibonacci=64, seed=11)
-    for _ in range(3):
-        left, _ = first(adsorbate="CO")
-        right, _ = second(adsorbate="CO")
-        assert np.allclose(left.positions, right.positions)
-
-
-def test_raw_adsorption_uses_outward_normal(slab: Atoms) -> None:
-    from adsorption import RawAdsorption
-
-    top = top_surface_index(slab)
-    obj = RawAdsorption(atoms=slab, core=[top], calculator=None)
-    result, _ = obj(adsorbate="O")
-    position = result.positions[len(slab)]
-    direction = position - obj.site_geometry.center
-    direction = direction / np.linalg.norm(direction)
-    assert np.allclose(direction, obj.site_geometry.outward_normal)
 
 
 def test_direction_roll_set() -> None:

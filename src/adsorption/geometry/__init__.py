@@ -1,27 +1,24 @@
 """The calculator-free geometric layer of the adsorption construction.
 
-The subpackage implements the four factors of an adsorption event: the site
-``O`` (core set, centre, neighbour shell, direction sphere), the approach
-direction ``OA`` (a direction grid plus the steric filter), the molecular
-orientation ``AB`` (a rotation about the anchor), and the anchor distance
-``d``. Nothing here imports an ASE calculator, so the generated candidates are
+The subpackage implements the geometric primitives of an adsorption event:
+the site ``O`` (core set, centre, neighbour shell), the approach direction
+``OA`` (a direction grid), the molecular orientation (a rotation set, including
+the Super-Fibonacci sequence on ``SO(3)``), and the anchor distance ``d``.
+Nothing here imports an ASE calculator, so the generated candidates are
 independent of the energy engine.
 
 Example:
-    >>> import numpy as np
     >>> from ase.build import fcc111
-    >>> from adsorption.geometry import admissible_directions, build_site
+    >>> from adsorption.geometry import build_site
     >>> slab = fcc111("Cu", size=(2, 2, 2), vacuum=8, orthogonal=True)
     >>> site = build_site(slab, core=[0])
-    >>> grid = admissible_directions(site, n=10)
-    >>> grid.n_oa <= 10
-    True
+    >>> tuple(site.center.shape)
+    (3,)
 """
 
 from __future__ import annotations
 
-from .admissibility import AdmissibleSet, admissible_directions, filter_grid
-from .conformers import (
+from ..utils.conformers import (
     generate_conformers,
     near_congruent,
     prune_by_energy,
@@ -61,6 +58,7 @@ from .rotations import (
     ShortestArcSet,
 )
 from .shell import first_neighbor_shell, mean_mic, outward_normal
+from .superfibonacci import SuperFibonacciSO3
 from .site import SiteGeometry, build_site
 
 __all__ = [
@@ -71,7 +69,6 @@ __all__ = [
     "SCALE_SINGLE",
     "SKIN_MULTI",
     "SKIN_SINGLE",
-    "AdmissibleSet",
     "Anchor",
     "DirectionGrid",
     "DirectionRollSet",
@@ -83,7 +80,6 @@ __all__ = [
     "SO3Set",
     "SeededRandomGrid",
     "SiteGeometry",
-    "admissible_directions",
     "apply_rotation",
     "build_site",
     "default_scale",
@@ -91,7 +87,6 @@ __all__ = [
     "displacements_mic",
     "distance_array",
     "distances_mic",
-    "filter_grid",
     "generate_conformers",
     "first_neighbor_shell",
     "is_periodic",
@@ -104,6 +99,7 @@ __all__ = [
     "quaternion_to_rotation",
     "resolve_anchor",
     "ShortestArcSet",
+    "SuperFibonacciSO3",
     "shortest_arc_rotation",
     "unit_vector",
 ]

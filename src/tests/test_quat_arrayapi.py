@@ -8,7 +8,7 @@ tested here with plain NumPy arrays.
 import numpy as np
 import pytest
 
-from adsorption.common import _quat
+from adsorption.geometry import _quat
 
 
 class TestQuaternionApply:
