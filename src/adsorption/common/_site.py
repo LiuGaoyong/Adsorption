@@ -146,7 +146,7 @@ class Site(BaseModel):
     @staticmethod
     def get_1order_nbr(atoms: Atoms, core: npt.ArrayLike) -> np.ndarray:
         """Get the 1-order neighbors of the core atoms."""
-        return first_neighbor_shell(atoms, core)
+        return first_neighbor_shell(atoms, core)  # type: ignore
 
 
 def _site_helper(
@@ -175,9 +175,7 @@ def _site_helper(
             f" to {MAX_CORE_SIZE}. The value of core: {core_array}."
         )
     if neighbors is None:
-        neighbor_array = first_neighbor_shell(
-            atoms, core_array, origin=_origin
-        )
+        neighbor_array = first_neighbor_shell(atoms, core_array, origin=_origin)
     else:
         neighbor_array = np.setdiff1d(
             np.asarray(neighbors, dtype=int).ravel(), core_array

@@ -80,12 +80,12 @@ def generate_conformers(
     if mol is None:
         raise ValueError("The molecule must not be None.")
     mol = Chem.AddHs(mol)
-    parameters = AllChem.ETKDGv3()
+    parameters = AllChem.ETKDGv3()  # type: ignore[attr-defined]
     parameters.randomSeed = int(seed)
     parameters.pruneRmsThresh = float(prune_rmsd)
     parameters.numThreads = 1
     conformer_ids = list(
-        AllChem.EmbedMultipleConfs(
+        AllChem.EmbedMultipleConfs(  # type: ignore[attr-defined]
             mol,
             numConfs=int(n_conformers),
             params=parameters,
@@ -93,8 +93,8 @@ def generate_conformers(
     )
     if not conformer_ids:
         raise ValueError("RDKit did not embed any conformer.")
-    if optimize and AllChem.MMFFHasAllMoleculeParams(mol):
-        AllChem.MMFFOptimizeMoleculeConfs(
+    if optimize and AllChem.MMFFHasAllMoleculeParams(mol):  # type: ignore[attr-defined]
+        AllChem.MMFFOptimizeMoleculeConfs(  # type: ignore[attr-defined]
             mol,
             numThreads=1,
             maxIters=200,
@@ -168,9 +168,7 @@ def near_congruent(
     if not np.isfinite(tolerance) or tolerance < 0.0:
         raise ValueError(f"tolerance must be non-negative, got {tolerance}.")
     if len(left) != len(right):
-        raise ValueError(
-            f"Different sizes: {len(left)} and {len(right)}."
-        )
+        raise ValueError(f"Different sizes: {len(left)} and {len(right)}.")
     if not np.array_equal(left.numbers, right.numbers):
         raise ValueError("Different compositions.")
     a = np.asarray(left.positions, dtype=float)
