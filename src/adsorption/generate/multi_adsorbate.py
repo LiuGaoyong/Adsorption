@@ -15,15 +15,15 @@ from typing import Any
 import numpy as np
 from ase import Atoms
 
-from ..geometry import (
+from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
+from adsorption.geometry import (
     DirectionGrid,
     ResolvedAnchor,
     RotationSet,
     SiteGeometry,
 )
-from ..process import AdsConfGenABC, Trial
-from .multi_site import MultiSiteGen
-from .single_site import SingleSiteGen
+from adsorption.generate.multi_site import MultiSiteGen
+from adsorption.generate.single_site import SingleSiteGen
 
 __all__ = ["Conformer", "MultiAdsorbateGen"]
 
@@ -63,7 +63,7 @@ class Conformer:
         object.__setattr__(self, "distances", values)
 
 
-class MultiAdsorbateGen(AdsConfGenABC):
+class MultiAdsorbateGen(AdsorptionConfigurationGeneratorABC):
     """Enumerate several conformers, each over its sites.
 
     Attributes:

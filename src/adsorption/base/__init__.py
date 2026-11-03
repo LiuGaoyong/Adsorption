@@ -1,6 +1,6 @@
 """The common module."""
 
-from ._base import (
+from adsorption.base._base import (
     AdsorptionConfigurationFilterABC,
     AdsorptionConfigurationGeneratorABC,
     Trial,

@@ -27,7 +27,7 @@ class _Gen(AdsorptionConfigurationGeneratorABC):
     ) -> Iterator[Trial]:
         last = self._n if stop is None else stop
         for index in range(start, last + 1):
-            yield Trial(Atoms("H2"), index, self._n, 1)
+            yield Trial(Atoms("H2"), index, self._n, {"n_substrate": 1})
 
     def signature(self) -> dict[str, int]:
         return {"n": self._n}

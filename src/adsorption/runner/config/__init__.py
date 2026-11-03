@@ -21,12 +21,12 @@
 # from hydra.core.config_store import ConfigStore
 # from omegaconf import MISSING, DictConfig, OmegaConf
 
-# from ...generate import (
+# from adsorption.generate import (
 #     Conformer,
 #     MultiAdsorbateGen,
 #     build_orientation,
 # )
-# from ...geometry import build_site, distance_array, resolve_anchor
+# from adsorption.geometry import build_site, distance_array, resolve_anchor
 # from adsorption.base import (
 #     AdsorptionConfigurationGeneratorABC,
 #     AdsorptionConfigurationFilterABC,

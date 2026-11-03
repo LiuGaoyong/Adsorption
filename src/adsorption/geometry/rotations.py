@@ -13,8 +13,8 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from .grids import DirectionGrid, FibonacciGrid
-from .rotation import (
+from adsorption.geometry.grids import DirectionGrid, FibonacciGrid
+from adsorption.geometry.rotation import (
     axis_angle_rotation,
     quaternion_to_rotation,
     shortest_arc_rotation,

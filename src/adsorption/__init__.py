@@ -1,31 +1,37 @@
 """Adsorption: geometric pre-screening of adsorption configurations."""
 
-from .filters import EnergyFilter, GeometryFilter, LJFilter
-from .generate import (
+from adsorption.base import (
+    AdsorptionConfigurationFilterABC,
+    AdsorptionConfigurationGeneratorABC,
+    Trial,
+    Verdict,
+)
+from adsorption.base.pipeline import (
+    AdsorptionConfigurationPipeline,
+    Record,
+)
+from adsorption.filters import (
+    GeometryFilter,
+    LennardJonesEnergyFilter,
+    OptimizedEnergyFilter,
+)
+from adsorption.generate import (
     Conformer,
     MultiAdsorbateGen,
     MultiSiteGen,
     SingleSiteGen,
 )
-from .process import (
-    AdsConfFilterABC,
-    AdsConfGenABC,
-    AdsConfPipeline,
-    Record,
-    Trial,
-    Verdict,
-)
 
 __all__ = [
-    "AdsConfFilterABC",
-    "AdsConfGenABC",
-    "AdsConfPipeline",
+    "AdsorptionConfigurationFilterABC",
+    "AdsorptionConfigurationGeneratorABC",
+    "AdsorptionConfigurationPipeline",
     "Conformer",
-    "EnergyFilter",
     "GeometryFilter",
-    "LJFilter",
+    "LennardJonesEnergyFilter",
     "MultiAdsorbateGen",
     "MultiSiteGen",
+    "OptimizedEnergyFilter",
     "Record",
     "SingleSiteGen",
     "Trial",

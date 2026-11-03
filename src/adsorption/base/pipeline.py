@@ -11,7 +11,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ._base import (
+from adsorption.base._base import (
     AdsorptionConfigurationFilterABC,
     AdsorptionConfigurationGeneratorABC,
     Trial,

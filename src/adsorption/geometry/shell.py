@@ -8,8 +8,8 @@ import numpy as np
 from ase import Atoms
 from ase.data import covalent_radii as COV_R
 
-from .constants import DELTA_NBR
-from .mic import displacements_mic, is_periodic
+from adsorption.geometry.constants import DELTA_NBR
+from adsorption.geometry.mic import displacements_mic, is_periodic
 
 __all__ = ["first_neighbor_shell", "mean_mic", "outward_normal"]
 

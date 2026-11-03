@@ -12,13 +12,13 @@ from bisect import bisect_right
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
-from ..process import AdsConfGenABC, Trial
-from .single_site import SingleSiteGen
+from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
+from adsorption.generate.single_site import SingleSiteGen
 
 __all__ = ["MultiSiteGen"]
 
 
-class MultiSiteGen(AdsConfGenABC):
+class MultiSiteGen(AdsorptionConfigurationGeneratorABC):
     """Enumerate several sites, one single-site generator per site.
 
     Attributes:

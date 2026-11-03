@@ -6,9 +6,9 @@ from collections.abc import Iterator
 import pytest
 from ase import Atoms
 
-from adsorption.process import (
-    AdsConfFilterABC,
-    AdsConfGenABC,
+from adsorption.base import (
+    AdsorptionConfigurationFilterABC,
+    AdsorptionConfigurationGeneratorABC,
     Trial,
     Verdict,
 )
@@ -16,14 +16,14 @@ from adsorption.process import (
 
 def test_abstract_processes_cannot_instantiate() -> None:
     with pytest.raises(TypeError):
-        AdsConfGenABC()
+        AdsorptionConfigurationGeneratorABC()  # type: ignore[abstract]
     with pytest.raises(TypeError):
-        AdsConfFilterABC()
+        AdsorptionConfigurationFilterABC()  # type: ignore[abstract]
 
 
 def test_trial_validation() -> None:
-    atoms = Atoms("H")
-    Trial(atoms, index=1, n_total=1)
+    atoms = Atoms("H2")
+    Trial(atoms, index=1, n_total=1, meta={"n_substrate": 1})
     with pytest.raises(ValueError):
         Trial(atoms, index=0, n_total=1)
     with pytest.raises(ValueError):
@@ -46,7 +46,7 @@ def test_verdict_defaults_and_validation() -> None:
         Verdict(1)  # type: ignore[arg-type]
 
 
-class _CountingGen(AdsConfGenABC):
+class _CountingGen(AdsorptionConfigurationGeneratorABC):
     def __init__(self, n: int) -> None:
         self._n = n
 
@@ -59,13 +59,18 @@ class _CountingGen(AdsConfGenABC):
     ) -> Iterator[Trial]:
         last = self._n if stop is None else stop
         for index in range(start, last + 1):
-            yield Trial(Atoms("H"), index, self._n, {"i": index})
+            yield Trial(
+                Atoms("H2"),
+                index,
+                self._n,
+                {"i": index, "n_substrate": 1},
+            )
 
     def signature(self) -> dict[str, object]:
         return {"n": self._n}
 
 
-class _EvenFilter(AdsConfFilterABC):
+class _EvenFilter(AdsorptionConfigurationFilterABC):
     def evaluate(self, trial: Trial) -> Verdict:
         accepted = trial.index % 2 == 0
         return Verdict(accepted, value=float(trial.index))
@@ -78,7 +83,7 @@ def test_generator_contract() -> None:
     assert generator.signature() == {"n": 5}
     trials = list(generator.generate())
     assert [trial.index for trial in trials] == [1, 2, 3, 4, 5]
-    assert trials[2].meta == {"i": 3}
+    assert trials[2].meta["i"] == 3
     assert [trial.index for trial in generator.generate(2, 4)] == [2, 3, 4]
 
 

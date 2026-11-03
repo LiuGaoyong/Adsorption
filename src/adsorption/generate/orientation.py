@@ -13,7 +13,7 @@ from typing import Literal
 import numpy as np
 from ase import Atoms
 
-from ..geometry import (
+from adsorption.geometry import (
     FixedRotation,
     RotationSet,
     ShortestArcSet,

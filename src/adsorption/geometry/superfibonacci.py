@@ -28,7 +28,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from .rotation import quaternion_to_rotation, unit_vector
+from adsorption.geometry.rotation import (
+    quaternion_to_rotation,
+    unit_vector,
+)
 
 __all__ = ["SuperFibonacciSO3"]
 

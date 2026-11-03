@@ -17,7 +17,8 @@ from typing import Any
 import numpy as np
 from ase import Atoms
 
-from ..geometry import (
+from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
+from adsorption.geometry import (
     DirectionGrid,
     FibonacciGrid,
     ResolvedAnchor,
@@ -25,12 +26,11 @@ from ..geometry import (
     SiteGeometry,
     place,
 )
-from ..process import AdsConfGenABC, Trial
 
 __all__ = ["SingleSiteGen"]
 
 
-class SingleSiteGen(AdsConfGenABC):
+class SingleSiteGen(AdsorptionConfigurationGeneratorABC):
     """Enumerate the trial configurations of one fixed site.
 
     Attributes:

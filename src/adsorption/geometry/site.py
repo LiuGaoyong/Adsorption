@@ -16,8 +16,17 @@ import numpy as np
 from ase import Atoms
 from ase.data import covalent_radii as COV_R
 
-from .constants import DELTA_NBR, MAX_CORE_SIZE, default_scale, default_skin
-from .shell import first_neighbor_shell, mean_mic, outward_normal
+from adsorption.geometry.constants import (
+    DELTA_NBR,
+    MAX_CORE_SIZE,
+    default_scale,
+    default_skin,
+)
+from adsorption.geometry.shell import (
+    first_neighbor_shell,
+    mean_mic,
+    outward_normal,
+)
 
 __all__ = ["SiteGeometry", "build_site"]
 

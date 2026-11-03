@@ -1,7 +1,11 @@
-"""The geometric and energetic filters."""
+"""The geometric, steric and energetic filters."""
 
-from .geometry import GeometryFilter
-from .lennardjones import LJFilter
-from .relaxation import EnergyFilter
+from adsorption.filters.geometry import GeometryFilter
+from adsorption.filters.lennardjones import LennardJonesEnergyFilter
+from adsorption.filters.relaxation import OptimizedEnergyFilter
 
-__all__ = ["EnergyFilter", "GeometryFilter", "LJFilter"]
+__all__ = [
+    "GeometryFilter",
+    "LennardJonesEnergyFilter",
+    "OptimizedEnergyFilter",
+]

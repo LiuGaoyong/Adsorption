@@ -18,12 +18,12 @@ Example:
 
 from __future__ import annotations
 
-from ..utils.conformers import (
+from adsorption.utils.conformers import (
     generate_conformers,
     near_congruent,
     prune_by_energy,
 )
-from .constants import (
+from adsorption.geometry.constants import (
     DELTA_NBR,
     GOLDEN_RATIO,
     MAX_CORE_SIZE,
@@ -34,32 +34,45 @@ from .constants import (
     default_scale,
     default_skin,
 )
-from .distance import distance_array
-from .grids import (
+from adsorption.geometry.distance import distance_array
+from adsorption.geometry.grids import (
     DirectionGrid,
     FibonacciGrid,
     LatLonGrid,
     SeededRandomGrid,
 )
-from .mic import displacements_mic, distances_mic, is_periodic
-from .placement import Anchor, ResolvedAnchor, place, resolve_anchor
-from .rotation import (
+from adsorption.geometry.mic import (
+    displacements_mic,
+    distances_mic,
+    is_periodic,
+)
+from adsorption.geometry.placement import (
+    Anchor,
+    ResolvedAnchor,
+    place,
+    resolve_anchor,
+)
+from adsorption.geometry.rotation import (
     apply_rotation,
     matrix_to_quaternion,
     quaternion_to_rotation,
     shortest_arc_rotation,
     unit_vector,
 )
-from .rotations import (
+from adsorption.geometry.rotations import (
     DirectionRollSet,
     FixedRotation,
     RotationSet,
     SO3Set,
     ShortestArcSet,
 )
-from .shell import first_neighbor_shell, mean_mic, outward_normal
-from .superfibonacci import SuperFibonacciSO3
-from .site import SiteGeometry, build_site
+from adsorption.geometry.shell import (
+    first_neighbor_shell,
+    mean_mic,
+    outward_normal,
+)
+from adsorption.geometry.superfibonacci import SuperFibonacciSO3
+from adsorption.geometry.site import SiteGeometry, build_site
 
 __all__ = [
     "DELTA_NBR",
