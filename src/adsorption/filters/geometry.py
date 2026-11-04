@@ -174,18 +174,6 @@ class GeometryFilter(AdsorptionConfigurationFilterABC):
             raise ValueError(message)
         warnings.warn(message, UserWarning, stacklevel=3)
 
-    def floor(self, left: int, right: int) -> float:
-        """Return the floor of one atomic-number pair.
-
-        Args:
-            left: Atomic number of the first atom.
-            right: Atomic number of the second atom.
-
-        Returns:
-            float: The pairwise floor in Angstrom.
-        """
-        return self._floor(left, right)
-
     def evaluate(self, trial: Trial) -> Verdict:
         """Return the minimum slack over all pairs.
 

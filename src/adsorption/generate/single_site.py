@@ -30,6 +30,7 @@ from adsorption.geometry import (
     ResolvedAnchor,
     RotationSet,
     build_site,
+    distance_array,
     place,
     resolve_anchor,
 )
@@ -50,43 +51,6 @@ DEFAULT_D_MIN = 0.8
 
 DEFAULT_D_MAX = 3.0
 """Default upper bound of the anchor-distance array, in Angstrom."""
-
-
-def _distance_grid(
-    n_d: int,
-    d_min: float,
-    d_max: float,
-) -> np.ndarray:
-    """Return the uniform anchor-distance array of the named bounds.
-
-    Args:
-        n_d: Number of distances.
-        d_min: Lower bound of the array, in Angstrom.
-        d_max: Upper bound of the array, in Angstrom.
-
-    Returns:
-        np.ndarray: The distances, shape ``(n_d,)``.
-
-    Raises:
-        ValueError: If the bounds are inconsistent or the count is invalid.
-    """
-    if not np.isfinite(d_min) or not np.isfinite(d_max):
-        raise ValueError(
-            f"The distance bounds must be finite, got {d_min} and {d_max}."
-        )
-    if d_min < 0.0:
-        raise ValueError(f"d_min must be non-negative, got {d_min}.")
-    if d_max < d_min:
-        raise ValueError(
-            f"d_max must be at least d_min, got {d_max} < {d_min}."
-        )
-    count = int(n_d)
-    if count < 1:
-        raise ValueError(f"n_d must be positive, got {n_d}.")
-    if count == 1:
-        return np.array([float(d_min)], dtype=float)
-    step = (float(d_max) - float(d_min)) / (count - 1)
-    return float(d_min) + step * np.arange(count, dtype=float)
 
 
 class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
@@ -190,7 +154,7 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
         if int(self.orientation.count()) < 1:
             raise ValueError("orientation must contain at least one rotation.")
         if distances is None:
-            distances = _distance_grid(n_d, d_min, d_max)
+            distances = distance_array(d_min, d_max, n=n_d)
         values = np.asarray(distances, dtype=float).ravel()
         if values.size == 0:
             raise ValueError("distances must not be empty.")

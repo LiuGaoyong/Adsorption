@@ -13,6 +13,8 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 from graphatoms.geometry.sample import fibonacci_lattice
 
+from adsorption.geometry.rotation import unit_vector
+
 __all__ = [
     "DirectionGrid",
     "FibonacciGrid",
@@ -45,11 +47,7 @@ def _check_n(n: int) -> int:
 
 
 def _normalize(points: np.ndarray) -> np.ndarray:
-    points = np.asarray(points, dtype=float)
-    norms = np.linalg.norm(points, axis=1)
-    if np.any(norms < 1e-15):
-        raise ValueError("The grid contains a zero-length vector.")
-    return points / norms[:, None]
+    return unit_vector(np.asarray(points, dtype=float))
 
 
 class FibonacciGrid:

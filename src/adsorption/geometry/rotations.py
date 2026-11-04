@@ -30,7 +30,6 @@ __all__ = [
     "DirectionRollSet",
     "FixedRotation",
     "RotationSet",
-    "SO3Set",
     "ShortestArcSet",
 ]
 
@@ -193,79 +192,3 @@ class DirectionRollSet:
         return np.asarray(
             self.directions[int(index) // self.n_roll], dtype=float
         )
-
-
-def _generalized_golden_ratio(dimension: int) -> float:
-    """Return the root above one of ``x ** (dimension + 1) = x + 1``."""
-    def residual(x: float) -> float:
-        return x ** (dimension + 1) - x - 1.0
-
-    lower, upper = 1.0, 2.0
-    for _ in range(200):
-        middle = 0.5 * (lower + upper)
-        if residual(middle) > 0.0:
-            upper = middle
-        else:
-            lower = middle
-    return 0.5 * (lower + upper)
-
-
-class SO3Set:
-    """A deterministic low-discrepancy point set on ``SO(3)``.
-
-    Three Kronecker sequences built from the generalised golden ratio of
-    dimension three are mapped through Shoemake's uniform-quaternion
-    parameterisation:
-
-    ``q = (sqrt(1-u1) sin 2*pi*u2, sqrt(1-u1) cos 2*pi*u2,
-           sqrt(u1) sin 2*pi*u3, sqrt(u1) cos 2*pi*u3)``
-
-    with ``u`` the Kronecker point. The construction is closed-form and
-    reproducible. It samples the roll as well as the axis direction, so for a
-    linear adsorbate it over-samples the physically irrelevant roll; use
-    ``ShortestArcSet`` there.
-
-    Attributes:
-        quaternions: The unit quaternions ``(w, x, y, z)``, shape ``(n, 4)``.
-    """
-
-    name = "so3"
-
-    def __init__(self, n: int) -> None:
-        """Precompute the quaternions.
-
-        Args:
-            n: Number of rotations.
-
-        Raises:
-            ValueError: If ``n`` is not positive.
-        """
-        if int(n) < 1:
-            raise ValueError(f"n must be positive, got {n}.")
-        dimension = 3
-        golden = _generalized_golden_ratio(dimension)
-        alpha = np.array(
-            [1.0 / golden**k for k in range(1, dimension + 1)]
-        )
-        points = (
-            0.5 + np.arange(int(n), dtype=float)[:, None] * alpha[None, :]
-        ) % 1.0
-        u1, u2, u3 = points[:, 0], points[:, 1], points[:, 2]
-        qx = np.sqrt(1.0 - u1) * np.sin(2.0 * np.pi * u2)
-        qy = np.sqrt(1.0 - u1) * np.cos(2.0 * np.pi * u2)
-        qz = np.sqrt(u1) * np.sin(2.0 * np.pi * u3)
-        qw = np.sqrt(u1) * np.cos(2.0 * np.pi * u3)
-        self.quaternions = np.asarray(
-            standardize_quaternion(
-                np.column_stack((qw, qx, qy, qz))
-            ),
-            dtype=float,
-        )
-
-    def count(self) -> int:
-        """Return the number of sampled rotations."""
-        return len(self.quaternions)
-
-    def quaternion(self, index: int) -> np.ndarray:
-        """Return the quaternion at ``index``."""
-        return np.asarray(self.quaternions[int(index)], dtype=float)

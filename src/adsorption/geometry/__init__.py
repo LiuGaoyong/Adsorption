@@ -45,7 +45,6 @@ from adsorption.geometry.placement import (
 from adsorption.geometry.rotation import (
     apply_quaternion,
     axis_angle_quaternion,
-    compose_quaternions,
     quaternion_from_scipy,
     scipy_from_quaternion,
     shortest_arc_quaternion,
@@ -55,7 +54,6 @@ from adsorption.geometry.rotations import (
     DirectionRollSet,
     FixedRotation,
     RotationSet,
-    SO3Set,
     ShortestArcSet,
 )
 from adsorption.geometry.shell import first_neighbor_shell, mean_mic
@@ -77,7 +75,6 @@ __all__ = [
     "SCALE_SINGLE",
     "SKIN_MULTI",
     "SKIN_SINGLE",
-    "SO3Set",
     "SeededRandomGrid",
     "ShortestArcSet",
     "SiteGeometry",
@@ -85,7 +82,6 @@ __all__ = [
     "apply_quaternion",
     "axis_angle_quaternion",
     "build_site",
-    "compose_quaternions",
     "default_scale",
     "default_skin",
     "displacements_mic",

@@ -65,5 +65,9 @@ def displacements_mic(
     if not is_periodic(cell, pbc):
         return v.copy()
     flat = v.reshape(-1, 3)
-    out, _ = find_mic(flat, np.asarray(cell, dtype=float), _axis_mask(pbc))
+    out, _ = find_mic(
+        flat,
+        np.asarray(cell, dtype=float),
+        _axis_mask(pbc),  # type: ignore
+    )
     return np.asarray(out, dtype=float).reshape(v.shape)

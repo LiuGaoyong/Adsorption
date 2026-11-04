@@ -11,7 +11,7 @@ loses the evidence.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import Any, Literal
@@ -53,9 +53,7 @@ class Trial:
             raise ValueError("A trial must contain at least one atom.")
         nad = int(self.natoms_adsorbate)
         if nad < 1:
-            raise ValueError(
-                f"natoms_adsorbate must be at least 1, got {nad}."
-            )
+            raise ValueError(f"natoms_adsorbate must be at least 1, got {nad}.")
         if nad >= len(self.atoms):
             raise ValueError(
                 "natoms_adsorbate must be less than the number of atoms "
@@ -132,16 +130,112 @@ class Verdict:
             raise ValueError("reason must not be empty.")
 
 
-class AdsorptionConfigurationGeneratorABC(ABC):
+class AdsorptionConfigurationGeneratorABC(
+    Sequence[Trial],
+    Generator[Trial, None, None],
+    ABC,
+):
     """Process A: deterministic adsorption configuration trial generation.
 
     A concrete generator yields trials in candidate-index order. It must not
     evaluate an energy, so generation stays independent of the energy engine.
+
+    The class is both a :class:`~collections.abc.Sequence` and a
+    :class:`~collections.abc.Generator` of trials:
+
+    * the sequence protocol gives random access in zero-based order
+      (``generator[i]`` is the trial with one-based index ``i + 1``),
+      slicing, ``len()`` and re-iterable iteration;
+    * the generator protocol gives a one-shot cursor over the same trials
+      (``next(generator)``, ``send``, ``throw``, ``close``), created lazily
+      from :meth:`generate`.
+
+    The two protocols share the trials but not the cursor: ``iter()`` starts a
+    fresh stream on every call, while ``next()`` advances the object's own
+    cursor. Sharded access remains available through :meth:`generate`.
     """
+
+    _iterator: Iterator[Trial] | None = None
 
     def __len__(self) -> int:
         """Return the fixed number of candidates."""
         return int(self.n_candidates)
+
+    def __getitem__(self, index: int | slice) -> Trial | list[Trial]:  # type: ignore
+        """Return the trial at a zero-based index, or a slice of trials.
+
+        Args:
+            index: Zero-based index or slice. Negative indices count from the
+                end, following the sequence protocol.
+
+        Returns:
+            Trial | list[Trial]: The trial, or the list of trials of a slice.
+
+        Raises:
+            IndexError: If ``index`` is outside ``[0, len(self))``.
+        """
+        if isinstance(index, slice):
+            return [self[item] for item in range(*index.indices(len(self)))]  # type: ignore
+        position = int(index)
+        total = len(self)
+        if position < 0:
+            position += total
+        if position < 0 or position >= total:
+            raise IndexError(f"index must be in [0, {total}), got {index}.")
+        return next(self.generate(position + 1, position + 1))
+
+    def __iter__(self) -> Iterator[Trial]:  # type: ignore
+        """Return a fresh iterator over every trial."""
+        return self.generate()
+
+    def __next__(self) -> Trial:
+        """Return the next trial of the object's own cursor."""
+        if self._iterator is None:
+            self._iterator = self.generate()
+        return next(self._iterator)
+
+    def send(self, value: None) -> Trial:
+        """Send ``None`` into the object's cursor and return the next trial.
+
+        Args:
+            value: Must be ``None``; the trials are not a coroutine.
+
+        Returns:
+            Trial: The next trial of the cursor.
+        """
+        if self._iterator is None:
+            self._iterator = self.generate()
+        return self._iterator.send(value)  # type: ignore
+
+    def throw(
+        self,
+        typ: object,
+        val: object | None = None,
+        tb: object | None = None,
+    ) -> Trial:
+        """Raise an exception inside the object's cursor.
+
+        Args:
+            typ: Exception type or instance.
+            val: Optional exception value.
+            tb: Optional traceback.
+
+        Returns:
+            Trial: The next trial of the cursor.
+        """
+        if self._iterator is None:
+            self._iterator = self.generate()
+        if val is None and tb is None:
+            return self._iterator.throw(typ)  # type: ignore[arg-type]
+        return self._iterator.throw(typ, val, tb)  # type: ignore[arg-type]
+
+    def close(self) -> None:
+        """Close the object's cursor.
+
+        A later ``next`` raises ``StopIteration``.
+        """
+        if self._iterator is not None:
+            self._iterator.close()  # type: ignore
 
     @property
     @abstractmethod

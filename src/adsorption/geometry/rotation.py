@@ -16,14 +16,12 @@ from scipy.spatial.transform import Rotation
 from adsorption.geometry._quat import (
     quaternion_apply,
     quaternion_invert,
-    quaternion_raw_multiply,
     standardize_quaternion,
 )
 
 __all__ = [
     "apply_quaternion",
     "axis_angle_quaternion",
-    "compose_quaternions",
     "quaternion_from_scipy",
     "scipy_from_quaternion",
     "shortest_arc_quaternion",
@@ -31,25 +29,28 @@ __all__ = [
 ]
 
 
-def unit_vector(vector: np.ndarray) -> np.ndarray:
-    """Return the normalised vector.
+def unit_vector(vectors: np.ndarray) -> np.ndarray:
+    """Return the normalised vector(s).
 
     Args:
-        vector: A vector of shape ``(3,)``.
+        vectors: A vector of shape ``(3,)`` or an array of shape
+            ``(..., 3)``.
 
     Returns:
-        np.ndarray: The unit vector.
+        np.ndarray: The unit vector(s), the same shape as ``vectors``.
 
     Raises:
-        ValueError: If the vector is not three-dimensional or is zero.
+        ValueError: If the last axis is not 3 or a vector is zero.
     """
-    v = np.asarray(vector, dtype=float)
-    if v.shape != (3,):
-        raise ValueError(f"The vector must be (3,), got {v.shape}.")
-    length = float(np.linalg.norm(v))
-    if length < 1e-12:
+    v = np.asarray(vectors, dtype=float)
+    if v.shape[-1:] != (3,):
+        raise ValueError(
+            f"The vector must be (3,) or (..., 3), got {v.shape}."
+        )
+    norms = np.linalg.norm(v, axis=-1)
+    if np.any(norms < 1e-12):
         raise ValueError("Cannot normalise a zero-length vector.")
-    return v / length
+    return v / np.asarray(norms)[..., None]
 
 
 def quaternion_from_scipy(rotation: Rotation) -> np.ndarray:
@@ -159,25 +160,3 @@ def apply_quaternion(
     if inverse:
         q = quaternion_invert(q)
     return np.asarray(quaternion_apply(q, pos), dtype=float)
-
-
-def compose_quaternions(*quaternions: np.ndarray) -> np.ndarray:
-    """Compose unit quaternions left to right.
-
-    Args:
-        *quaternions: Unit quaternions ``(w, x, y, z)``.
-
-    Returns:
-        np.ndarray: The product, real part first, shape ``(4,)``.
-
-    Raises:
-        ValueError: If no quaternion is given.
-    """
-    if not quaternions:
-        raise ValueError("At least one quaternion is required.")
-    result = np.asarray(quaternions[0], dtype=float).ravel()
-    for quaternion in quaternions[1:]:
-        result = np.asarray(
-            quaternion_raw_multiply(result, quaternion), dtype=float
-        ).ravel()
-    return standardize_quaternion(result)

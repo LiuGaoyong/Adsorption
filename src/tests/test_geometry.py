@@ -14,7 +14,6 @@ from adsorption.geometry import (
     DirectionRollSet,
     FibonacciGrid,
     LatLonGrid,
-    SO3Set,
     SeededRandomGrid,
     build_site,
     default_scale,
@@ -24,13 +23,12 @@ from adsorption.geometry import (
     first_neighbor_shell,
     mean_mic,
     apply_quaternion,
-    compose_quaternions,
     place,
     resolve_anchor,
     shortest_arc_quaternion,
     unit_vector,
 )
-from adsorption.geometry._quat import quaternion_invert
+from adsorption.geometry._quat import quaternion_invert, quaternion_raw_multiply
 from adsorption.utils.conformers import (
     generate_conformers,
     near_congruent,
@@ -110,6 +108,38 @@ def test_distance_array() -> None:
         distance_array(1.0, 0.5, 0.1)
     with pytest.raises(ValueError):
         distance_array(0.0, 1.0, 0.0)
+
+
+def test_distance_array_from_the_count() -> None:
+    assert np.allclose(
+        distance_array(0.8, 3.0, n=12),
+        distance_array(0.8, 3.0, 0.2),
+    )
+    single = distance_array(2.0, 3.0, n=1)
+    assert single.shape == (1,)
+    assert single[0] == pytest.approx(2.0)
+    with pytest.raises(ValueError):
+        distance_array(0.0, 1.0)
+    with pytest.raises(ValueError):
+        distance_array(0.0, 1.0, 0.2, n=5)
+    with pytest.raises(ValueError):
+        distance_array(-1.0, 1.0, n=3)
+    with pytest.raises(ValueError):
+        distance_array(0.0, 1.0, n=0)
+
+
+def test_unit_vector_normalises_a_batch() -> None:
+    vectors = np.array(
+        [[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, -4.0]]
+    )
+    unit = unit_vector(vectors)
+    assert unit.shape == vectors.shape
+    assert np.allclose(np.linalg.norm(unit, axis=1), 1.0)
+    assert np.allclose(unit, np.diag([1.0, 1.0, -1.0]))
+    with pytest.raises(ValueError):
+        unit_vector(np.zeros((2, 3)))
+    with pytest.raises(ValueError):
+        unit_vector(np.zeros((2, 4)))
 
 
 def test_shortest_arc_quaternion() -> None:
@@ -253,7 +283,7 @@ def test_direction_roll_set() -> None:
     # the first direction carries four rolls, one per roll index
     first = orientations.quaternion(0)
     second = orientations.quaternion(1)
-    relative = compose_quaternions(second, quaternion_invert(first))
+    relative = quaternion_raw_multiply(second, quaternion_invert(first))
     angle = 2.0 * np.arccos(np.clip(abs(relative[0]), -1.0, 1.0))
     assert np.isclose(angle, 2.0 * np.pi / 4)
     image = orientations.image(0)
@@ -261,26 +291,6 @@ def test_direction_roll_set() -> None:
     assert np.allclose(rolled, image)
     # the roll leaves the placed axis invariant
     assert np.allclose(orientations.image(7), orientations.image(4))
-
-
-def test_so3_set_is_uniform_and_deterministic() -> None:
-    orientations = SO3Set(1024)
-    assert orientations.count() == 1024
-    assert np.array_equal(orientations.quaternions, SO3Set(1024).quaternions)
-    for index in (0, 1, 500, 1023):
-        quaternion = orientations.quaternion(index)
-        assert np.isclose(np.linalg.norm(quaternion), 1.0, atol=1e-10)
-    axis = np.array([0.0, 0.0, 1.0])
-    images = np.array(
-        [
-            apply_quaternion(orientations.quaternion(i), axis[None, :])[0]
-            for i in range(1024)
-        ]
-    )
-    assert np.linalg.norm(images.mean(axis=0)) < 0.02
-    covariance = np.cov(images.T)
-    assert np.allclose(np.diag(covariance), 1.0 / 3.0, atol=0.02)
-    assert np.allclose(covariance - np.diag(np.diag(covariance)), 0.0, atol=0.01)
 
 
 def test_conformer_generation_is_deterministic() -> None:

@@ -125,35 +125,6 @@ class SiteGeometry:
             )
         )
 
-    @property
-    def filter_numbers(self) -> np.ndarray:
-        """Return the atomic numbers of the steric filter set ``P(s)``."""
-        if self.core_size == 1:
-            return np.asarray(self.neighbor_numbers, dtype=int)
-        return np.concatenate(
-            (
-                np.asarray(self.core_numbers, dtype=int),
-                np.asarray(self.neighbor_numbers, dtype=int),
-            )
-        )
-
-    @property
-    def filter_radii(self) -> np.ndarray:
-        """Return the covalent radii of the steric filter set."""
-        return np.asarray(COV_R[self.filter_numbers], dtype=float)
-
-    def cell_array(self) -> np.ndarray | None:
-        """Return the cached cell as a float array, or ``None``."""
-        if self.cell is None:
-            return None
-        return np.asarray(self.cell, dtype=float)
-
-    def pbc_array(self) -> np.ndarray | None:
-        """Return the cached periodic-axis mask, or ``None``."""
-        if self.pbc is None:
-            return None
-        return np.asarray(self.pbc, dtype=bool)
-
 
 def build_site(
     atoms: Atoms,

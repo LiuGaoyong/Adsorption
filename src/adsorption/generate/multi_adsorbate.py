@@ -7,15 +7,14 @@ never generates, weights or relaxes conformers itself.
 
 from __future__ import annotations
 
-from bisect import bisect_right
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 from ase import Atoms
 
-from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
+from adsorption.generate._chained import _ChainedGenerator
 from adsorption.generate.multi_site import MultiSiteGenerator
 from adsorption.generate.single_site import DEFAULT_N_OA, SingleSiteGenerator
 from adsorption.geometry import (
@@ -62,7 +61,7 @@ class Conformer:
         object.__setattr__(self, "distances", values)
 
 
-class MultiAdsorbateGenerator(AdsorptionConfigurationGeneratorABC):
+class MultiAdsorbateGenerator(_ChainedGenerator):
     """Enumerate several conformers, each over its sites.
 
     Attributes:
@@ -119,105 +118,7 @@ class MultiAdsorbateGenerator(AdsorptionConfigurationGeneratorABC):
                 for site_index, site in enumerate(self.sites)
             ]
             components.append(MultiSiteGenerator(singles))
-        self.components = tuple(components)
-        offsets: list[int] = []
-        total = 0
-        for component in self.components:
-            offsets.append(total)
-            total += int(component.n_candidates)
-        self.offsets = tuple(offsets)
-        self.total = int(total)
-
-    @property
-    def n_candidates(self) -> int:
-        """Return the total number of candidates."""
-        return self.total
-
-    def _position(self, kappa: int) -> int:
-        """Return the conformer position of a one-based index.
-
-        Args:
-            kappa: One-based candidate index.
-
-        Returns:
-            int: Index into :attr:`components`.
-
-        Raises:
-            IndexError: If ``kappa`` is outside ``[1, total]``.
-        """
-        index = int(kappa)
-        if index < 1 or index > self.total:
-            raise IndexError(
-                f"kappa must be in [1, {self.total}], got {kappa}."
-            )
-        return bisect_right(self.offsets, index - 1) - 1
-
-    def trial(self, kappa: int) -> Trial:
-        """Build the trial of one global candidate index.
-
-        Args:
-            kappa: One-based global index.
-
-        Returns:
-            Trial: The placed configuration with a global index.
-
-        Raises:
-            IndexError: If ``kappa`` is outside ``[1, total]``.
-        """
-        position = self._position(kappa)
-        offset = self.offsets[position]
-        inner = self.components[position].trial(int(kappa) - offset)
-        return Trial(
-            atoms=inner.atoms,  # type: ignore
-            index=int(kappa),  # type: ignore
-            n_total=self.total,  # type: ignore
-            meta=inner.meta,  # type: ignore
-        )
-
-    def generate(
-        self,
-        start: int = 1,
-        stop: int | None = None,
-    ) -> Iterator[Trial]:
-        """Yield the trials of a one-based global index interval.
-
-        Args:
-            start: First one-based index (inclusive).
-            stop: Last one-based index (inclusive); the end when ``None``.
-
-        Yields:
-            Trial: The trials in global index order.
-
-        Raises:
-            IndexError: If the interval is outside ``[1, total]``.
-            ValueError: If ``start`` is greater than ``stop``.
-        """
-        first = int(start)
-        last = self.total if stop is None else int(stop)
-        if first < 1 or last > self.total:
-            raise IndexError(
-                f"interval must be in [1, {self.total}], got [{first}, {last}]."
-            )
-        if first > last:
-            raise ValueError(f"start must not exceed stop, got {start}>{stop}.")
-        cursor = first
-        position = self._position(cursor)
-        while cursor <= last:
-            component = self.components[position]
-            offset = self.offsets[position]
-            local_first = cursor - offset
-            local_last = min(component.n_candidates, last - offset)
-            for trial in component.generate(local_first, local_last):
-                yield Trial(
-                    atoms=trial.atoms,
-                    index=trial.index + offset,
-                    n_total=self.total,
-                    meta=trial.meta,
-                )
-            position += 1
-            if position >= len(self.components):
-                break
-            cursor = self.offsets[position] + 1
+        super().__init__(components)
 
     def signature(self) -> Mapping[str, Any]:
         """Return the parameters that identify this generator.
