@@ -17,9 +17,9 @@ from adsorption.filters import (
 )
 from adsorption.generate import (
     Conformer,
-    MultiAdsorbateGen,
-    MultiSiteGen,
-    SingleSiteGen,
+    MultiAdsorbateGenerator,
+    MultiSiteGenerator,
+    SingleSiteGenerator,
 )
 
 __all__ = [
@@ -29,11 +29,11 @@ __all__ = [
     "Conformer",
     "GeometryFilter",
     "LennardJonesEnergyFilter",
-    "MultiAdsorbateGen",
-    "MultiSiteGen",
+    "MultiAdsorbateGenerator",
+    "MultiSiteGenerator",
     "OptimizedEnergyFilter",
     "Record",
-    "SingleSiteGen",
+    "SingleSiteGenerator",
     "Trial",
     "Verdict",
 ]

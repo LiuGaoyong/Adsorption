@@ -6,12 +6,8 @@ import pytest
 from ase import Atoms
 from ase.build import fcc111, molecule
 
-from adsorption.generate import MultiSiteGen, SingleSiteGen
-from adsorption.geometry import (
-    FixedRotation,
-    build_site,
-    resolve_anchor,
-)
+from adsorption.generate import MultiSiteGenerator, SingleSiteGenerator
+from adsorption.geometry import FixedRotation
 
 
 @pytest.fixture(scope="module")
@@ -19,23 +15,27 @@ def slab() -> Atoms:
     return fcc111("Cu", (2, 2, 2), vacuum=8.0, orthogonal=True)
 
 
-def make(slab: Atoms, core: list[int], n_grid: int, distances: list[float], index: int) -> SingleSiteGen:
-    reference = molecule("CO")
-    return SingleSiteGen(
+def make(
+    slab: Atoms,
+    core: list[int],
+    n_oa: int,
+    distances: list[float],
+    index: int,
+) -> SingleSiteGenerator:
+    return SingleSiteGenerator(
         slab,
-        build_site(slab, core=core),
-        reference,
-        anchor=resolve_anchor(reference, "com"),
+        core,
+        molecule("CO"),
+        n_oa=n_oa,
         orientation=FixedRotation(),
         distances=np.array(distances),
-        n_grid=n_grid,
         site_index=index,
     )
 
 
 @pytest.fixture(scope="module")
-def generator(slab: Atoms) -> MultiSiteGen:
-    return MultiSiteGen(
+def generator(slab: Atoms) -> MultiSiteGenerator:
+    return MultiSiteGenerator(
         [
             make(slab, [0], 4, [2.0], 0),
             make(slab, [1], 6, [2.0, 2.5], 1),
@@ -43,13 +43,13 @@ def generator(slab: Atoms) -> MultiSiteGen:
     )
 
 
-def test_budget(generator: MultiSiteGen) -> None:
+def test_budget(generator: MultiSiteGenerator) -> None:
     assert generator.n_candidates == 4 + 12
     assert len(generator) == 16
     assert generator.offsets == (0, 4)
 
 
-def test_global_index_maps_to_site(generator: MultiSiteGen) -> None:
+def test_global_index_maps_to_site(generator: MultiSiteGenerator) -> None:
     assert generator.trial(1).meta["site"] == 0
     assert generator.trial(4).meta["site"] == 0
     fifth = generator.trial(5)
@@ -64,7 +64,7 @@ def test_global_index_maps_to_site(generator: MultiSiteGen) -> None:
     assert last.n_total == 16
 
 
-def test_generate_across_the_boundary(generator: MultiSiteGen) -> None:
+def test_generate_across_the_boundary(generator: MultiSiteGenerator) -> None:
     chunk = list(generator.generate(3, 6))
     assert [trial.index for trial in chunk] == [3, 4, 5, 6]
     assert [trial.meta["site"] for trial in chunk] == [0, 0, 1, 1]
@@ -77,10 +77,10 @@ def test_generate_across_the_boundary(generator: MultiSiteGen) -> None:
 
 def test_empty_components() -> None:
     with pytest.raises(ValueError):
-        MultiSiteGen([])
+        MultiSiteGenerator([])
 
 
-def test_signature(generator: MultiSiteGen) -> None:
+def test_signature(generator: MultiSiteGenerator) -> None:
     signature = generator.signature()
     assert signature["kind"] == "multi_site"
     assert len(signature["components"]) == 2

@@ -32,9 +32,8 @@ def test_quaternions_are_unit_and_deterministic() -> None:
 def test_rotations_are_proper() -> None:
     sequence = SuperFibonacciSO3(8)
     for index in range(8):
-        rotation = sequence.rotation(index)
-        assert np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-12)
-        assert np.linalg.det(rotation) == pytest.approx(1.0)
+        quaternion = sequence.quaternion(index)
+        assert np.isclose(np.linalg.norm(quaternion), 1.0, atol=1e-12)
         image = sequence.image(index)
         assert np.linalg.norm(image) == pytest.approx(1.0)
 
@@ -50,8 +49,9 @@ def test_rotation_angle_follows_haar() -> None:
     sequence = SuperFibonacciSO3(2000)
     angles = np.array(
         [
-            np.arccos(
-                np.clip((np.trace(sequence.rotation(i)) - 1.0) / 2.0, -1, 1)
+            2.0
+            * np.arccos(
+                np.clip(abs(sequence.quaternion(i)[0]), 0.0, 1.0)
             )
             for i in range(sequence.count())
         ]

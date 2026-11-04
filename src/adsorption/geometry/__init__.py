@@ -18,14 +18,8 @@ Example:
 
 from __future__ import annotations
 
-from adsorption.utils.conformers import (
-    generate_conformers,
-    near_congruent,
-    prune_by_energy,
-)
 from adsorption.geometry.constants import (
     DELTA_NBR,
-    GOLDEN_RATIO,
     MAX_CORE_SIZE,
     SCALE_MULTI,
     SCALE_SINGLE,
@@ -41,11 +35,7 @@ from adsorption.geometry.grids import (
     LatLonGrid,
     SeededRandomGrid,
 )
-from adsorption.geometry.mic import (
-    displacements_mic,
-    distances_mic,
-    is_periodic,
-)
+from adsorption.geometry.mic import displacements_mic, is_periodic
 from adsorption.geometry.placement import (
     Anchor,
     ResolvedAnchor,
@@ -53,10 +43,12 @@ from adsorption.geometry.placement import (
     resolve_anchor,
 )
 from adsorption.geometry.rotation import (
-    apply_rotation,
-    matrix_to_quaternion,
-    quaternion_to_rotation,
-    shortest_arc_rotation,
+    apply_quaternion,
+    axis_angle_quaternion,
+    compose_quaternions,
+    quaternion_from_scipy,
+    scipy_from_quaternion,
+    shortest_arc_quaternion,
     unit_vector,
 )
 from adsorption.geometry.rotations import (
@@ -66,53 +58,45 @@ from adsorption.geometry.rotations import (
     SO3Set,
     ShortestArcSet,
 )
-from adsorption.geometry.shell import (
-    first_neighbor_shell,
-    mean_mic,
-    outward_normal,
-)
+from adsorption.geometry.shell import first_neighbor_shell, mean_mic
 from adsorption.geometry.superfibonacci import SuperFibonacciSO3
 from adsorption.geometry.site import SiteGeometry, build_site
 
 __all__ = [
-    "DELTA_NBR",
-    "GOLDEN_RATIO",
-    "MAX_CORE_SIZE",
-    "SCALE_MULTI",
-    "SCALE_SINGLE",
-    "SKIN_MULTI",
-    "SKIN_SINGLE",
     "Anchor",
+    "DELTA_NBR",
     "DirectionGrid",
     "DirectionRollSet",
     "FibonacciGrid",
     "FixedRotation",
     "LatLonGrid",
+    "MAX_CORE_SIZE",
     "ResolvedAnchor",
     "RotationSet",
+    "SCALE_MULTI",
+    "SCALE_SINGLE",
+    "SKIN_MULTI",
+    "SKIN_SINGLE",
     "SO3Set",
     "SeededRandomGrid",
+    "ShortestArcSet",
     "SiteGeometry",
-    "apply_rotation",
+    "SuperFibonacciSO3",
+    "apply_quaternion",
+    "axis_angle_quaternion",
     "build_site",
+    "compose_quaternions",
     "default_scale",
     "default_skin",
     "displacements_mic",
     "distance_array",
-    "distances_mic",
-    "generate_conformers",
     "first_neighbor_shell",
     "is_periodic",
-    "matrix_to_quaternion",
     "mean_mic",
-    "near_congruent",
-    "outward_normal",
     "place",
-    "prune_by_energy",
-    "quaternion_to_rotation",
+    "quaternion_from_scipy",
     "resolve_anchor",
-    "ShortestArcSet",
-    "SuperFibonacciSO3",
-    "shortest_arc_rotation",
+    "scipy_from_quaternion",
+    "shortest_arc_quaternion",
     "unit_vector",
 ]

@@ -1,46 +1,111 @@
-"""Process A for one adsorption site: enumerate ``(OA, SO(3), d)``.
+"""Process A for one adsorption site: enumerate ``(OA, AB, d)``.
 
-``SingleSiteGen`` owns a single :class:`~adsorption.geometry.SiteGeometry` and
-a single reference adsorbate. It enumerates the approach direction on a
-Fibonacci grid, the molecular orientation on a rotation set (by default the
-Super-Fibonacci sequence on ``SO(3)``), and the anchor distance on a one-
-dimensional array. The candidate index follows the protocol order: direction
-outermost, orientation next, distance fastest.
+``SingleSiteGenerator`` owns one adsorption site and one reference adsorbate.
+It enumerates the approach direction on a near-uniform spherical point set
+(the spherical Fibonacci lattice by default), the molecular orientation on a
+rotation set, and the anchor distance on a one-dimensional array. The
+candidate index follows the protocol order: direction outermost, orientation
+next, distance fastest.
+
+The generator is built from three inputs -- the substrate, the index (or
+indices) of the adsorption centre, and the adsorbate molecule. Every remaining
+choice is a named parameter with a protocol default.
 """
 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 import numpy as np
 from ase import Atoms
 
 from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
+from adsorption.generate.orientation import Shape, build_orientation
 from adsorption.geometry import (
+    Anchor,
     DirectionGrid,
     FibonacciGrid,
     ResolvedAnchor,
     RotationSet,
-    SiteGeometry,
+    build_site,
     place,
+    resolve_anchor,
 )
 
-__all__ = ["SingleSiteGen"]
+__all__ = ["SingleSiteGenerator"]
+
+DEFAULT_N_OA = 200
+"""Default number of approach directions (the protocol value of $N$)."""
+
+DEFAULT_N_ROT = 200
+"""Default number of orientations (the protocol value of $N_{AB}$)."""
+
+DEFAULT_N_D = 12
+"""Default length of the anchor-distance array (the protocol value of $M$)."""
+
+DEFAULT_D_MIN = 0.8
+"""Default lower bound of the anchor-distance array, in Angstrom."""
+
+DEFAULT_D_MAX = 3.0
+"""Default upper bound of the anchor-distance array, in Angstrom."""
 
 
-class SingleSiteGen(AdsorptionConfigurationGeneratorABC):
+def _distance_grid(
+    n_d: int,
+    d_min: float,
+    d_max: float,
+) -> np.ndarray:
+    """Return the uniform anchor-distance array of the named bounds.
+
+    Args:
+        n_d: Number of distances.
+        d_min: Lower bound of the array, in Angstrom.
+        d_max: Upper bound of the array, in Angstrom.
+
+    Returns:
+        np.ndarray: The distances, shape ``(n_d,)``.
+
+    Raises:
+        ValueError: If the bounds are inconsistent or the count is invalid.
+    """
+    if not np.isfinite(d_min) or not np.isfinite(d_max):
+        raise ValueError(
+            f"The distance bounds must be finite, got {d_min} and {d_max}."
+        )
+    if d_min < 0.0:
+        raise ValueError(f"d_min must be non-negative, got {d_min}.")
+    if d_max < d_min:
+        raise ValueError(
+            f"d_max must be at least d_min, got {d_max} < {d_min}."
+        )
+    count = int(n_d)
+    if count < 1:
+        raise ValueError(f"n_d must be positive, got {n_d}.")
+    if count == 1:
+        return np.array([float(d_min)], dtype=float)
+    step = (float(d_max) - float(d_min)) / (count - 1)
+    return float(d_min) + step * np.arange(count, dtype=float)
+
+
+class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
     """Enumerate the trial configurations of one fixed site.
+
+    The site is derived from the adsorption-centre index: the core atom set is
+    the given index (one atom for a top site, a pair for a bridge, a triple
+    for a hollow), the site centre is its minimum-image mean, and the
+    first-neighbour shell is detected from the covalent radii.
 
     Attributes:
         substrate: The substrate structure.
-        site: The site geometry.
+        core: The core atom indices of the adsorption centre.
+        site: The site geometry built from ``core``.
         reference: The reference adsorbate.
         anchor: The resolved anchor in the reference frame.
         orientation: The rotation set.
         distances: The anchor-centre distances, shape ``(n_d,)``.
-        n_oa: Number of approach directions.
+        n_oa: Number of approach directions realised by the grid.
         n_rot: Number of orientations.
         n_d: Number of distances.
     """
@@ -48,28 +113,46 @@ class SingleSiteGen(AdsorptionConfigurationGeneratorABC):
     def __init__(
         self,
         substrate: Atoms,
-        site: SiteGeometry,
+        core: int | Sequence[int] | np.ndarray,
         reference: Atoms,
         *,
-        anchor: ResolvedAnchor,
-        orientation: RotationSet,
-        distances: np.ndarray,
+        n_oa: int = DEFAULT_N_OA,
+        n_rot: int = DEFAULT_N_ROT,
+        n_d: int = DEFAULT_N_D,
+        d_min: float = DEFAULT_D_MIN,
+        d_max: float = DEFAULT_D_MAX,
+        distances: np.ndarray | Sequence[float] | None = None,
+        anchor: Anchor | ResolvedAnchor = "com",
+        orientation: RotationSet | None = None,
+        orientation_kind: Shape = "auto",
         grid: DirectionGrid | None = None,
-        n_grid: int = 200,
+        scale: float | None = None,
+        skin: float | None = None,
         site_index: int = 0,
         conformer: int = 0,
     ) -> None:
-        """Store the site, the adsorbate and the three grids.
+        """Build the site, the adsorbate and the three grids.
 
         Args:
             substrate: The substrate structure.
-            site: The geometry of the fixed site.
-            reference: The reference adsorbate.
-            anchor: The resolved anchor of the reference.
-            orientation: The rotation set.
-            distances: The anchor-centre distances in Angstrom.
-            grid: Direction grid. Defaults to the Fibonacci lattice.
-            n_grid: Requested number of directions.
+            core: Index (or indices) of the adsorption-centre core atoms.
+            reference: The reference adsorbate molecule.
+            n_oa: Number of approach directions.
+            n_rot: Number of molecular orientations.
+            n_d: Number of anchor distances.
+            d_min: Lower bound of the anchor-distance array, in Angstrom.
+            d_max: Upper bound of the anchor-distance array, in Angstrom.
+            distances: Explicit anchor-distance array; overrides ``n_d``,
+                ``d_min`` and ``d_max``.
+            anchor: The anchor declaration, or an already resolved anchor.
+            orientation: An explicit rotation set; overrides
+                ``orientation_kind`` and ``n_rot``.
+            orientation_kind: How to build the rotation set when
+                ``orientation`` is not given: ``"auto"``, ``"fixed"``,
+                ``"s2"`` or ``"so3"``.
+            grid: Direction grid. Defaults to the spherical Fibonacci lattice.
+            scale: Direction-sphere scale factor of the site.
+            skin: Steric margin of the site, in Angstrom.
             site_index: Zero-based index of the site in the parent generator.
             conformer: Zero-based index of the conformer.
 
@@ -85,28 +168,42 @@ class SingleSiteGen(AdsorptionConfigurationGeneratorABC):
             raise TypeError(
                 f"reference must be an ase.Atoms, got {type(reference)}."
             )
+        if int(n_oa) < 1:
+            raise ValueError(f"n_oa must be positive, got {n_oa}.")
+
+        self.substrate = substrate
+        self.reference = reference
+        self.site = build_site(substrate, core, scale=scale, skin=skin)
+        self.core = np.asarray(self.site.core_indices, dtype=int)
+        self.anchor = (
+            anchor
+            if isinstance(anchor, ResolvedAnchor)
+            else resolve_anchor(reference, anchor)
+        )
+        if orientation is None:
+            if int(n_rot) < 1:
+                raise ValueError(f"n_rot must be positive, got {n_rot}.")
+            _, orientation = build_orientation(
+                orientation_kind, reference, n=int(n_rot)
+            )
+        self.orientation = orientation
+        if int(self.orientation.count()) < 1:
+            raise ValueError("orientation must contain at least one rotation.")
+        if distances is None:
+            distances = _distance_grid(n_d, d_min, d_max)
         values = np.asarray(distances, dtype=float).ravel()
         if values.size == 0:
             raise ValueError("distances must not be empty.")
         if not np.all(np.isfinite(values)):
             raise ValueError("distances must be finite.")
-        if int(n_grid) < 1:
-            raise ValueError(f"n_grid must be positive, got {n_grid}.")
-        if int(orientation.count()) < 1:
-            raise ValueError("orientation must contain at least one rotation.")
 
-        self.substrate = substrate
-        self.site = site
-        self.reference = reference
-        self.anchor = anchor
-        self.orientation = orientation
         self.distances = values
         self.site_index = int(site_index)
         self.conformer = int(conformer)
         active_grid: DirectionGrid = FibonacciGrid() if grid is None else grid
-        self.unit = np.asarray(active_grid.points(int(n_grid)), dtype=float)
+        self.unit = np.asarray(active_grid.points(int(n_oa)), dtype=float)
         self.n_oa = int(len(self.unit))
-        self.n_rot = int(orientation.count())
+        self.n_rot = int(self.orientation.count())
         self.n_d = int(values.size)
 
     @property
@@ -157,12 +254,12 @@ class SingleSiteGen(AdsorptionConfigurationGeneratorABC):
             np.asarray(self.site.center, dtype=float)
             + distance * direction
         )
-        rotation = np.asarray(self.orientation.rotation(j - 1), dtype=float)
+        quaternion = self.orientation.quaternion(j - 1)
         placed = place(
             self.reference,
             anchor=self.anchor,
             target=target,
-            rotation=rotation,
+            quaternion=quaternion,
         )
         structure = self.substrate.copy()
         structure.extend(placed)
@@ -229,7 +326,7 @@ class SingleSiteGen(AdsorptionConfigurationGeneratorABC):
             "kind": "single_site",
             "site_index": self.site_index,
             "conformer": self.conformer,
-            "core": [int(index) for index in self.site.core_indices],
+            "core": [int(index) for index in self.core],
             "center": [float(value) for value in self.site.center],
             "anchor": {
                 "kind": self.anchor.kind,
@@ -242,7 +339,7 @@ class SingleSiteGen(AdsorptionConfigurationGeneratorABC):
                 "name": getattr(self.orientation, "name", "unknown"),
                 "count": self.n_rot,
             },
-            "n_grid": self.n_oa,
+            "n_oa": self.n_oa,
             "n_d": self.n_d,
             "distances": [float(value) for value in self.distances],
             "reference": digest,

@@ -33,11 +33,11 @@ REQUIRED_EXPORTS = frozenset(
         "Conformer",
         "GeometryFilter",
         "LennardJonesEnergyFilter",
-        "MultiAdsorbateGen",
-        "MultiSiteGen",
+        "MultiAdsorbateGenerator",
+        "MultiSiteGenerator",
         "OptimizedEnergyFilter",
         "Record",
-        "SingleSiteGen",
+        "SingleSiteGenerator",
         "Trial",
         "Verdict",
     }
@@ -143,8 +143,8 @@ def test_root_exports_are_the_same_objects_as_their_modules() -> None:
         is sys.modules[f"{PACKAGE}.filters.geometry"].GeometryFilter
     )
     assert (
-        adsorption.SingleSiteGen
-        is sys.modules[f"{PACKAGE}.generate.single_site"].SingleSiteGen
+        adsorption.SingleSiteGenerator
+        is sys.modules[f"{PACKAGE}.generate.single_site"].SingleSiteGenerator
     )
 
 

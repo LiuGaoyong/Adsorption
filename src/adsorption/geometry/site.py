@@ -10,6 +10,7 @@ multi-core site.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,11 +23,7 @@ from adsorption.geometry.constants import (
     default_scale,
     default_skin,
 )
-from adsorption.geometry.shell import (
-    first_neighbor_shell,
-    mean_mic,
-    outward_normal,
-)
+from adsorption.geometry.shell import first_neighbor_shell, mean_mic
 
 __all__ = ["SiteGeometry", "build_site"]
 
@@ -145,20 +142,6 @@ class SiteGeometry:
         """Return the covalent radii of the steric filter set."""
         return np.asarray(COV_R[self.filter_numbers], dtype=float)
 
-    @property
-    def outward_normal(self) -> np.ndarray:
-        """Return the outward reference direction ``n_s`` of Eq. (4).
-
-        This vector is bookkeeping and visualisation only; it does not
-        constrain the ``OA`` grid.
-        """
-        return outward_normal(
-            self.center,
-            self.neighbor_positions,
-            cell=self.cell,
-            pbc=self.pbc,
-        )
-
     def cell_array(self) -> np.ndarray | None:
         """Return the cached cell as a float array, or ``None``."""
         if self.cell is None:
@@ -174,9 +157,9 @@ class SiteGeometry:
 
 def build_site(
     atoms: Atoms,
-    core: np.ndarray | list[int] | int,
+    core: np.ndarray | Sequence[int] | int,
     *,
-    neighbors: np.ndarray | list[int] | None = None,
+    neighbors: np.ndarray | Sequence[int] | None = None,
     origin: object | None = None,
     scale: float | None = None,
     skin: float | None = None,
@@ -262,9 +245,7 @@ def build_site(
         center=center,
         cell=cell_arg,
         pbc=pbc_arg,
-        scale=default_scale(core_array.size)
-        if scale is None
-        else float(scale),
+        scale=default_scale(core_array.size) if scale is None else float(scale),
         skin=default_skin(core_array.size) if skin is None else float(skin),
         delta_nbr=float(delta_nbr),
     )

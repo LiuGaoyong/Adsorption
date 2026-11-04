@@ -1,9 +1,10 @@
 """Process A for several sites: chain single-site generators.
 
-``MultiSiteGen`` composes :class:`~adsorption.generate.SingleSiteGen`
-instances and maps a global candidate index onto the owning component with a
-prefix-sum table. The composition keeps the candidate multiset identical to a
-sequential concatenation, so sharding stays a contiguous index interval.
+``MultiSiteGenerator`` composes
+:class:`~adsorption.generate.SingleSiteGenerator` instances and maps a global
+candidate index onto the owning component with a prefix-sum table. The
+composition keeps the candidate multiset identical to a sequential
+concatenation, so sharding stays a contiguous index interval.
 """
 
 from __future__ import annotations
@@ -13,12 +14,12 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
-from adsorption.generate.single_site import SingleSiteGen
+from adsorption.generate.single_site import SingleSiteGenerator
 
-__all__ = ["MultiSiteGen"]
+__all__ = ["MultiSiteGenerator"]
 
 
-class MultiSiteGen(AdsorptionConfigurationGeneratorABC):
+class MultiSiteGenerator(AdsorptionConfigurationGeneratorABC):
     """Enumerate several sites, one single-site generator per site.
 
     Attributes:
@@ -27,7 +28,7 @@ class MultiSiteGen(AdsorptionConfigurationGeneratorABC):
         total: Total number of candidates.
     """
 
-    def __init__(self, components: Sequence[SingleSiteGen]) -> None:
+    def __init__(self, components: Sequence[SingleSiteGenerator]) -> None:
         """Store the components and build the prefix-sum table.
 
         Args:

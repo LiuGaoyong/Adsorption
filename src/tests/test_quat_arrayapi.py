@@ -1,6 +1,6 @@
 """Test the Array-API compatible quaternion functions.
 
-The functions in `adsorption.common._quat` are namespace agnostic: they
+The functions in `adsorption.geometry._quat` are namespace agnostic: they
 dispatch on the input arrays via the Python Array API standard, so they are
 tested here with plain NumPy arrays.
 """

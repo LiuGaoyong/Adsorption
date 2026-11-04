@@ -14,7 +14,7 @@ from adsorption.base import (
 from adsorption.base.pipeline import AdsorptionConfigurationPipeline
 
 
-class _Gen(AdsorptionConfigurationGeneratorABC):
+class _Generator(AdsorptionConfigurationGeneratorABC):
     def __init__(self, n: int) -> None:
         self._n = n
 
@@ -44,7 +44,7 @@ class _AboveTwo(AdsorptionConfigurationFilterABC):
 
 
 def test_pipeline_stops_at_first_failure() -> None:
-    pipeline = AdsorptionConfigurationPipeline(_Gen(5), [_Even(), _AboveTwo()])
+    pipeline = AdsorptionConfigurationPipeline(_Generator(5), [_Even(), _AboveTwo()])
     records = list(pipeline.run())
     assert [record.trial.index for record in records] == [1, 2, 3, 4, 5]
     assert records[0].first_failed == "_Even"
@@ -55,13 +55,13 @@ def test_pipeline_stops_at_first_failure() -> None:
 
 
 def test_pipeline_accepts() -> None:
-    pipeline = AdsorptionConfigurationPipeline(_Gen(6), [_Even(), _AboveTwo()])
+    pipeline = AdsorptionConfigurationPipeline(_Generator(6), [_Even(), _AboveTwo()])
     survivors = list(pipeline.accepted())
     assert [record.trial.index for record in survivors] == [4, 6]
 
 
 def test_pipeline_index_interval() -> None:
-    pipeline = AdsorptionConfigurationPipeline(_Gen(6), [])
+    pipeline = AdsorptionConfigurationPipeline(_Generator(6), [])
     records = list(pipeline.run(2, 4))
     assert [record.trial.index for record in records] == [2, 3, 4]
     assert all(record.first_failed is None for record in records)

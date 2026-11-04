@@ -16,8 +16,8 @@ import numpy as np
 from ase import Atoms
 
 from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
-from adsorption.generate.multi_site import MultiSiteGen
-from adsorption.generate.single_site import SingleSiteGen
+from adsorption.generate.multi_site import MultiSiteGenerator
+from adsorption.generate.single_site import DEFAULT_N_OA, SingleSiteGenerator
 from adsorption.geometry import (
     DirectionGrid,
     ResolvedAnchor,
@@ -25,7 +25,7 @@ from adsorption.geometry import (
     SiteGeometry,
 )
 
-__all__ = ["Conformer", "MultiAdsorbateGen"]
+__all__ = ["Conformer", "MultiAdsorbateGenerator"]
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,7 @@ class Conformer:
         object.__setattr__(self, "distances", values)
 
 
-class MultiAdsorbateGen(AdsorptionConfigurationGeneratorABC):
+class MultiAdsorbateGenerator(AdsorptionConfigurationGeneratorABC):
     """Enumerate several conformers, each over its sites.
 
     Attributes:
@@ -78,7 +78,7 @@ class MultiAdsorbateGen(AdsorptionConfigurationGeneratorABC):
         conformers: Sequence[Conformer],
         *,
         grid: DirectionGrid | None = None,
-        n_grid: int = 200,
+        n_oa: int = DEFAULT_N_OA,
     ) -> None:
         """Build one multi-site generator per conformer.
 
@@ -87,7 +87,7 @@ class MultiAdsorbateGen(AdsorptionConfigurationGeneratorABC):
             sites: The site geometries.
             conformers: The prepared conformers.
             grid: Direction grid forwarded to every single-site generator.
-            n_grid: Requested number of directions.
+            n_oa: Number of approach directions per site.
 
         Raises:
             ValueError: If ``sites`` or ``conformers`` is empty.
@@ -99,24 +99,26 @@ class MultiAdsorbateGen(AdsorptionConfigurationGeneratorABC):
         self.substrate = substrate
         self.sites = tuple(sites)
         self.conformers = tuple(conformers)
-        components: list[MultiSiteGen] = []
+        components: list[MultiSiteGenerator] = []
         for conformer_index, conformer in enumerate(self.conformers):
             singles = [
-                SingleSiteGen(
+                SingleSiteGenerator(
                     substrate,
-                    site,
+                    site.core_indices,
                     conformer.reference,
+                    n_oa=n_oa,
                     anchor=conformer.anchor,
                     orientation=conformer.orientation,
                     distances=conformer.distances,
                     grid=grid,
-                    n_grid=n_grid,
+                    scale=site.scale,
+                    skin=site.skin,
                     site_index=site_index,
                     conformer=conformer_index,
                 )
                 for site_index, site in enumerate(self.sites)
             ]
-            components.append(MultiSiteGen(singles))
+            components.append(MultiSiteGenerator(singles))
         self.components = tuple(components)
         offsets: list[int] = []
         total = 0

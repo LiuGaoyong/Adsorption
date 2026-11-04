@@ -21,17 +21,20 @@ from adsorption.geometry import (
     default_skin,
     displacements_mic,
     distance_array,
-    distances_mic,
     first_neighbor_shell,
-    generate_conformers,
     mean_mic,
-    near_congruent,
-    outward_normal,
+    apply_quaternion,
+    compose_quaternions,
     place,
-    prune_by_energy,
     resolve_anchor,
-    shortest_arc_rotation,
+    shortest_arc_quaternion,
     unit_vector,
+)
+from adsorption.geometry._quat import quaternion_invert
+from adsorption.utils.conformers import (
+    generate_conformers,
+    near_congruent,
+    prune_by_energy,
 )
 
 
@@ -109,28 +112,27 @@ def test_distance_array() -> None:
         distance_array(0.0, 1.0, 0.0)
 
 
-def test_shortest_arc_rotation() -> None:
+def test_shortest_arc_quaternion() -> None:
     a = np.array([0.0, 0.0, 1.0])
     b = np.array([1.0, 0.0, 0.0])
-    rotation = shortest_arc_rotation(a, b)
-    assert np.allclose(rotation @ a, b)
-    assert np.isclose(np.linalg.det(rotation), 1.0)
-    assert np.allclose(rotation @ rotation.T, np.eye(3))
+    quaternion = shortest_arc_quaternion(a, b)
+    assert np.isclose(np.linalg.norm(quaternion), 1.0)
+    assert np.allclose(apply_quaternion(quaternion, a[None, :])[0], b)
 
-    identity = shortest_arc_rotation(a, a)
-    assert np.allclose(identity, np.eye(3))
+    identity = shortest_arc_quaternion(a, a)
+    assert np.allclose(apply_quaternion(identity, np.eye(3)), np.eye(3))
 
-    antiparallel = shortest_arc_rotation(a, -a)
-    assert np.allclose(antiparallel @ a, -a)
-    assert np.isclose(np.linalg.det(antiparallel), 1.0)
+    antiparallel = shortest_arc_quaternion(a, -a)
+    assert np.allclose(apply_quaternion(antiparallel, a[None, :])[0], -a)
 
     rng = np.random.default_rng(0)
     for _ in range(5):
         u = unit_vector(rng.normal(size=3))
         v = unit_vector(rng.normal(size=3))
-        matrix = shortest_arc_rotation(u, v)
-        assert np.allclose(matrix @ u, v, atol=1e-10)
-        assert np.isclose(np.linalg.det(matrix), 1.0, atol=1e-10)
+        q = shortest_arc_quaternion(u, v)
+        assert np.allclose(apply_quaternion(q, u[None, :])[0], v, atol=1e-10)
+        back = apply_quaternion(q, v[None, :], inverse=True)[0]
+        assert np.allclose(back, u, atol=1e-10)
 
 
 def test_anchor_resolution() -> None:
@@ -159,15 +161,27 @@ def test_place_is_rigid_and_does_not_mutate() -> None:
     reference = Atoms("CO")
     anchor = resolve_anchor(reference, "com")
     before = reference.positions.copy()
-    rotation = shortest_arc_rotation([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
+    quaternion = shortest_arc_quaternion([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
     target = np.array([1.0, 2.0, 3.0])
-    placed = place(reference, anchor=anchor, target=target, rotation=rotation)
+    placed = place(
+        reference,
+        anchor=anchor,
+        target=target,
+        quaternion=quaternion,
+    )
 
     assert np.array_equal(reference.positions, before)
-    assert np.allclose(placed.positions[0] - placed.positions[1], rotation @ (before[0] - before[1]))
+    bond = (before[0] - before[1])[None, :]
+    assert np.allclose(
+        placed.positions[0] - placed.positions[1],
+        apply_quaternion(quaternion, bond)[0],
+    )
     # the anchor lands on the target
     relative = before - anchor.position
-    assert np.allclose(target + relative @ rotation.T, placed.positions)
+    assert np.allclose(
+        target + apply_quaternion(quaternion, relative),
+        placed.positions,
+    )
 
 
 def test_first_neighbor_shell_matches_brute_force(slab: Atoms) -> None:
@@ -215,25 +229,16 @@ def test_site_geometry_defaults(slab: Atoms, cluster: Atoms) -> None:
     assert np.allclose(cluster_site.center, cluster.positions[cluster_index])
 
 
-def test_outward_normal(slab: Atoms) -> None:
-    top = top_surface_index(slab)
-    site = build_site(slab, [top])
-    normal = site.outward_normal
-    assert np.isclose(np.linalg.norm(normal), 1.0)
-    assert np.allclose(outward_normal(site.center, site.neighbor_positions, site.cell, site.pbc), normal)
-    # the reference normal of a (111) top site points away from the surface
-    assert normal[2] > 0.0
-
-
 def test_minimum_image_matches_ase(slab: Atoms) -> None:
     rng = np.random.default_rng(3)
     points_a = rng.uniform(-2, 6, size=(6, 3))
     points_b = rng.uniform(-2, 6, size=(4, 3))
-    got = distances_mic(points_a, points_b, slab.cell.array, slab.pbc)
     diff = points_b[None, :, :] - points_a[:, None, :]
-    expected = np.linalg.norm(find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0], axis=1).reshape(6, 4)
-    assert np.allclose(got, expected)
-    assert np.allclose(displacements_mic(diff, slab.cell.array, slab.pbc), find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0].reshape(diff.shape))
+    expected = find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0]
+    assert np.allclose(
+        displacements_mic(diff, slab.cell.array, slab.pbc),
+        expected.reshape(diff.shape),
+    )
 
 
 def test_direction_roll_set() -> None:
@@ -241,17 +246,19 @@ def test_direction_roll_set() -> None:
     orientations = DirectionRollSet(axis, 8, n_roll=4)
     assert orientations.count() == 32
     for index in (0, 1, 5, 31):
-        rotation = orientations.rotation(index)
-        assert np.allclose(rotation @ rotation.T, np.eye(3))
-        assert np.isclose(np.linalg.det(rotation), 1.0)
+        quaternion = orientations.quaternion(index)
+        assert np.isclose(np.linalg.norm(quaternion), 1.0)
+        image = apply_quaternion(quaternion, axis[None, :])[0]
+        assert np.allclose(image, orientations.image(index))
     # the first direction carries four rolls, one per roll index
-    first = orientations.rotation(0)
-    second = orientations.rotation(1)
-    relative = second @ first.T
-    angle = np.arccos(np.clip((np.trace(relative) - 1.0) / 2.0, -1.0, 1.0))
+    first = orientations.quaternion(0)
+    second = orientations.quaternion(1)
+    relative = compose_quaternions(second, quaternion_invert(first))
+    angle = 2.0 * np.arccos(np.clip(abs(relative[0]), -1.0, 1.0))
     assert np.isclose(angle, 2.0 * np.pi / 4)
     image = orientations.image(0)
-    assert np.allclose(relative @ image, image)
+    rolled = apply_quaternion(relative, image[None, :])[0]
+    assert np.allclose(rolled, image)
     # the roll leaves the placed axis invariant
     assert np.allclose(orientations.image(7), orientations.image(4))
 
@@ -261,11 +268,15 @@ def test_so3_set_is_uniform_and_deterministic() -> None:
     assert orientations.count() == 1024
     assert np.array_equal(orientations.quaternions, SO3Set(1024).quaternions)
     for index in (0, 1, 500, 1023):
-        rotation = orientations.rotation(index)
-        assert np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-10)
-        assert np.isclose(np.linalg.det(rotation), 1.0, atol=1e-10)
+        quaternion = orientations.quaternion(index)
+        assert np.isclose(np.linalg.norm(quaternion), 1.0, atol=1e-10)
     axis = np.array([0.0, 0.0, 1.0])
-    images = np.array([orientations.rotation(i) @ axis for i in range(1024)])
+    images = np.array(
+        [
+            apply_quaternion(orientations.quaternion(i), axis[None, :])[0]
+            for i in range(1024)
+        ]
+    )
     assert np.linalg.norm(images.mean(axis=0)) < 0.02
     covariance = np.cov(images.T)
     assert np.allclose(np.diag(covariance), 1.0 / 3.0, atol=0.02)

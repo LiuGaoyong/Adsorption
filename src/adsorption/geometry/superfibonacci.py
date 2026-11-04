@@ -14,7 +14,7 @@ same rotation.
 
 The reference implementation writes the four components in the order above.
 This module interprets them as ``(x, y, z, w)`` and reorders to the internal
-``(w, x, y, z)`` convention of :func:`quaternion_to_rotation`. Numerical
+``(w, x, y, z)`` convention of :mod:`adsorption.geometry._quat`. Numerical
 checks show the label order does not change the induced measure (all tested
 orderings are Haar-equivalent); the order is pinned only for reproducibility.
 
@@ -28,10 +28,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from adsorption.geometry.rotation import (
-    quaternion_to_rotation,
-    unit_vector,
-)
+from adsorption.geometry._quat import standardize_quaternion
+from adsorption.geometry.rotation import apply_quaternion, unit_vector
 
 __all__ = ["SuperFibonacciSO3"]
 
@@ -97,29 +95,11 @@ class SuperFibonacciSO3:
         alpha = 2.0 * np.pi * s / np.sqrt(2.0)
         beta = 2.0 * np.pi * s / PSI
         # Reference order (x, y, z, w); w is the scalar part.
-        return np.array(
-            [
-                big_r * np.cos(beta),
-                r * np.sin(alpha),
-                r * np.cos(alpha),
-                big_r * np.sin(beta),
-            ],
-            dtype=float,
-        )
-
-    def rotation(self, index: int) -> np.ndarray:
-        """Return the ``(3, 3)`` rotation matrix of ``index``.
-
-        Args:
-            index: Zero-based rotation index.
-
-        Returns:
-            np.ndarray: The rotation matrix.
-
-        Raises:
-            IndexError: If ``index`` is outside ``[0, n)``.
-        """
-        return quaternion_to_rotation(self.quaternion(index))
+        x = big_r * np.cos(beta)
+        y = r * np.sin(alpha)
+        z = r * np.cos(alpha)
+        w = big_r * np.sin(beta)
+        return standardize_quaternion(np.array([w, x, y, z], dtype=float))
 
     def image(self, index: int) -> np.ndarray:
         """Return the placed reference axis ``R @ axis``.
@@ -133,6 +113,4 @@ class SuperFibonacciSO3:
         Raises:
             IndexError: If ``index`` is outside ``[0, n)``.
         """
-        return np.asarray(
-            self.rotation(index) @ self.axis, dtype=float
-        )
+        return apply_quaternion(self.quaternion(index), self.axis[None, :])[0]

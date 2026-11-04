@@ -64,7 +64,7 @@ def test_verdict_defaults_and_validation() -> None:
         Verdict(1)  # type: ignore[arg-type]
 
 
-class _CountingGen(AdsorptionConfigurationGeneratorABC):
+class _CountingGenerator(AdsorptionConfigurationGeneratorABC):
     def __init__(self, n: int) -> None:
         self._n = n
 
@@ -95,7 +95,7 @@ class _EvenFilter(AdsorptionConfigurationFilterABC):
 
 
 def test_generator_contract() -> None:
-    generator = _CountingGen(5)
+    generator = _CountingGenerator(5)
     assert generator.n_candidates == 5
     assert len(generator) == 5
     assert generator.signature() == {"n": 5}
@@ -106,8 +106,8 @@ def test_generator_contract() -> None:
 
 
 def test_filter_contract_keeps_order() -> None:
-    generator = _CountingGen(5)
+    generator = _CountingGenerator(5)
     filt = _EvenFilter()
-    assert filt.accepts(_CountingGen(1).generate().__next__()) is False
+    assert filt.accepts(_CountingGenerator(1).generate().__next__()) is False
     survivors = list(filt.filter(generator.generate()))
     assert [trial.index for trial in survivors] == [2, 4]

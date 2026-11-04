@@ -6,7 +6,7 @@ import pytest
 from ase import Atoms
 from ase.build import fcc111, molecule
 
-from adsorption.generate import Conformer, MultiAdsorbateGen
+from adsorption.generate import Conformer, MultiAdsorbateGenerator
 from adsorption.geometry import (
     SuperFibonacciSO3,
     build_site,
@@ -36,25 +36,25 @@ def make(reference: Atoms, distances: list[float], label: str) -> Conformer:
 
 @pytest.fixture(scope="module")
 def generator(slab: Atoms, sites):
-    return MultiAdsorbateGen(
+    return MultiAdsorbateGenerator(
         slab,
         sites,
         [
             make(molecule("CO"), [2.0], "co"),
             make(molecule("H2O"), [2.0, 2.5], "water"),
         ],
-        n_grid=3,
+        n_oa=3,
     )
 
 
-def test_budget(generator: MultiAdsorbateGen) -> None:
+def test_budget(generator: MultiAdsorbateGenerator) -> None:
     # CO: 3 directions * 2 orientations * 1 distance * 2 sites = 12
     # H2O: 3 * 2 * 2 * 2 = 24
     assert generator.n_candidates == 36
     assert generator.offsets == (0, 12)
 
 
-def test_conformer_index(generator: MultiAdsorbateGen) -> None:
+def test_conformer_index(generator: MultiAdsorbateGenerator) -> None:
     assert generator.trial(1).meta["conformer"] == 0
     assert generator.trial(12).meta["conformer"] == 0
     assert generator.trial(13).meta["conformer"] == 1
@@ -64,7 +64,7 @@ def test_conformer_index(generator: MultiAdsorbateGen) -> None:
     assert last.n_total == 36
 
 
-def test_generate_across_conformers(generator: MultiAdsorbateGen) -> None:
+def test_generate_across_conformers(generator: MultiAdsorbateGenerator) -> None:
     chunk = list(generator.generate(11, 14))
     assert [trial.index for trial in chunk] == [11, 12, 13, 14]
     assert [trial.meta["conformer"] for trial in chunk] == [0, 0, 1, 1]
@@ -78,13 +78,27 @@ def test_generate_across_conformers(generator: MultiAdsorbateGen) -> None:
 def test_empty_inputs(slab: Atoms, sites) -> None:
     conformer = make(molecule("CO"), [2.0], "co")
     with pytest.raises(ValueError):
-        MultiAdsorbateGen(slab, [], [conformer])
+        MultiAdsorbateGenerator(slab, [], [conformer])
     with pytest.raises(ValueError):
-        MultiAdsorbateGen(slab, sites, [])
+        MultiAdsorbateGenerator(slab, sites, [])
 
 
-def test_signature(generator: MultiAdsorbateGen) -> None:
+def test_signature(generator: MultiAdsorbateGenerator) -> None:
     signature = generator.signature()
     assert signature["kind"] == "multi_adsorbate"
     assert len(signature["conformers"]) == 2
     assert signature["conformers"][0]["label"] == "co"
+
+
+def test_components_derive_their_sites_from_core_indices(
+    generator: MultiAdsorbateGenerator,
+    slab: Atoms,
+) -> None:
+    """Each single-site component keeps the core of the site it stands for."""
+    for component in generator.components:
+        for single in component.components:
+            assert list(single.core) == list(single.site.core_indices)
+            assert np.allclose(
+                single.site.center,
+                slab.positions[single.core].mean(axis=0),
+            )

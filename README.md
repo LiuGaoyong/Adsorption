@@ -41,27 +41,23 @@ Requires Python 3.12–3.13, ASE, NumPy, SciPy, Hydra, and
 ```python
 from ase import Atoms
 from ase.build import fcc111
-from adsorption import AdsConfPipeline, GeometryFilter, SingleSiteGen
-from adsorption.geometry import (
-    FixedRotation,
-    build_site,
-    distance_array,
-    resolve_anchor,
-)
+from adsorption import AdsorptionConfigurationPipeline, GeometryFilter
+from adsorption import SingleSiteGenerator
 
 slab = fcc111("Cu", size=(3, 4, 3), vacuum=10, orthogonal=True)
 oxygen = Atoms("O")
-generator = SingleSiteGen(
+generator = SingleSiteGenerator(
     slab,
-    build_site(slab, core=[0]),
-    oxygen,
-    anchor=resolve_anchor(oxygen, "com"),
-    orientation=FixedRotation(),  # one atom: no orientation
-    distances=distance_array(2.0, 3.0, 0.2),
-    n_grid=50,
+    0,                     # adsorption centre: atom index 0
+    oxygen,                # adsorbate
+    n_oa=50,               # approach directions
+    n_rot=1,               # orientations (a single atom has none)
+    n_d=6,                 # anchor distances
+    d_min=2.0,
+    d_max=3.0,
 )
 filt = GeometryFilter({29: 2.338, 8: 3.0})  # Cu and O sigma
-pipeline = AdsConfPipeline(generator, [filt])
+pipeline = AdsorptionConfigurationPipeline(generator, [filt])
 
 for record in pipeline.accepted():
     print(record.trial.index, record.trial.meta["distance"])
@@ -88,9 +84,9 @@ verdict per candidate, and refuses to start when the candidate count exceeds
 
 ```text
 AdsConfGenABC                       AdsConfFilterABC
-├── SingleSiteGen   one site        ├── GeometryFilter   pairwise floor
-├── MultiSiteGen    many sites      ├── LJFilter         repulsive energy
-└── MultiAdsorbateGen  many         └── EnergyFilter     relaxation + E cut
+├── SingleSiteGenerator   one site        ├── GeometryFilter   pairwise floor
+├── MultiSiteGenerator    many sites      ├── LJFilter         repulsive energy
+└── MultiAdsorbateGenerator  many         └── EnergyFilter     relaxation + E cut
     conformers (consumed)
 ```
 
@@ -103,7 +99,7 @@ rejection. Every `Trial` carries its one-based index and budget; every
 ```text
 src/adsorption/
 ├── process/       # Trial, Verdict, the two ABCs, pipeline
-├── generate/      # SingleSiteGen, MultiSiteGen, MultiAdsorbateGen
+├── generate/      # SingleSiteGenerator, MultiSiteGenerator, MultiAdsorbateGenerator
 ├── filters/       # GeometryFilter, LJFilter, EnergyFilter
 ├── geometry/      # site, grids, SuperFibonacciSO3, rotation, placement
 ├── protocol/      # index, plan, sidecar, hashing

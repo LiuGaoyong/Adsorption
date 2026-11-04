@@ -23,7 +23,7 @@
 
 # from adsorption.generate import (
 #     Conformer,
-#     MultiAdsorbateGen,
+#     MultiAdsorbateGenerator,
 #     build_orientation,
 # )
 # from adsorption.geometry import build_site, distance_array, resolve_anchor
@@ -121,14 +121,14 @@
 #     return stable_hash(container)
 
 
-# def _build_generator(cfg: Config) -> MultiAdsorbateGen:
+# def _build_generator(cfg: Config) -> MultiAdsorbateGenerator:
 #     """Build the process-A generator from the configuration.
 
 #     Args:
 #         cfg: The composed configuration.
 
 #     Returns:
-#         MultiAdsorbateGen: The generator.
+#         MultiAdsorbateGenerator: The generator.
 
 #     Raises:
 #         ValueError: If the site list is empty.
@@ -165,11 +165,11 @@
 #         distances=distances,
 #         label=adsorbate.get_chemical_formula(),
 #     )
-#     return MultiAdsorbateGen(
+#     return MultiAdsorbateGenerator(
 #         substrate,
 #         sites,
 #         [conformer],
-#         n_grid=int(cfg.protocol.grid.n),
+#         n_oa=int(cfg.protocol.grid.n),
 #     )
 
 

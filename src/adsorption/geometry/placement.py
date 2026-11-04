@@ -9,6 +9,8 @@ from typing import Literal
 import numpy as np
 from ase import Atoms
 
+from adsorption.geometry.rotation import apply_quaternion
+
 __all__ = ["Anchor", "ResolvedAnchor", "place", "resolve_anchor"]
 
 
@@ -94,41 +96,45 @@ def place(
     *,
     anchor: ResolvedAnchor,
     target: np.ndarray,
-    rotation: np.ndarray | None = None,
+    quaternion: np.ndarray | None = None,
 ) -> Atoms:
     """Place the rigid reference adsorbate at a target anchor position.
 
-    The reference positions are rotated about the anchor and translated so that
-    the anchor lands on ``target``, i.e.
-    ``r = target + R @ (r0 - r_anchor0)`` (Eq. 10).
+    The reference positions are rotated about the anchor with the given unit
+    quaternion and translated so that the anchor lands on ``target``, i.e.
+    ``r = target + R (r0 - r_anchor0)`` (Eq. 10).
 
     Args:
         reference: Reference (gas-phase) adsorbate. It is not modified.
         anchor: Resolved anchor in the reference frame.
         target: Target anchor position, shape ``(3,)``.
-        rotation: Optional ``(3, 3)`` rotation matrix. Defaults to the identity.
+        quaternion: Optional unit quaternion ``(w, x, y, z)``. Defaults to
+            the identity.
 
     Returns:
         Atoms: A new adsorbate with the placed positions.
 
     Raises:
-        ValueError: If ``target`` or ``rotation`` has the wrong shape, or the
-            rotation is not a proper rotation.
+        ValueError: If ``target`` or ``quaternion`` has the wrong shape, or
+            the quaternion is not a unit quaternion.
     """
     target_array = np.asarray(target, dtype=float)
     if target_array.shape != (3,):
         raise ValueError(f"target must be (3,), got {target_array.shape}.")
-    matrix = (
-        np.eye(3) if rotation is None else np.asarray(rotation, dtype=float)
+    q = (
+        np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
+        if quaternion is None
+        else np.asarray(quaternion, dtype=float).ravel()
     )
-    if matrix.shape != (3, 3):
-        raise ValueError(f"rotation must be (3, 3), got {matrix.shape}.")
-    if not np.allclose(matrix @ matrix.T, np.eye(3), atol=1e-8):
-        raise ValueError("rotation must be orthonormal.")
-    if not np.isclose(np.linalg.det(matrix), 1.0, atol=1e-8):
-        raise ValueError("rotation must be a proper rotation (det == 1).")
+    if q.shape != (4,):
+        raise ValueError(f"quaternion must be (4,), got {q.shape}.")
+    if not np.all(np.isfinite(q)):
+        raise ValueError(f"quaternion must be finite, got {q}.")
+    norm = float(np.linalg.norm(q))
+    if abs(norm - 1.0) > 1e-6:
+        raise ValueError(f"quaternion must be a unit quaternion, got {q}.")
 
     placed = reference.copy()
     relative = np.asarray(reference.positions, dtype=float) - anchor.position
-    placed.set_positions(target_array + relative @ matrix.T)
+    placed.set_positions(target_array + apply_quaternion(q, relative))
     return placed
