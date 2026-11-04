@@ -9,7 +9,7 @@ Issues = "https://github.com/LiuGaoyong/Adsorption/issues/"
 
 [project]
 name = "adsorption"
-version = "0.1.2"
+version = "0.2.0"
 readme = "README.md"
 description = "Adsorption Based on ASE."
 keywords = ["chemistry", "adsorption"]
@@ -35,6 +35,10 @@ dependencies = [
     'hydra-core',
     "pyyaml>=6",
 ]
+
+[project.scripts]
+adsorption-run = "adsorption.runner._cli:main"
+
 [dependency-groups]
 dev = [
     "ruff>=0.11",
