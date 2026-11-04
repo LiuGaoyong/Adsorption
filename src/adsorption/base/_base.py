@@ -51,15 +51,15 @@ class Trial:
             )
         if len(self.atoms) == 0:
             raise ValueError("A trial must contain at least one atom.")
-        if int(self.natoms_adsorbate) < 1:
-            if int(self.natoms_adsorbate) >= len(self.atoms):
-                raise ValueError(
-                    "natoms_adsorbate must be at most"
-                    + f" {len(self.atoms)}, got {self.natoms_adsorbate}."
-                )
+        nad = int(self.natoms_adsorbate)
+        if nad < 1:
             raise ValueError(
-                "natoms_adsorbate must be at least"
-                + f" 1, got {self.natoms_adsorbate}."
+                f"natoms_adsorbate must be at least 1, got {nad}."
+            )
+        if nad >= len(self.atoms):
+            raise ValueError(
+                "natoms_adsorbate must be less than the number of atoms "
+                f"({len(self.atoms)}), got {nad}."
             )
         if int(self.index) < 1:
             raise ValueError(f"index must be one-based, got {self.index}.")
@@ -90,8 +90,8 @@ class Trial:
             )
         if value >= len(self.atoms):
             raise ValueError(
-                f"n_substrate must be at most "
-                f"{len(self.atoms)}, but got {value}."
+                f"n_substrate must be less than {len(self.atoms)}, "
+                f"but got {value}."
             )
         return value
 

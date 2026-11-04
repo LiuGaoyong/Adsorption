@@ -1,8 +1,8 @@
-"""Process B, steric tier: the repulsive Lennard-Jones energy.
+"""Process B, steric tier: Lennard-Jones relaxation behind an energy ceiling.
 
-Only the repulsive branch is summed, and the filter only removes: a trial is
-accepted when the total repulsive energy stays below the registered ceiling.
-The filter never ranks candidates.
+The tier relaxes each survivor with a Lennard-Jones calculator and keeps it
+only when the relaxed energy stays below the registered ceiling. It only
+removes: the filter never ranks candidates.
 """
 
 from __future__ import annotations
@@ -18,7 +18,12 @@ __all__ = ["LennardJonesEnergyFilter"]
 
 
 class LennardJonesEnergyFilter(OptimizedEnergyFilter):
-    """Reject adsorption configurations with a total Lennard-Jones energy."""
+    """Reject adsorption configurations with a relaxed Lennard-Jones energy.
+
+    The filter is the energetic tier of :mod:`adsorption.filters.relaxation`
+    with a Lennard-Jones calculator and the same fixed-budget relaxation
+    protocol; the ceiling applies to the relaxed energy.
+    """
 
     def __init__(
         self,

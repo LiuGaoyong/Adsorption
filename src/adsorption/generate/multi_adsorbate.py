@@ -16,14 +16,14 @@ import numpy as np
 from ase import Atoms
 
 from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
+from adsorption.generate.multi_site import MultiSiteGen
+from adsorption.generate.single_site import SingleSiteGen
 from adsorption.geometry import (
     DirectionGrid,
     ResolvedAnchor,
     RotationSet,
     SiteGeometry,
 )
-from adsorption.generate.multi_site import MultiSiteGen
-from adsorption.generate.single_site import SingleSiteGen
 
 __all__ = ["Conformer", "MultiAdsorbateGen"]
 
@@ -50,8 +50,7 @@ class Conformer:
         """Validate the conformer declaration."""
         if not isinstance(self.reference, Atoms):
             raise TypeError(
-                "reference must be an ase.Atoms, got "
-                f"{type(self.reference)}."
+                f"reference must be an ase.Atoms, got {type(self.reference)}."
             )
         values = np.asarray(self.distances, dtype=float).ravel()
         if values.size == 0:
@@ -167,10 +166,10 @@ class MultiAdsorbateGen(AdsorptionConfigurationGeneratorABC):
         offset = self.offsets[position]
         inner = self.components[position].trial(int(kappa) - offset)
         return Trial(
-            atoms=inner.atoms,
-            index=int(kappa),
-            n_total=self.total,
-            meta=inner.meta,
+            atoms=inner.atoms,  # type: ignore
+            index=int(kappa),  # type: ignore
+            n_total=self.total,  # type: ignore
+            meta=inner.meta,  # type: ignore
         )
 
     def generate(
@@ -195,8 +194,7 @@ class MultiAdsorbateGen(AdsorptionConfigurationGeneratorABC):
         last = self.total if stop is None else int(stop)
         if first < 1 or last > self.total:
             raise IndexError(
-                f"interval must be in [1, {self.total}], got "
-                f"[{first}, {last}]."
+                f"interval must be in [1, {self.total}], got [{first}, {last}]."
             )
         if first > last:
             raise ValueError(f"start must not exceed stop, got {start}>{stop}.")

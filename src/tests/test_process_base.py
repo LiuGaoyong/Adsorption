@@ -34,6 +34,24 @@ def test_trial_validation() -> None:
         Trial(Atoms(), index=1, n_total=1)
 
 
+def test_trial_requires_a_substrate_size() -> None:
+    atoms = Atoms("H2O")
+    with pytest.raises(ValueError):
+        Trial(atoms, index=1, n_total=1)
+    with pytest.raises(ValueError):
+        Trial(atoms, index=1, n_total=1, meta={"n_substrate": 0})
+    with pytest.raises(ValueError):
+        Trial(atoms, index=1, n_total=1, meta={"n_substrate": 3})
+    with pytest.raises(ValueError):
+        Trial(atoms, index=1, n_total=1, meta={"n_substrate": "2"})
+
+
+def test_trial_derives_the_adsorbate_count() -> None:
+    trial = Trial(Atoms("H2O"), index=1, n_total=1, meta={"n_substrate": 2})
+    assert trial.natoms_substrate == 2
+    assert trial.natoms_adsorbate == 1
+
+
 def test_verdict_defaults_and_validation() -> None:
     ok = Verdict(True)
     assert ok.accepted is True

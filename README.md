@@ -10,11 +10,12 @@ adsorption configurations on clusters and periodic surfaces, built on
 
 The package is organised as two processes:
 
-- **A — generation** (`AdsConfGenABC`): a fixed-budget, deterministic
-  enumeration of the site `O`, the approach direction `OA` on a Fibonacci
-  sphere, the molecular orientation on `SO(3)` (Super-Fibonacci quaternions),
+- **A — generation** (`AdsorptionConfigurationGeneratorABC`): a fixed-budget, deterministic
+  enumeration of the site `O`, the approach direction `OA` on a deterministic
+  near-uniform spherical point set (the spherical Fibonacci lattice by default),
+  the molecular orientation on `SO(3)` (Super-Fibonacci quaternions),
   and the anchor distance `d`.
-- **B — filtering** (`AdsConfFilterABC`): a cheap pairwise distance floor, a
+- **B — filtering** (`AdsorptionConfigurationFilterABC`): a cheap pairwise distance floor, a
   repulsive Lennard-Jones tier, and an optional relaxation tier.
 
 Generation never imports an ASE calculator; the energy engine is injected
@@ -55,11 +56,11 @@ generator = SingleSiteGen(
     build_site(slab, core=[0]),
     oxygen,
     anchor=resolve_anchor(oxygen, "com"),
-    orientation=FixedRotation(),          # one atom: no orientation
+    orientation=FixedRotation(),  # one atom: no orientation
     distances=distance_array(2.0, 3.0, 0.2),
     n_grid=50,
 )
-filt = GeometryFilter({29: 2.338, 8: 3.0})   # Cu and O sigma
+filt = GeometryFilter({29: 2.338, 8: 3.0})  # Cu and O sigma
 pipeline = AdsConfPipeline(generator, [filt])
 
 for record in pipeline.accepted():

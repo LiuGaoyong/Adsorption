@@ -1,9 +1,10 @@
 """Process B, energetic tier: relaxation followed by an energy threshold.
 
-The filter wraps any callable with the signature of
-:class:`adsorption.evaluation.Relaxation`: it receives a structure and the
-number of substrate atoms and returns an ``EvalResult``. The verdict carries
-the energy and the result itself, so a caller never relaxes twice.
+The filter wraps an ASE calculator: it relaxes a copy of the trial structure
+with :func:`arrayff.optimize.call_optimization` and accepts the trial when the
+relaxed energy is finite, at most ``e_cut`` and the convergence policy allows
+it. The verdict carries the energy and the optimization result itself, so a
+caller never relaxes twice.
 """
 
 from __future__ import annotations
@@ -47,22 +48,18 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
             fmax: Force tolerance in eV/A.
             max_steps: Maximum number of steps.
             method: Optimization method.
-            fix_substrate: Whether to fix the substrate atoms.
-                Only effective if ``fix_adsorbate_bonds`` is ``False``.
-            fix_adsorbate_bonds: Whether to fix the adsorbate bonds.
+            fix_substrate: Whether to fix the substrate atoms; forced on when
+                ``fix_adsorbate_bonds`` is set.
+            fix_adsorbate_bonds: Whether to constrain every intramolecular
+                distance of the adsorbate to its reference value.
             reject_on_unconverged: Whether to reject trials on unconverged
                 optimizations.
             **kwargs: unused arguments.
         """
-        if self.fix_adsorbate_bonds:
-            self.fix_adsorbate_bonds = True
-            self.fix_substrate = True
-        elif self.fix_substrate:
-            self.fix_adsorbate_bonds = False
-            self.fix_substrate = True
-        else:
-            self.fix_adsorbate_bonds = False
-            self.fix_substrate = False
+        if fix_adsorbate_bonds:
+            fix_substrate = True
+        elif not fix_substrate:
+            fix_adsorbate_bonds = False
         if not np.isfinite(e_cut):
             raise ValueError(f"e_cut must be finite, got {e_cut}.")
         self.e_cut = float(e_cut)
@@ -90,8 +87,8 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
             ids = list(range(trial.natoms_substrate))
             atoms.constraints = [FixAtoms(indices=ids)]
         if self.fix_adsorbate_bonds:
-            z = atoms.numbers[-trial.natoms_substrate :]
-            r = atoms.positions[-trial.natoms_substrate :]
+            z = atoms.numbers[-trial.natoms_adsorbate :]
+            r = atoms.positions[-trial.natoms_adsorbate :]
             gas_atoms = Atoms(numbers=z, positions=r)
             edges = Gas.from_ase(gas_atoms).pair
             assert isinstance(edges, np.ndarray)
