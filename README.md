@@ -119,8 +119,24 @@ tested, linted, or packaged.
 
 ```bash
 pixi run test              # pytest -s -vv
+pixi run test-case         # example cases, writes PNGs
 pytest src/tests -m "not slow"
 ```
+
+The migrated examples live in `src/test-case/` and are not part of the default
+`pytest` paths. Every case renders `src/test-case/results/`:
+
+```text
+results/sites/<site>.png                    # the twelve site grids
+results/<site>-<adsorbate>/<index>.png      # four views (accepted only)
+results/<site>-<adsorbate>/<index>.xyz      # extended XYZ of the candidate
+results/<site>-<adsorbate>/<index>.txt      # geometric-filter verdict
+```
+
+Every candidate gets an `.xyz` and a `.txt`, accepted or not; only accepted
+candidates get a `.png`. `<index>` is the one-based candidate index of the
+generator and the verdict file records `accepted: true|false` plus the filter
+value.
 
 ## Citation and license
 

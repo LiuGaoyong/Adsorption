@@ -175,7 +175,13 @@ class GeometryFilter(AdsorptionConfigurationFilterABC):
         warnings.warn(message, UserWarning, stacklevel=3)
 
     def evaluate(self, trial: Trial) -> Verdict:
-        """Return the minimum slack over all pairs.
+        """Return the minimum slack over the substrate-adsorbate pairs.
+
+        Substrate-substrate and adsorbate-adsorbate distances are fixed by the
+        input structures (the substrate is rigid and the adsorbate is placed
+        as a rigid body), so only the cross pairs can create a new steric
+        clash.  Evaluating the cross pairs also avoids the quadratic all-pairs
+        list and its self-pairs.
 
         Args:
             trial: The trial to judge.
@@ -184,21 +190,42 @@ class GeometryFilter(AdsorptionConfigurationFilterABC):
             Verdict: Accepted when ``slack_min >= 0``; ``value`` is the
             minimum slack and ``detail`` names the closest pair.
         """
-        first, second, distance = distance_pairs(
-            p1=trial.atoms.positions,
-            p2=trial.atoms.positions,
-            cell=trial.atoms.cell,
-            pbc=trial.atoms.pbc,
-            cutoff=self.r_cut,
-            quantities="ijd",
-        )
-        if len(first) == 0:
+        n_substrate = trial.natoms_substrate
+        positions = trial.atoms.positions
+        substrate = positions[:n_substrate]
+        adsorbate = positions[n_substrate:]
+        # The sklearn backend of ``distance_pairs`` expects at least as many
+        # points in ``p1`` as in ``p2``; keep that order and map the indices
+        # back to the full trial afterwards.
+        if len(substrate) >= len(adsorbate):
+            first, second, distance = distance_pairs(
+                p1=substrate,
+                p2=adsorbate,
+                cell=trial.atoms.cell,
+                pbc=trial.atoms.pbc,
+                cutoff=self.r_cut,
+                quantities="ijd",
+            )
+            left = first
+            right = second + n_substrate
+        else:
+            first, second, distance = distance_pairs(
+                p1=adsorbate,
+                p2=substrate,
+                cell=trial.atoms.cell,
+                pbc=trial.atoms.pbc,
+                cutoff=self.r_cut,
+                quantities="ijd",
+            )
+            left = second
+            right = first + n_substrate
+        if len(left) == 0:
             return Verdict(True, value=float("inf"), reason="ok")
         numbers = np.asarray(trial.atoms.numbers, dtype=int)
         floors = np.array(
             [
-                self._floor(numbers[left], numbers[right])  # type: ignore
-                for left, right in zip(first, second)
+                self._floor(numbers[sub], numbers[ads])  # type: ignore
+                for sub, ads in zip(left, right)
             ],
             dtype=float,
         )
@@ -211,7 +238,7 @@ class GeometryFilter(AdsorptionConfigurationFilterABC):
             value=value,
             reason="ok" if accepted else "floor",
             detail={
-                "pair": (int(first[position]), int(second[position])),
+                "pair": (int(left[position]), int(right[position])),
                 "r": float(distance[position]),
                 "floor": float(floors[position]),
             },
