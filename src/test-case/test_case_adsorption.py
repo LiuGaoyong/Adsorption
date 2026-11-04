@@ -18,8 +18,10 @@ from typing import Any
 import pytest
 from _cases import (  # type: ignore
     ADSORBATES,
-    D_MAX,
-    D_MIN,
+    D_MAX_BASE,
+    D_MAX_RADIUS_SCALE,
+    D_MIN_BASE,
+    D_MIN_RADIUS_SCALE,
     N_D,
     N_OA,
     N_ROT,
@@ -86,20 +88,23 @@ def test_adsorption_case(
 ) -> None:
     """Write every candidate with its structure, figure and verdict."""
     substrate: Atoms = request.getfixturevalue(structure)
+    reference = molecule(adsorbate)
     generator = SingleSiteGenerator(
         substrate,
         core,
-        molecule(adsorbate),
+        reference,
         n_oa=N_OA,
         n_rot=N_ROT,
         n_d=N_D,
-        d_min=D_MIN,
-        d_max=D_MAX,
+        d_min=D_MIN_BASE,
+        d_max=D_MAX_BASE,
+        d_min_radius_scale=D_MIN_RADIUS_SCALE,
+        d_max_radius_scale=D_MAX_RADIUS_SCALE,
     )
     assert 1 <= generator.n_oa < 10
     assert 1 <= generator.n_rot < 10
 
-    filt = GeometryFilter()
+    filt = GeometryFilter(scale=1.0)
     outdir = result_root / f"{name}-{adsorbate}"
     outdir.mkdir(parents=True, exist_ok=True)
     for pattern in ("*.png", "*.xyz", "*.txt"):

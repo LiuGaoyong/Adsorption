@@ -1,12 +1,12 @@
 """Process B, geometric tier: the pairwise distance floor.
 
-The floor of a pair is ``a_i + a_j`` with ``a_i = 0.5 * scale * sigma_i``
-by default, i.e. ``r_min,ij = 0.65 * sigma_ij`` with the Lorentz-Berthelot
-mixing ``sigma_ij = (sigma_i + sigma_j) / 2``. The criterion is
-``r_ij >= a_i + a_j`` for every pair. The coefficient is a screening floor,
-not a bond length: a pair at the Lennard-Jones equilibrium
-``2**(1/6) * sigma_ij`` always passes, while severe overlaps are removed
-before any energy evaluation.
+The floor of a pair is ``a_i + a_j`` with ``a_i = 0.5 * scale * sigma_i``,
+i.e. ``r_min,ij = scale * sigma_ij`` with the Lorentz-Berthelot mixing
+``sigma_ij = (sigma_i + sigma_j) / 2``. The criterion is
+``r_ij >= a_i + a_j`` for every pair. The default ``scale`` is 1.0, so the
+floor is the Lennard-Jones zero crossing ``sigma_ij``; the equilibrium
+``2**(1/6) * sigma_ij`` lies above it. The coefficient is a screening floor,
+not a bond length: severe overlaps are removed before any energy evaluation.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class GeometryFilter(AdsorptionConfigurationFilterABC):
     def __init__(
         self,
         *,
-        scale: float = 0.65,
+        scale: float = 1.0,
         r_cut: float | None = None,
         element_overrides: Mapping[int, float] | None = None,
         pair_overrides: Mapping[tuple[int, int], float] | None = None,

@@ -52,6 +52,12 @@ DEFAULT_D_MIN = 0.8
 DEFAULT_D_MAX = 3.0
 """Default upper bound of the anchor-distance array, in Angstrom."""
 
+DEFAULT_D_MIN_RADIUS_SCALE = 0.0
+"""Default radius coefficient added to the lower distance bound."""
+
+DEFAULT_D_MAX_RADIUS_SCALE = 0.0
+"""Default radius coefficient added to the upper distance bound."""
+
 
 class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
     """Enumerate the trial configurations of one fixed site.
@@ -85,6 +91,8 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
         n_d: int = DEFAULT_N_D,
         d_min: float = DEFAULT_D_MIN,
         d_max: float = DEFAULT_D_MAX,
+        d_min_radius_scale: float = DEFAULT_D_MIN_RADIUS_SCALE,
+        d_max_radius_scale: float = DEFAULT_D_MAX_RADIUS_SCALE,
         distances: np.ndarray | Sequence[float] | None = None,
         anchor: Anchor | ResolvedAnchor = "com",
         orientation: RotationSet | None = None,
@@ -106,8 +114,12 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
             n_d: Number of anchor distances.
             d_min: Lower bound of the anchor-distance array, in Angstrom.
             d_max: Upper bound of the anchor-distance array, in Angstrom.
+            d_min_radius_scale: Coefficient of the adsorbate radius
+                ``R = max_i ||r_i - r_com||`` added to ``d_min``.
+            d_max_radius_scale: Coefficient of the adsorbate radius added to
+                ``d_max``.
             distances: Explicit anchor-distance array; overrides ``n_d``,
-                ``d_min`` and ``d_max``.
+                ``d_min``, ``d_max`` and both radius coefficients.
             anchor: The anchor declaration, or an already resolved anchor.
             orientation: An explicit rotation set; overrides
                 ``orientation_kind`` and ``n_rot``.
@@ -134,6 +146,12 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
             )
         if int(n_oa) < 1:
             raise ValueError(f"n_oa must be positive, got {n_oa}.")
+        for name, value in (
+            ("d_min_radius_scale", d_min_radius_scale),
+            ("d_max_radius_scale", d_max_radius_scale),
+        ):
+            if not np.isfinite(value):
+                raise ValueError(f"{name} must be finite, got {value}.")
 
         self.substrate = substrate
         self.reference = reference
@@ -154,6 +172,12 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
         if int(self.orientation.count()) < 1:
             raise ValueError("orientation must contain at least one rotation.")
         if distances is None:
+            if d_min_radius_scale != 0.0 or d_max_radius_scale != 0.0:
+                com = np.asarray(reference.get_center_of_mass(), dtype=float)
+                v = np.asarray(reference.positions, dtype=float) - com
+                radius = float(np.linalg.norm(v, axis=1).max())
+                d_min = float(d_min) + float(d_min_radius_scale) * radius
+                d_max = float(d_max) + float(d_max_radius_scale) * radius
             distances = distance_array(d_min, d_max, n=n_d)
         values = np.asarray(distances, dtype=float).ravel()
         if values.size == 0:
@@ -215,8 +239,7 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
         direction = np.asarray(self.unit[i - 1], dtype=float)
         distance = float(self.distances[k - 1])
         target = (
-            np.asarray(self.site.center, dtype=float)
-            + distance * direction
+            np.asarray(self.site.center, dtype=float) + distance * direction
         )
         quaternion = self.orientation.quaternion(j - 1)
         placed = place(
@@ -295,9 +318,7 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
             "anchor": {
                 "kind": self.anchor.kind,
                 "index": self.anchor.index,
-                "position": [
-                    float(value) for value in self.anchor.position
-                ],
+                "position": [float(value) for value in self.anchor.position],
             },
             "orientation": {
                 "name": getattr(self.orientation, "name", "unknown"),

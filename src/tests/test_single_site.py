@@ -91,6 +91,30 @@ def test_explicit_distances_override_the_bounds(slab: Atoms) -> None:
     assert generator.distances == pytest.approx([2.0, 2.5])
 
 
+def test_distance_bounds_follow_the_adsorbate_radius(slab: Atoms) -> None:
+    """The radius coefficients shift both bounds by the molecular radius."""
+    reference = molecule("C6H6")
+    center = reference.get_center_of_mass()
+    radius = float(
+        np.linalg.norm(reference.positions - center, axis=1).max()
+    )
+    generator = SingleSiteGenerator(
+        slab,
+        0,
+        reference,
+        n_oa=1,
+        n_rot=1,
+        n_d=2,
+        d_min=2.0,
+        d_max=3.5,
+        d_min_radius_scale=0.1,
+        d_max_radius_scale=0.35,
+    )
+    assert generator.distances == pytest.approx(
+        [2.0 + 0.1 * radius, 3.5 + 0.35 * radius]
+    )
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

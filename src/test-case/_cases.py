@@ -20,11 +20,17 @@ N_ROT = 4
 N_D = 3
 """Number of anchor distances per case."""
 
-D_MIN = 1.5
-"""Lower bound of the anchor-distance array, in Angstrom."""
+D_MIN_BASE = 2.0
+"""Contact part of the lower distance bound, in Angstrom."""
 
-D_MAX = 3.0
-"""Upper bound of the anchor-distance array, in Angstrom."""
+D_MIN_RADIUS_SCALE = 0.1
+"""Coefficient of the adsorbate radius in the lower distance bound."""
+
+D_MAX_BASE = 3.5
+"""Base part of the upper distance bound, in Angstrom."""
+
+D_MAX_RADIUS_SCALE = 0.35
+"""Coefficient of the adsorbate radius in the upper distance bound."""
 
 ADSORBATES = (
     "O",
@@ -37,6 +43,7 @@ ADSORBATES = (
     "CH3OH",
 )
 """Adsorbates of the migrated adsorption examples."""
+
 
 SITE_CASES: tuple[tuple[str, str, tuple[int, ...]], ...] = (
     ("cluster_v_top", "cluster", (303,)),
