@@ -46,5 +46,8 @@ The highlighted atoms are the site core.
 Every example applies `GeometryFilter(scale=1.0)` followed by
 `LennardJonesEnergyFilter(e_cut: null)`, whose ceiling is the sum of the
 isolated substrate and adsorbate Lennard-Jones energies. The runner resolves
-that ceiling once before the candidate loop. The adsorbates are
-rigid (`conformers: none`) and the distance bounds are size-aware.
+that ceiling once before the candidate loop. The examples use a short LJ
+relaxation budget (`max_steps: 10`, `fmax: 0.3`,
+`reject_on_unconverged: false`) so the gallery stays runnable; the filter
+defaults remain 100 steps and `fmax=0.01`. The adsorbates are rigid
+(`conformers: none`) and the distance bounds are size-aware.
