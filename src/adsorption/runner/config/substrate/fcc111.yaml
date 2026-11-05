@@ -1,5 +1,0 @@
-_target_: ase.build.fcc111
-symbol: Cu
-size: [2, 2, 2]
-vacuum: 8.0
-orthogonal: true

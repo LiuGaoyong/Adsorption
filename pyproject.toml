@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.scripts]
-adsorption-run = "adsorption.runner._cli:main"
+adsorption-run = "adsorption.runner:run"
 
 [dependency-groups]
 dev = [

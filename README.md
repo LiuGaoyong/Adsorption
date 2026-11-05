@@ -67,17 +67,29 @@ For a molecule, build the rotation set with
 `build_orientation("auto", adsorbate, n=200)`: linear molecules use `S^2`,
 planar and three-dimensional molecules use `SO(3)`.
 
-## Hydra campaign
+## Campaign runner
 
 ```bash
-python -m adsorption.config                        # run.yaml defaults
-python -m adsorption.config --multirun protocol.orientation.n=200,500
+adsorption-run                         # Hydra entry point, packaged run.yaml
+python -m adsorption.runner            # same entry point
+adsorption-run parallel.n_jobs=4       # Hydra config override
+adsorption-run start=1 stop=100 outputs=./runs/demo
 ```
 
-`run.yaml` composes `substrate`, `adsorbate` and `filter` groups; swappable
-objects are `_target_` nodes instantiated through
-`graphatoms.utils.parser.hydra_parse`. A run writes `records.jsonl` with one
-verdict per candidate, and refuses to start when the candidate count exceeds
+`run.yaml` is a **single** file next to the runner package
+(`src/adsorption/runner/run.yaml`): it declares the
+substrate, the adsorbate, the site declaration, the generation protocol, the
+filter chain and the budget. Swappable objects are `_target_` nodes
+instantiated with `hydra.utils.instantiate`.
+
+The runner detects the adsorbate's rotatable bonds: when it finds any, it
+builds a conformer ensemble and uses `MultiAdsorbateGenerator`; otherwise it
+uses the single reference. The site declaration is adaptive too: one core set
+builds `SingleSiteGenerator`, several core sets build `MultiSiteGenerator`,
+and `sites: auto` selects every top-layer atom as a top site. Candidate
+intervals are evaluated in parallel with `joblib` (default backend `loky`);
+`records.jsonl` holds one JSON line per candidate and `summary.json` holds the
+campaign totals. A run refuses to start when the candidate count exceeds
 `budget.max_candidates`.
 
 ## The two processes

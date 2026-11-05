@@ -1,6 +1,0 @@
-_target_: adsorption.filters.GeometryFilter
-sigma:
-  29: 2.338
-  6: 3.4
-  8: 3.0
-scale: 1.0
