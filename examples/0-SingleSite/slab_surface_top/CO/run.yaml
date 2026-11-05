@@ -28,6 +28,12 @@ protocol:
 filters:
   - _target_: adsorption.filters.GeometryFilter
     scale: 1.0
+  - _target_: adsorption.filters.LennardJonesEnergyFilter
+    e_cut: null
+    # Short LJ relaxation budget for the example gallery.
+    max_steps: 10
+    fmax: 0.3
+    reject_on_unconverged: false
 
 budget:
   max_candidates: 1000000

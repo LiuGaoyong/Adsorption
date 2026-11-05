@@ -66,6 +66,45 @@ def test_non_finite_ceiling_is_rejected(e_cut: float) -> None:
         OptimizedEnergyFilter(e_cut=e_cut, calculator=EMT())
 
 
+def test_none_ceiling_uses_isolated_fragment_energies() -> None:
+    """``e_cut=None`` compares against the isolated fragment sum."""
+    trial = make_trial()
+    n_substrate = trial.natoms_substrate
+    substrate = Atoms(
+        numbers=trial.atoms.numbers[:n_substrate],
+        positions=trial.atoms.positions[:n_substrate],
+        cell=trial.atoms.cell,
+        pbc=trial.atoms.pbc,
+    )
+    adsorbate = Atoms(
+        numbers=trial.atoms.numbers[n_substrate:],
+        positions=trial.atoms.positions[n_substrate:],
+    )
+    substrate.calc = EMT()
+    e_substrate = substrate.get_potential_energy()
+    adsorbate.calc = EMT()
+    e_adsorbate = adsorbate.get_potential_energy()
+    cutoff = e_substrate + e_adsorbate
+
+    filt = OptimizedEnergyFilter(
+        e_cut=None,
+        calculator=EMT(),
+        fmax=0.5,
+        max_steps=3,
+        reject_on_unconverged=False,
+    )
+    filt.prepare(trial)
+    assert 0 in filt._cutoffs
+    verdict = filt.evaluate(trial)
+    assert filt.e_cut is None
+    assert filt.signature()["e_cut"] is None
+    assert verdict.value is not None
+    if verdict.reason == "e_cut":
+        assert verdict.value > cutoff
+    else:
+        assert verdict.value <= cutoff
+
+
 def test_evaluate_accepts_below_the_ceiling() -> None:
     """A relaxed trial under the ceiling is accepted and not mutated."""
     filt = OptimizedEnergyFilter(

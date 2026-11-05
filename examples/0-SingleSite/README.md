@@ -43,5 +43,8 @@ python examples/0-SingleSite/plot_sites.py --only cluster_vertex_top
 
 The highlighted atoms are the site core.
 
-The examples use rigid adsorbates (`conformers: none`),
-`GeometryFilter(scale=1.0)` and the size-aware distance bounds.
+Every example applies `GeometryFilter(scale=1.0)` followed by
+`LennardJonesEnergyFilter(e_cut: null)`, whose ceiling is the sum of the
+isolated substrate and adsorbate Lennard-Jones energies. The runner resolves
+that ceiling once before the candidate loop. The adsorbates are
+rigid (`conformers: none`) and the distance bounds are size-aware.

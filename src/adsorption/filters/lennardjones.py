@@ -1,8 +1,9 @@
 """Process B, steric tier: Lennard-Jones relaxation behind an energy ceiling.
 
 The tier relaxes each survivor with a Lennard-Jones calculator and keeps it
-only when the relaxed energy stays below the registered ceiling. It only
-removes: the filter never ranks candidates.
+only when the relaxed energy stays below the registered ceiling. With
+``e_cut=None`` the ceiling is the sum of the isolated substrate and adsorbate
+Lennard-Jones energies. It only removes: the filter never ranks candidates.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ class LennardJonesEnergyFilter(OptimizedEnergyFilter):
 
     def __init__(
         self,
-        e_cut: float,
+        e_cut: float | None,
         *,
         fmax: float = 0.01,
         max_steps: int = 100,
@@ -40,7 +41,8 @@ class LennardJonesEnergyFilter(OptimizedEnergyFilter):
         """Store the evaluator and the acceptance policy.
 
         Args:
-            e_cut: Energy ceiling in eV.
+            e_cut: Energy ceiling in eV, or ``None`` to use the sum of the
+                isolated substrate and adsorbate single-point energies.
             fmax: Force tolerance in eV/A.
             max_steps: Maximum number of steps.
             method: Optimization method.

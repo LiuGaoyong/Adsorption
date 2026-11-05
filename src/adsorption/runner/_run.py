@@ -511,6 +511,19 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _detail_payload(detail: Any) -> Any:
+    """Return a compact JSON-safe verdict detail."""
+    if detail is None:
+        return None
+    if isinstance(detail, (Mapping, list, tuple)):
+        return _jsonable(detail)
+    payload: dict[str, Any] = {"type": type(detail).__name__}
+    converged = getattr(detail, "converged", None)
+    if converged is not None:
+        payload["converged"] = bool(converged)
+    return payload
+
+
 def _record_payload(
     record: Record,
     filters: Sequence[AdsorptionConfigurationFilterABC],
@@ -526,7 +539,7 @@ def _record_payload(
                 "accepted": bool(verdict.accepted),
                 "value": _jsonable(verdict.value),
                 "reason": verdict.reason,
-                "detail": _jsonable(verdict.detail),
+                "detail": _detail_payload(verdict.detail),
             }
             for filt, verdict in zip(filters, record.verdicts)
         ],
@@ -660,6 +673,12 @@ def run_config(
             f"Invalid interval [{first}, {last}] for "
             f"{total_candidates} candidates."
         )
+
+    sample = generator.trial(first)
+    for filt in filters:
+        prepare = getattr(filt, "prepare", None)
+        if callable(prepare):
+            prepare(sample)
 
     raw_output = (
         output if output is not None else config.get("outputs", "./runs")
