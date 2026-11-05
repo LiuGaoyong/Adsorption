@@ -88,8 +88,9 @@ uses the single reference. The site declaration is adaptive too: one core set
 builds `SingleSiteGenerator`, several core sets build `MultiSiteGenerator`,
 and `sites: auto` selects every top-layer atom as a top site. Candidate
 intervals are evaluated in parallel with `joblib` (default backend `loky`);
-`records.jsonl` holds one JSON line per candidate and `summary.json` holds the
-campaign totals. A run refuses to start when the candidate count exceeds
+`records.jsonl` holds one JSON line per candidate, `accepted.xyz` holds the
+accepted structures as one extended-XYZ trajectory, and `summary.json` holds
+the campaign totals. A run refuses to start when the candidate count exceeds
 `budget.max_candidates`.
 
 ## The two processes
@@ -131,24 +132,12 @@ tested, linted, or packaged.
 
 ```bash
 pixi run test              # pytest -s -vv
-pixi run test-case         # example cases, writes PNGs
 pytest src/tests -m "not slow"
 ```
 
-The migrated examples live in `src/test-case/` and are not part of the default
-`pytest` paths. Every case renders `src/test-case/results/`:
-
-```text
-results/sites/<site>.png                    # the twelve site grids
-results/<site>-<adsorbate>/<index>.png      # four views (accepted only)
-results/<site>-<adsorbate>/<index>.xyz      # extended XYZ of the candidate
-results/<site>-<adsorbate>/<index>.txt      # geometric-filter verdict
-```
-
-Every candidate gets an `.xyz` and a `.txt`, accepted or not; only accepted
-candidates get a `.png`. `<index>` is the one-based candidate index of the
-generator and the verdict file records `accepted: true|false` plus the filter
-value.
+The 96 site-adsorbate examples live in `examples/0-SingleSite/<site>/<adsorbate>/`.
+Run them separately with `adsorption-run`, or all of them with
+`examples/0-SingleSite/run_all.sh`.
 
 ## Citation and license
 

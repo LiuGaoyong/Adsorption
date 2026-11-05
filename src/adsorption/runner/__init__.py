@@ -38,4 +38,5 @@ def run(cfg: DictConfig) -> None:
         f"rotatable_bonds={summary.n_rotatable_bonds}"
     )
     print(f"records: {summary.records_path}")
+    print(f"accepted: {summary.accepted_xyz_path}")
     print(f"summary: {summary.summary_path}")

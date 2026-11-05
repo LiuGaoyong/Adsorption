@@ -24,6 +24,7 @@ from typing import Any
 import numpy as np
 import yaml
 from ase import Atoms
+from ase.io import write as ase_write
 from hydra.utils import instantiate
 from joblib import Parallel, cpu_count, delayed
 
@@ -63,6 +64,7 @@ class RunSummary:
         rejected: Number of candidates rejected by some filter.
         first_failed: Rejection counts keyed by the first failing filter.
         records_path: Path of the merged ``records.jsonl`` sidecar.
+        accepted_xyz_path: Path of the merged accepted structures.
         summary_path: Path of the ``summary.json`` sidecar.
         seconds: Wall-clock duration of the campaign.
         signature: The generator signature.
@@ -76,6 +78,7 @@ class RunSummary:
     rejected: int
     first_failed: Mapping[str, int]
     records_path: Path
+    accepted_xyz_path: Path
     summary_path: Path
     seconds: float
     signature: Mapping[str, Any]
@@ -536,12 +539,14 @@ def _run_interval(
     start: int,
     stop: int,
     path: Path,
+    xyz_path: Path,
 ) -> dict[str, Any]:
-    """Evaluate one index interval into a private JSONL chunk."""
+    """Evaluate one index interval into JSONL and accepted-XYZ chunks."""
     pipeline = AdsorptionConfigurationPipeline(generator, filters)
     total = 0
     accepted = 0
     failures: Counter[str] = Counter()
+    xyz_path.unlink(missing_ok=True)
     with path.open("w", encoding="utf-8") as stream:
         for record in pipeline.run(start, stop):
             stream.write(
@@ -551,10 +556,28 @@ def _run_interval(
                 + "\n"
             )
             total += 1
-            if record.first_failed is None:
-                accepted += 1
-            else:
+            if record.first_failed is not None:
                 failures[record.first_failed] += 1
+                continue
+            accepted += 1
+            atoms = record.trial.atoms.copy()
+            atoms.calc = None
+            meta = record.trial.meta
+            atoms.info = {
+                "index": int(record.trial.index),
+                "site": int(meta.get("site", 0)),
+                "conformer": int(meta.get("conformer", 0)),
+                "i": int(meta.get("i", 0)),
+                "j": int(meta.get("j", 0)),
+                "k": int(meta.get("k", 0)),
+                "distance": float(meta.get("distance", 0.0)),
+            }
+            ase_write(
+                xyz_path,
+                atoms,
+                format="extxyz",
+                append=xyz_path.exists(),
+            )
     return {
         "total": total,
         "accepted": accepted,
@@ -658,18 +681,26 @@ def run_config(
         chunks_dir / f"chunk_{index:05d}.jsonl"
         for index in range(len(ranges))
     ]
+    xyz_paths = [
+        chunks_dir / f"chunk_{index:05d}.xyz"
+        for index in range(len(ranges))
+    ]
     started = time.perf_counter()
     if n_jobs == 1:
         results = [
-            _run_interval(generator, filters, begin, end, path)
-            for (begin, end), path in zip(ranges, paths)
+            _run_interval(generator, filters, begin, end, path, xyz_path)
+            for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
         ]
     else:
         results = Parallel(
             n_jobs=n_jobs, backend=backend, verbose=verbose
         )(
-            delayed(_run_interval)(generator, filters, begin, end, path)
-            for (begin, end), path in zip(ranges, paths)
+            delayed(_run_interval)(
+                generator, filters, begin, end, path, xyz_path
+            )
+            for (begin, end), path, xyz_path in zip(
+                ranges, paths, xyz_paths
+            )
         )
     seconds = time.perf_counter() - started
 
@@ -679,6 +710,13 @@ def run_config(
             with path.open("r", encoding="utf-8") as chunk:
                 shutil.copyfileobj(chunk, stream)
             path.unlink()
+    accepted_xyz_path = output_dir / "accepted.xyz"
+    with accepted_xyz_path.open("w", encoding="utf-8") as stream:
+        for xyz_path in xyz_paths:
+            if xyz_path.exists():
+                with xyz_path.open("r", encoding="utf-8") as chunk:
+                    shutil.copyfileobj(chunk, stream)
+                xyz_path.unlink()
     chunks_dir.rmdir()
 
     total = sum(int(result["total"]) for result in results)
@@ -691,6 +729,7 @@ def run_config(
         "accepted": accepted,
         "rejected": total - accepted,
         "first_failed": dict(failures),
+        "accepted_xyz": str(accepted_xyz_path),
         "start": first,
         "stop": last,
         "n_jobs": n_jobs,
@@ -712,6 +751,7 @@ def run_config(
         rejected=total - accepted,
         first_failed=dict(failures),
         records_path=records_path,
+        accepted_xyz_path=accepted_xyz_path,
         summary_path=summary_path,
         seconds=seconds,
         signature=dict(generator.signature()),

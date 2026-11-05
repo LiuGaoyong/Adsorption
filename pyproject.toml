@@ -95,7 +95,6 @@ dev = { features = ["dev"], solve-group = "default" }
 
 [tool.pixi.tasks]
 test = "pytest -s -vv"
-test-case = "pytest -s -vv src/test-case"
 
 [tool.pixi.dependencies]
 python = ">=3.12, <3.14"
