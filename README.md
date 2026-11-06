@@ -135,9 +135,10 @@ pixi run test              # pytest -s -vv
 pytest src/tests -m "not slow"
 ```
 
-The 96 site-adsorbate examples live in `examples/0-SingleSite/<site>/<adsorbate>/`.
-Run them separately with `adsorption-run`, or all of them with
-`examples/0-SingleSite/run_all.sh`.
+The 96 single-site examples live in `examples/0-SingleSite/<site>/<adsorbate>/`;
+the six-system multi-site gallery is in `examples/1-MultiSite/`, and the
+flexible-adsorbate gallery (n-hexane and 1,5-hexadiene) is in
+`examples/2-FlexibleAdsorbate/`. Each folder has its own `run_all.sh`.
 
 ## Citation and license
 

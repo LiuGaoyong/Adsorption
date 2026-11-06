@@ -1,0 +1,24 @@
+system,adsorbate,formula,conformers,sites,site_labels,total_candidates,n_oa_min,n_oa_max,tiers,status
+S1-Cu-octahedron,C6H6,C6H6,1,6,vertex_top;vertex_bridge;vertex_three_fold;facet_top;facet_bridge;facet_three_fold,463200,12,79,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S1-Cu-octahedron,CH4,CH4,1,6,vertex_top;vertex_bridge;vertex_three_fold;facet_top;facet_bridge;facet_three_fold,463200,12,79,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S1-Cu-octahedron,CO,CO,1,6,vertex_top;vertex_bridge;vertex_three_fold;facet_top;facet_bridge;facet_three_fold,463200,12,79,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S1-Cu-octahedron,H2O,H2O,1,6,vertex_top;vertex_bridge;vertex_three_fold;facet_top;facet_bridge;facet_three_fold,463200,12,79,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S1-Cu-octahedron,O,O,1,6,vertex_top;vertex_bridge;vertex_three_fold;facet_top;facet_bridge;facet_three_fold,463200,12,79,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S1-Cu-octahedron,n-hexane,C6H14,2,6,vertex_top;vertex_bridge;vertex_three_fold;facet_top;facet_bridge;facet_three_fold,926400,12,79,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S2-Cu111,C6H6,C6H6,1,3,facet_top;facet_bridge;facet_three_fold,124800,12,21,tier0-glj;tier1-mlp;tier2-emt;tier3-dft-template,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable;tier3-dft-template=template
+S2-Cu111,CO,CO,1,3,facet_top;facet_bridge;facet_three_fold,124800,12,21,tier0-glj;tier1-mlp;tier2-emt;tier3-dft-template,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable;tier3-dft-template=template
+S2-Cu111,H2O,H2O,1,3,facet_top;facet_bridge;facet_three_fold,124800,12,21,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S2-Cu111,O,O,1,3,facet_top;facet_bridge;facet_three_fold,124800,12,21,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S2-Cu111,n-hexane,C6H14,2,3,facet_top;facet_bridge;facet_three_fold,249600,12,21,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S3-Pd111,C6H6,C6H6,1,3,facet_top;facet_bridge;facet_three_fold,153600,16,24,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S3-Pd111,CO,CO,1,3,facet_top;facet_bridge;facet_three_fold,153600,16,24,tier0-glj;tier1-mlp;tier2-emt;tier3-dft-template,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable;tier3-dft-template=template
+S3-Pd111,furfural,C5H4O2,1,3,facet_top;facet_bridge;facet_three_fold,153600,16,24,tier0-glj;tier1-mlp;tier2-emt,tier0-glj=runnable;tier1-mlp=needs engine;tier2-emt=runnable
+S4-Fe110,C6H6,C6H6,1,3,facet_top;facet_bridge;facet_three_fold,132000,11,22,tier0-glj;tier1-mlp,tier0-glj=runnable;tier1-mlp=needs engine
+S4-Fe110,CO,CO,1,3,facet_top;facet_bridge;facet_three_fold,132000,11,22,tier0-glj;tier1-mlp;tier3-dft-template,tier0-glj=runnable;tier1-mlp=needs engine;tier3-dft-template=template
+S4-Fe110,O,O,1,3,facet_top;facet_bridge;facet_three_fold,132000,11,22,tier0-glj;tier1-mlp;tier3-dft-template,tier0-glj=runnable;tier1-mlp=needs engine;tier3-dft-template=template
+S5-Cu211-stepped,C6H6,C6H6,1,4,step_top;step_bridge;terrace_top;terrace_bridge,230400,11,38,tier0-glj;tier1-mlp,tier0-glj=runnable;tier1-mlp=needs engine
+S5-Cu211-stepped,CO,CO,1,4,step_top;step_bridge;terrace_top;terrace_bridge,230400,11,38,tier0-glj;tier1-mlp;tier3-dft-template,tier0-glj=runnable;tier1-mlp=needs engine;tier3-dft-template=template
+S5-Cu211-stepped,O,O,1,4,step_top;step_bridge;terrace_top;terrace_bridge,230400,11,38,tier0-glj;tier1-mlp,tier0-glj=runnable;tier1-mlp=needs engine
+S6-disordered-Cu,C6H6,C6H6,1,2,coord_top;coord_bridge,297600,42,82,tier0-glj;tier1-mlp,tier0-glj=runnable;tier1-mlp=needs engine
+S6-disordered-Cu,CO,CO,1,2,coord_top;coord_bridge,297600,42,82,tier0-glj;tier1-mlp,tier0-glj=runnable;tier1-mlp=needs engine
+S6-disordered-Cu,O,O,1,2,coord_top;coord_bridge,297600,42,82,tier0-glj;tier1-mlp,tier0-glj=runnable;tier1-mlp=needs engine

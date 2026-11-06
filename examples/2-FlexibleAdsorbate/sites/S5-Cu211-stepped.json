@@ -1,0 +1,55 @@
+{
+  "system": "S5",
+  "slug": "S5-Cu211-stepped",
+  "description": "Cu(211) stepped slab, terrace and step sites",
+  "formula": "Cu96",
+  "natoms": 96,
+  "sites": [
+    {
+      "core": [
+        2
+      ],
+      "label": "step_top",
+      "n_oa": 25,
+      "n_grid": 200,
+      "fraction": 0.125,
+      "r_s": 1.584,
+      "n_filter": 7
+    },
+    {
+      "core": [
+        2,
+        1
+      ],
+      "label": "step_bridge",
+      "n_oa": 38,
+      "n_grid": 200,
+      "fraction": 0.19,
+      "r_s": 1.98,
+      "n_filter": 12
+    },
+    {
+      "core": [
+        14
+      ],
+      "label": "terrace_top",
+      "n_oa": 11,
+      "n_grid": 200,
+      "fraction": 0.055,
+      "r_s": 1.584,
+      "n_filter": 9
+    },
+    {
+      "core": [
+        14,
+        13
+      ],
+      "label": "terrace_bridge",
+      "n_oa": 22,
+      "n_grid": 200,
+      "fraction": 0.11,
+      "r_s": 1.98,
+      "n_filter": 15
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+system,adsorbate,smiles,sites,conformers,cores
+S1-Cu-octahedron,"1,5-hexadiene",C=CCCC=C,6,5,"[303];[303,334];[303,334,464];[610];[608,610];[607,608,610]"
+S1-Cu-octahedron,n-hexane,CCCCCC,6,3,"[303];[303,334];[303,334,464];[610];[608,610];[607,608,610]"
+S2-Cu111,"1,5-hexadiene",C=CCCC=C,3,5,"[454];[454,444];[454,444,445]"
+S2-Cu111,n-hexane,CCCCCC,3,3,"[454];[454,444];[454,444,445]"
+S3-Pd111,"1,5-hexadiene",C=CCCC=C,3,5,"[454];[454,444];[454,444,445]"
+S3-Pd111,n-hexane,CCCCCC,3,3,"[454];[454,444];[454,444,445]"
+S4-Fe110,"1,5-hexadiene",C=CCCC=C,3,5,"[363];[363,355];[363,355,362]"
+S4-Fe110,n-hexane,CCCCCC,3,3,"[363];[363,355];[363,355,362]"
+S5-Cu211-stepped,"1,5-hexadiene",C=CCCC=C,4,5,"[2];[2,1];[14];[14,13]"
+S5-Cu211-stepped,n-hexane,CCCCCC,4,3,"[2];[2,1];[14];[14,13]"
+S6-disordered-Cu,"1,5-hexadiene",C=CCCC=C,2,5,"[12];[12,163]"
+S6-disordered-Cu,n-hexane,CCCCCC,2,3,"[12];[12,163]"

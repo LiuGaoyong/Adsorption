@@ -1,0 +1,81 @@
+{
+  "system": "S1",
+  "slug": "S1-Cu-octahedron",
+  "description": "Cu octahedral cluster (Octahedron, length 10)",
+  "formula": "Cu670",
+  "natoms": 670,
+  "sites": [
+    {
+      "core": [
+        303
+      ],
+      "label": "vertex_top",
+      "n_oa": 79,
+      "n_grid": 200,
+      "fraction": 0.395,
+      "r_s": 1.584,
+      "n_filter": 4
+    },
+    {
+      "core": [
+        303,
+        334
+      ],
+      "label": "vertex_bridge",
+      "n_oa": 37,
+      "n_grid": 200,
+      "fraction": 0.185,
+      "r_s": 1.98,
+      "n_filter": 9
+    },
+    {
+      "core": [
+        303,
+        334,
+        464
+      ],
+      "label": "vertex_three_fold",
+      "n_oa": 21,
+      "n_grid": 200,
+      "fraction": 0.105,
+      "r_s": 1.98,
+      "n_filter": 11
+    },
+    {
+      "core": [
+        610
+      ],
+      "label": "facet_top",
+      "n_oa": 12,
+      "n_grid": 200,
+      "fraction": 0.06,
+      "r_s": 1.584,
+      "n_filter": 9
+    },
+    {
+      "core": [
+        608,
+        610
+      ],
+      "label": "facet_bridge",
+      "n_oa": 23,
+      "n_grid": 200,
+      "fraction": 0.115,
+      "r_s": 1.98,
+      "n_filter": 15
+    },
+    {
+      "core": [
+        607,
+        608,
+        610
+      ],
+      "label": "facet_three_fold",
+      "n_oa": 21,
+      "n_grid": 200,
+      "fraction": 0.105,
+      "r_s": 1.98,
+      "n_filter": 18
+    }
+  ]
+}

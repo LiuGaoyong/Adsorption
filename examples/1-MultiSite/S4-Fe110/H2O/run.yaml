@@ -1,0 +1,57 @@
+# system: S4-Fe110; adsorbate: H2O
+substrate:
+  _target_: ase.build.bcc110
+  symbol: Fe
+  size: [8, 10, 5]
+  vacuum: 15.0
+  orthogonal: true
+  periodic: true
+
+adsorbate:
+  _target_: ase.build.molecule
+  name: H2O
+  conformers: none
+
+sites:
+  - [363]
+  - [363, 355]
+  - [363, 355, 362]
+
+protocol:
+  # Reduced demo grid; the paper matrix uses N=N_AB=200, M=12 and
+  # site-specific N_OA from pipeline/sites/.
+  n_oa: 10
+  n_rot: 10
+  n_d: 6
+  d_min: 0.8
+  d_max: 3.0
+  d_min_radius_scale: 0.0
+  d_max_radius_scale: 0.0
+  anchor: com
+  orientation_kind: auto
+
+filters:
+  - _target_: adsorption.filters.GeometryFilter
+    scale: 1.0
+  - _target_: adsorption.filters.LennardJonesEnergyFilter
+    e_cut: null
+    max_steps: 10
+    fmax: 0.3
+    reject_on_unconverged: false
+
+budget:
+  max_candidates: 1000000
+
+start: 1
+stop: null
+outputs: ./results
+
+parallel:
+  backend: loky
+  n_jobs: -1
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .
