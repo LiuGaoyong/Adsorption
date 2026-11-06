@@ -1,0 +1,63 @@
+# Single-file campaign configuration for `adsorption-run`.
+# Every `_target_` node is instantiated with hydra.utils.instantiate.
+# Runner-only adsorbate keys (`smiles`, `conformers`, ...) are removed before
+# the target is instantiated.
+
+substrate:
+  _target_: ase.build.fcc111
+  symbol: Cu
+  size: [2, 2, 2]
+  vacuum: 8.0
+  orthogonal: true
+  periodic: true
+
+adsorbate:
+  # A SMILES source is enough; _target_ can be used for an ASE reference.
+  smiles: CCCC
+  # auto: generate conformers only when rotatable bonds are detected.
+  conformers: auto
+  n_conformers: 8
+  conformer_seed: 20261030
+  prune_rmsd: 0.5
+  charge: 0
+
+# "auto" selects every top-layer atom as a top site. A flat list of integers is
+# one core set; a list of lists declares several sites explicitly.
+sites: auto
+
+protocol:
+  n_oa: 8
+  n_rot: 8
+  n_d: 6
+  d_min: 0.8
+  d_max: 3.0
+  # Optional size-dependent bounds:
+  # d_min_eff = d_min + d_min_radius_scale * R
+  # d_max_eff = d_max + d_max_radius_scale * R
+  d_min_radius_scale: 0.0
+  d_max_radius_scale: 0.0
+  anchor: com
+  orientation_kind: auto
+  scale: null
+  skin: null
+
+filters:
+  - _target_: adsorption.filters.GeometryFilter
+    scale: 1.0
+
+budget:
+  max_candidates: 10000000
+
+start: 1
+stop: null
+outputs: ./runs
+
+parallel:
+  backend: loky
+  n_jobs: -1
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .

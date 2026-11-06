@@ -1,0 +1,53 @@
+# site: slab_surface_bri; adsorbate: C2H6
+substrate:
+  _target_: ase.build.fcc111
+  symbol: Cu
+  size: [10, 10, 5]
+  vacuum: 10.0
+  orthogonal: true
+  periodic: true
+
+adsorbate:
+  _target_: ase.build.molecule
+  name: C2H6
+  conformers: none
+
+sites: [[400, 490]]
+
+protocol:
+  n_oa: 6
+  n_rot: 4
+  n_d: 3
+  d_min: 2.0
+  d_max: 3.5
+  d_min_radius_scale: 0.1
+  d_max_radius_scale: 0.35
+  anchor: com
+  orientation_kind: auto
+
+filters:
+  - _target_: adsorption.filters.GeometryFilter
+    scale: 1.0
+  - _target_: adsorption.filters.LennardJonesEnergyFilter
+    e_cut: null
+    # Short LJ relaxation budget for the example gallery.
+    max_steps: 10
+    fmax: 0.3
+    reject_on_unconverged: false
+
+budget:
+  max_candidates: 1000000
+
+start: 1
+stop: null
+outputs: ./results
+
+parallel:
+  backend: loky
+  n_jobs: -1
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .
