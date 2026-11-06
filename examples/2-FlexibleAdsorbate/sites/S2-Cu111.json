@@ -1,0 +1,45 @@
+{
+  "system": "S2",
+  "slug": "S2-Cu111",
+  "description": "Cu(111) slab 10x10x5, 15 A vacuum",
+  "formula": "Cu500",
+  "natoms": 500,
+  "sites": [
+    {
+      "core": [
+        454
+      ],
+      "label": "facet_top",
+      "n_oa": 12,
+      "n_grid": 200,
+      "fraction": 0.06,
+      "r_s": 1.584,
+      "n_filter": 9
+    },
+    {
+      "core": [
+        454,
+        444
+      ],
+      "label": "facet_bridge",
+      "n_oa": 19,
+      "n_grid": 200,
+      "fraction": 0.095,
+      "r_s": 1.98,
+      "n_filter": 15
+    },
+    {
+      "core": [
+        454,
+        444,
+        445
+      ],
+      "label": "facet_three_fold",
+      "n_oa": 21,
+      "n_grid": 200,
+      "fraction": 0.105,
+      "r_s": 1.98,
+      "n_filter": 18
+    }
+  ]
+}

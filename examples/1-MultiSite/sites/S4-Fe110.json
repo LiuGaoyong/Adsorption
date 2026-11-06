@@ -1,0 +1,45 @@
+{
+  "system": "S4",
+  "slug": "S4-Fe110",
+  "description": "Fe(110) slab 8x10x5, 15 A vacuum",
+  "formula": "Fe400",
+  "natoms": 400,
+  "sites": [
+    {
+      "core": [
+        363
+      ],
+      "label": "facet_top",
+      "n_oa": 11,
+      "n_grid": 200,
+      "fraction": 0.055,
+      "r_s": 1.584,
+      "n_filter": 10
+    },
+    {
+      "core": [
+        363,
+        355
+      ],
+      "label": "facet_bridge",
+      "n_oa": 22,
+      "n_grid": 200,
+      "fraction": 0.11,
+      "r_s": 1.98,
+      "n_filter": 16
+    },
+    {
+      "core": [
+        363,
+        355,
+        362
+      ],
+      "label": "facet_three_fold",
+      "n_oa": 22,
+      "n_grid": 200,
+      "fraction": 0.11,
+      "r_s": 1.98,
+      "n_filter": 20
+    }
+  ]
+}

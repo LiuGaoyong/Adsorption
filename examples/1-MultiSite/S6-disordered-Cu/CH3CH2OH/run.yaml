@@ -1,0 +1,53 @@
+# system: S6-disordered-Cu; adsorbate: CH3CH2OH
+substrate:
+  _target_: ase.io.read
+  filename: ../../structures/S6-disordered-Cu.xyz
+  format: extxyz
+
+adsorbate:
+  _target_: ase.build.molecule
+  name: CH3CH2OH
+  conformers: none
+
+sites:
+  - [12]
+  - [12, 163]
+
+protocol:
+  # Reduced demo grid; the paper matrix uses N=N_AB=200, M=12 and
+  # site-specific N_OA from pipeline/sites/.
+  n_oa: 10
+  n_rot: 10
+  n_d: 6
+  d_min: 0.8
+  d_max: 3.0
+  d_min_radius_scale: 0.0
+  d_max_radius_scale: 0.0
+  anchor: com
+  orientation_kind: auto
+
+filters:
+  - _target_: adsorption.filters.GeometryFilter
+    scale: 1.0
+  - _target_: adsorption.filters.LennardJonesEnergyFilter
+    e_cut: null
+    max_steps: 10
+    fmax: 0.3
+    reject_on_unconverged: false
+
+budget:
+  max_candidates: 1000000
+
+start: 1
+stop: null
+outputs: ./results
+
+parallel:
+  backend: loky
+  n_jobs: -1
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: .

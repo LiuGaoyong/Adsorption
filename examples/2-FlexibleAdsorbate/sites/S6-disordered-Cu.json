@@ -1,0 +1,32 @@
+{
+  "system": "S6",
+  "slug": "S6-disordered-Cu",
+  "description": "Disordered Cu cluster (deterministic random packing)",
+  "formula": "Cu200",
+  "natoms": 200,
+  "sites": [
+    {
+      "core": [
+        12
+      ],
+      "label": "coord_top",
+      "n_oa": 82,
+      "n_grid": 200,
+      "fraction": 0.41,
+      "r_s": 1.584,
+      "n_filter": 2
+    },
+    {
+      "core": [
+        12,
+        163
+      ],
+      "label": "coord_bridge",
+      "n_oa": 42,
+      "n_grid": 200,
+      "fraction": 0.21,
+      "r_s": 1.98,
+      "n_filter": 9
+    }
+  ]
+}

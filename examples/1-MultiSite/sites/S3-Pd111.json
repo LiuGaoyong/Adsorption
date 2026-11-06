@@ -1,0 +1,45 @@
+{
+  "system": "S3",
+  "slug": "S3-Pd111",
+  "description": "Pd(111) slab 10x10x5, 15 A vacuum",
+  "formula": "Pd500",
+  "natoms": 500,
+  "sites": [
+    {
+      "core": [
+        454
+      ],
+      "label": "facet_top",
+      "n_oa": 16,
+      "n_grid": 200,
+      "fraction": 0.08,
+      "r_s": 1.668,
+      "n_filter": 9
+    },
+    {
+      "core": [
+        454,
+        444
+      ],
+      "label": "facet_bridge",
+      "n_oa": 24,
+      "n_grid": 200,
+      "fraction": 0.12,
+      "r_s": 2.085,
+      "n_filter": 15
+    },
+    {
+      "core": [
+        454,
+        444,
+        445
+      ],
+      "label": "facet_three_fold",
+      "n_oa": 24,
+      "n_grid": 200,
+      "fraction": 0.12,
+      "r_s": 2.085,
+      "n_filter": 18
+    }
+  ]
+}
