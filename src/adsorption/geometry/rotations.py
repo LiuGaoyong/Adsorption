@@ -3,8 +3,10 @@
 The direction-only construction of Section 2.4 samples the molecular
 reference axis on the sphere and applies the shortest-arc rotation. The
 ``RotationSet`` interface hides that choice from the protocol layer: a set has
-a deterministic count and returns the ``index``-th rotation matrix, so the
-budget index keeps a single orientation radix whatever construction is used.
+a deterministic count and returns the ``index``-th unit quaternion
+``(w, x, y, z)``, so the budget index keeps a single orientation radix
+whatever construction is used. Quaternion algebra goes through
+:mod:`adsorption.geometry._quat`.
 """
 
 from __future__ import annotations
@@ -13,11 +15,14 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from .grids import DirectionGrid, FibonacciGrid
-from .rotation import (
-    axis_angle_rotation,
-    quaternion_to_rotation,
-    shortest_arc_rotation,
+from adsorption.geometry._quat import (
+    quaternion_raw_multiply,
+    standardize_quaternion,
+)
+from adsorption.geometry.grids import DirectionGrid, FibonacciGrid
+from adsorption.geometry.rotation import (
+    axis_angle_quaternion,
+    shortest_arc_quaternion,
     unit_vector,
 )
 
@@ -25,7 +30,6 @@ __all__ = [
     "DirectionRollSet",
     "FixedRotation",
     "RotationSet",
-    "SO3Set",
     "ShortestArcSet",
 ]
 
@@ -41,8 +45,8 @@ class RotationSet(Protocol):
         """Return the number of rotations in the set."""
         ...
 
-    def rotation(self, index: int) -> np.ndarray:
-        """Return the ``(3, 3)`` rotation matrix at ``index``."""
+    def quaternion(self, index: int) -> np.ndarray:
+        """Return the unit quaternion ``(w, x, y, z)`` at ``index``."""
         ...
 
 
@@ -59,13 +63,13 @@ class FixedRotation:
         """Return ``1``."""
         return 1
 
-    def rotation(self, index: int) -> np.ndarray:
-        """Return the identity for ``index = 0``."""
+    def quaternion(self, index: int) -> np.ndarray:
+        """Return the identity quaternion for ``index = 0``."""
         if int(index) != 0:
             raise IndexError(
                 f"The fixed rotation set has one element, got {index}."
             )
-        return np.eye(3)
+        return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
 
 
 class ShortestArcSet:
@@ -88,7 +92,7 @@ class ShortestArcSet:
         *,
         grid: DirectionGrid | None = None,
     ) -> None:
-        """Precompute the rotations.
+        """Precompute the quaternions.
 
         Args:
             axis: Body-frame reference axis, normalized internally.
@@ -98,18 +102,18 @@ class ShortestArcSet:
         self.axis = unit_vector(np.asarray(axis, dtype=float))
         active_grid: DirectionGrid = FibonacciGrid() if grid is None else grid
         self.directions = np.asarray(active_grid.points(n), dtype=float)
-        self._rotations = tuple(
-            shortest_arc_rotation(self.axis, direction)
+        self._quaternions = tuple(
+            shortest_arc_quaternion(self.axis, direction)
             for direction in self.directions
         )
 
     def count(self) -> int:
         """Return the number of sampled orientations."""
-        return len(self._rotations)
+        return len(self._quaternions)
 
-    def rotation(self, index: int) -> np.ndarray:
-        """Return the rotation that maps the axis onto direction ``index``."""
-        return np.asarray(self._rotations[int(index)], dtype=float)
+    def quaternion(self, index: int) -> np.ndarray:
+        """Return the shortest-arc rotation onto direction ``index``."""
+        return np.asarray(self._quaternions[int(index)], dtype=float)
 
     def image(self, index: int) -> np.ndarray:
         """Return the placed reference axis at ``index``."""
@@ -120,9 +124,8 @@ class DirectionRollSet:
     """The direction-plus-roll orientation set on ``S^2 x S^1``.
 
     The reference axis is mapped onto every direction of a grid with the
-    shortest-arc rotation, and a roll about the placed axis is applied on top:
-
-    ``R(j, gamma) = T(v_j, gamma) R_j``.
+    shortest-arc rotation, and a roll about the placed axis is composed on
+    top: ``q(j, gamma) = q_roll(v_j, gamma) q_arc(v_j)``.
 
     The roll grid is equally spaced. The index runs over the directions first
     and the roll fastest, i.e. ``j = index // n_roll`` and
@@ -144,7 +147,7 @@ class DirectionRollSet:
         n_roll: int = 1,
         grid: DirectionGrid | None = None,
     ) -> None:
-        """Precompute the rotations.
+        """Precompute the quaternions.
 
         Args:
             axis: Body-frame reference axis, normalized internally.
@@ -164,99 +167,28 @@ class DirectionRollSet:
         self._arcs = ShortestArcSet(self.axis, int(n_dir), grid=grid)
         self.directions = self._arcs.directions
         rolls = 2.0 * np.pi * np.arange(self.n_roll) / self.n_roll
-        rotations: list[np.ndarray] = []
+        quaternions: list[np.ndarray] = []
         for j, direction in enumerate(self.directions):
-            base = self._arcs.rotation(j)
+            base = self._arcs.quaternion(j)
             for gamma in rolls:
-                rotations.append(
-                    axis_angle_rotation(direction, float(gamma)) @ base
+                roll = axis_angle_quaternion(direction, float(gamma))
+                quaternions.append(
+                    standardize_quaternion(
+                        quaternion_raw_multiply(roll, base)
+                    )
                 )
-        self._rotations = tuple(rotations)
+        self._quaternions = tuple(quaternions)
 
     def count(self) -> int:
         """Return the number of sampled orientations."""
-        return len(self._rotations)
+        return len(self._quaternions)
 
-    def rotation(self, index: int) -> np.ndarray:
+    def quaternion(self, index: int) -> np.ndarray:
         """Return the rotation at ``index``."""
-        return np.asarray(self._rotations[int(index)], dtype=float)
+        return np.asarray(self._quaternions[int(index)], dtype=float)
 
     def image(self, index: int) -> np.ndarray:
         """Return the placed reference axis at ``index`` (roll invariant)."""
         return np.asarray(
             self.directions[int(index) // self.n_roll], dtype=float
         )
-
-
-def _generalized_golden_ratio(dimension: int) -> float:
-    """Return the root above one of ``x ** (dimension + 1) = x + 1``."""
-    def residual(x: float) -> float:
-        return x ** (dimension + 1) - x - 1.0
-
-    lower, upper = 1.0, 2.0
-    for _ in range(200):
-        middle = 0.5 * (lower + upper)
-        if residual(middle) > 0.0:
-            upper = middle
-        else:
-            lower = middle
-    return 0.5 * (lower + upper)
-
-
-class SO3Set:
-    """A deterministic low-discrepancy point set on ``SO(3)``.
-
-    Three Kronecker sequences built from the generalised golden ratio of
-    dimension three are mapped through Shoemake's uniform-quaternion
-    parameterisation:
-
-    ``q = (sqrt(1-u1) sin 2*pi*u2, sqrt(1-u1) cos 2*pi*u2,
-           sqrt(u1) sin 2*pi*u3, sqrt(u1) cos 2*pi*u3)``
-
-    with ``u`` the Kronecker point. The construction is closed-form and
-    reproducible. It samples the roll as well as the axis direction, so for a
-    linear adsorbate it over-samples the physically irrelevant roll; use
-    ``ShortestArcSet`` there.
-
-    Attributes:
-        quaternions: The unit quaternions ``(w, x, y, z)``, shape ``(n, 4)``.
-    """
-
-    name = "so3"
-
-    def __init__(self, n: int) -> None:
-        """Precompute the quaternions and rotation matrices.
-
-        Args:
-            n: Number of rotations.
-
-        Raises:
-            ValueError: If ``n`` is not positive.
-        """
-        if int(n) < 1:
-            raise ValueError(f"n must be positive, got {n}.")
-        dimension = 3
-        golden = _generalized_golden_ratio(dimension)
-        alpha = np.array(
-            [1.0 / golden**k for k in range(1, dimension + 1)]
-        )
-        points = (
-            0.5 + np.arange(int(n), dtype=float)[:, None] * alpha[None, :]
-        ) % 1.0
-        u1, u2, u3 = points[:, 0], points[:, 1], points[:, 2]
-        qx = np.sqrt(1.0 - u1) * np.sin(2.0 * np.pi * u2)
-        qy = np.sqrt(1.0 - u1) * np.cos(2.0 * np.pi * u2)
-        qz = np.sqrt(u1) * np.sin(2.0 * np.pi * u3)
-        qw = np.sqrt(u1) * np.cos(2.0 * np.pi * u3)
-        self.quaternions = np.column_stack((qw, qx, qy, qz))
-        self._rotations = tuple(
-            quaternion_to_rotation(q) for q in self.quaternions
-        )
-
-    def count(self) -> int:
-        """Return the number of sampled rotations."""
-        return len(self._rotations)
-
-    def rotation(self, index: int) -> np.ndarray:
-        """Return the rotation at ``index``."""
-        return np.asarray(self._rotations[int(index)], dtype=float)

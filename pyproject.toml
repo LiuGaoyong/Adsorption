@@ -9,7 +9,7 @@ Issues = "https://github.com/LiuGaoyong/Adsorption/issues/"
 
 [project]
 name = "adsorption"
-version = "0.1.2"
+version = "0.2.0"
 readme = "README.md"
 description = "Adsorption Based on ASE."
 keywords = ["chemistry", "adsorption"]
@@ -25,25 +25,28 @@ requires-python = ">=3.12, <3.14"
 license = "GPL-3.0-or-later"
 dependencies = [
     "ase",
-    "arrayff",
+    "arrayff>=0.0.2",
     "joblib",
     "numpy",
     "scipy",
     "scikit-learn",
     "typing-extensions",
     "graphatoms>=3.0",
+    'hydra-core',
     "pyyaml>=6",
 ]
+
+[project.scripts]
+adsorption-run = "adsorption.runner:run"
+
 [dependency-groups]
 dev = [
     "ruff>=0.11",
     "pytest>=8.3",
     "pytest-xdist",
     "jupyterlab",
+    "matplotlib>=3.8",
 ]
-
-[project.scripts]
-adsorption-campaign = "adsorption.runner.cli:main"
 
 # uv config
 [tool.uv]
@@ -56,6 +59,7 @@ default = true
 [tool.pytest.ini_options]
 addopts = '--maxfail=1 -rf' # exit after 1 failures, report fail info
 testpaths = ["src/tests"]
+markers = ["slow: long-running regression tests"]
 filterwarnings = [
     "error", # All other warnings are transformed into errors.
     # ignore the following warnings that matching a regex
@@ -68,6 +72,7 @@ line-length = 80
 indent-width = 4
 select = ["F", "E", "W", "UP", "D"]
 ignore = ["F722", 'D100']
+extend-exclude = ["deprecated"]
 [tool.ruff.pydocstyle]
 convention = "google"
 
@@ -94,7 +99,7 @@ test = "pytest -s -vv"
 [tool.pixi.dependencies]
 python = ">=3.12, <3.14"
 ase = ">=3.28.0,<4"
-arrayff = ">=0.0"
+arrayff = ">=0.0.2"
 joblib = ">=0.0"
 numpy = ">=0.0"
 scipy = ">=0.0"
@@ -106,3 +111,4 @@ ruff = ">=0.11"
 pytest = ">=8.3"
 pytest-xdist = ">=3.8.0"
 jupyterlab = ">=4.5.8"
+hydra-core = ">=1.0"

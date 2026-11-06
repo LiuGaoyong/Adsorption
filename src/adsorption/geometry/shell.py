@@ -8,10 +8,10 @@ import numpy as np
 from ase import Atoms
 from ase.data import covalent_radii as COV_R
 
-from .constants import DELTA_NBR
-from .mic import displacements_mic, is_periodic
+from adsorption.geometry.constants import DELTA_NBR
+from adsorption.geometry.mic import displacements_mic, is_periodic
 
-__all__ = ["first_neighbor_shell", "mean_mic", "outward_normal"]
+__all__ = ["first_neighbor_shell", "mean_mic"]
 
 
 def mean_mic(
@@ -44,44 +44,6 @@ def mean_mic(
     ref = pos[0]
     displacement = displacements_mic(pos - ref, cell, pbc)
     return ref + displacement.mean(axis=0)
-
-
-def outward_normal(
-    center: np.ndarray,
-    neighbor_positions: np.ndarray,
-    cell: np.ndarray | None = None,
-    pbc: np.ndarray | None = None,
-) -> np.ndarray:
-    """Return the outward reference direction of Eq. (4).
-
-    The vector runs from the minimum-image centroid of the first-neighbour
-    shell to the site centre and is normalised. It is bookkeeping and
-    visualisation only; it does not constrain the direction grid.
-
-    Args:
-        center: Site centre, shape ``(3,)``.
-        neighbor_positions: Shell positions of shape ``(m, 3)``.
-        cell: Optional ``(3, 3)`` cell matrix.
-        pbc: Optional ``(3,)`` periodic-axis mask.
-
-    Returns:
-        np.ndarray: The unit outward direction, shape ``(3,)``.
-
-    Raises:
-        ValueError: If the shell centroid coincides with the centre.
-    """
-    c = np.asarray(center, dtype=float)
-    if c.shape != (3,):
-        raise ValueError(f"center must be (3,), got {c.shape}.")
-    centroid = mean_mic(neighbor_positions, cell, pbc)
-    vector = c - centroid
-    length = float(np.linalg.norm(vector))
-    if length < 1e-12:
-        raise ValueError(
-            "The outward direction is undefined: the shell centroid "
-            "coincides with the site centre."
-        )
-    return vector / length
 
 
 def first_neighbor_shell(

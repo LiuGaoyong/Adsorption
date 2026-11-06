@@ -2,8 +2,8 @@
 
 A grid is a deterministic point set: for a given lattice size ``n`` it returns
 the same points in the same order. The protocol layer uses ``size(n)`` as the
-radix of the direction dimension, and the admissibility filter keeps the
-original grid indices so that a candidate can be regenerated from its index.
+radix of the direction dimension, and the original grid indices are kept so
+that a candidate can be regenerated from its index.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 from graphatoms.geometry.sample import fibonacci_lattice
+
+from adsorption.geometry.rotation import unit_vector
 
 __all__ = [
     "DirectionGrid",
@@ -45,11 +47,7 @@ def _check_n(n: int) -> int:
 
 
 def _normalize(points: np.ndarray) -> np.ndarray:
-    points = np.asarray(points, dtype=float)
-    norms = np.linalg.norm(points, axis=1)
-    if np.any(norms < 1e-15):
-        raise ValueError("The grid contains a zero-length vector.")
-    return points / norms[:, None]
+    return unit_vector(np.asarray(points, dtype=float))
 
 
 class FibonacciGrid:

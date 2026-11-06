@@ -25,10 +25,6 @@ SKIN_MULTI: float = 0.5
 MAX_CORE_SIZE: int = 6
 """Largest supported core set."""
 
-GOLDEN_RATIO: float = (1.0 + 5.0**0.5) / 2.0
-"""The golden ratio used by the spherical Fibonacci lattice."""
-
-
 def default_scale(core_size: int) -> float:
     """Return the default direction-sphere scale for a core set.
 

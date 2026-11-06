@@ -65,33 +65,9 @@ def displacements_mic(
     if not is_periodic(cell, pbc):
         return v.copy()
     flat = v.reshape(-1, 3)
-    out, _ = find_mic(flat, np.asarray(cell, dtype=float), _axis_mask(pbc))
+    out, _ = find_mic(
+        flat,
+        np.asarray(cell, dtype=float),
+        _axis_mask(pbc),  # type: ignore
+    )
     return np.asarray(out, dtype=float).reshape(v.shape)
-
-
-def distances_mic(
-    points_a: np.ndarray,
-    points_b: np.ndarray,
-    cell: np.ndarray | None = None,
-    pbc: np.ndarray | None = None,
-) -> np.ndarray:
-    """Return the pairwise minimum-image distances between two point sets.
-
-    Args:
-        points_a: Points of shape ``(n, 3)``.
-        points_b: Points of shape ``(m, 3)``.
-        cell: Optional ``(3, 3)`` cell matrix.
-        pbc: Optional ``(3,)`` periodic-axis mask.
-
-    Returns:
-        np.ndarray: Distances of shape ``(n, m)``.
-    """
-    a = np.atleast_2d(np.asarray(points_a, dtype=float))
-    b = np.atleast_2d(np.asarray(points_b, dtype=float))
-    if a.shape[-1] != 3 or b.shape[-1] != 3:
-        raise ValueError(
-            f"Points must be (..., 3), got {a.shape} and {b.shape}."
-        )
-    diff = b[None, :, :] - a[:, None, :]
-    diff = displacements_mic(diff, cell, pbc)
-    return np.linalg.norm(diff, axis=-1)

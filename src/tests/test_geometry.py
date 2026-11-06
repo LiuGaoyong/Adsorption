@@ -11,29 +11,28 @@ from ase.geometry import find_mic
 
 from adsorption.geometry import (
     DELTA_NBR,
-    AdmissibleSet,
     DirectionRollSet,
     FibonacciGrid,
     LatLonGrid,
-    SO3Set,
     SeededRandomGrid,
-    admissible_directions,
     build_site,
     default_scale,
     default_skin,
     displacements_mic,
     distance_array,
-    distances_mic,
     first_neighbor_shell,
-    generate_conformers,
     mean_mic,
-    near_congruent,
-    outward_normal,
+    apply_quaternion,
     place,
-    prune_by_energy,
     resolve_anchor,
-    shortest_arc_rotation,
+    shortest_arc_quaternion,
     unit_vector,
+)
+from adsorption.geometry._quat import quaternion_invert, quaternion_raw_multiply
+from adsorption.utils.conformers import (
+    generate_conformers,
+    near_congruent,
+    prune_by_energy,
 )
 
 
@@ -111,28 +110,59 @@ def test_distance_array() -> None:
         distance_array(0.0, 1.0, 0.0)
 
 
-def test_shortest_arc_rotation() -> None:
+def test_distance_array_from_the_count() -> None:
+    assert np.allclose(
+        distance_array(0.8, 3.0, n=12),
+        distance_array(0.8, 3.0, 0.2),
+    )
+    single = distance_array(2.0, 3.0, n=1)
+    assert single.shape == (1,)
+    assert single[0] == pytest.approx(2.0)
+    with pytest.raises(ValueError):
+        distance_array(0.0, 1.0)
+    with pytest.raises(ValueError):
+        distance_array(0.0, 1.0, 0.2, n=5)
+    with pytest.raises(ValueError):
+        distance_array(-1.0, 1.0, n=3)
+    with pytest.raises(ValueError):
+        distance_array(0.0, 1.0, n=0)
+
+
+def test_unit_vector_normalises_a_batch() -> None:
+    vectors = np.array(
+        [[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, -4.0]]
+    )
+    unit = unit_vector(vectors)
+    assert unit.shape == vectors.shape
+    assert np.allclose(np.linalg.norm(unit, axis=1), 1.0)
+    assert np.allclose(unit, np.diag([1.0, 1.0, -1.0]))
+    with pytest.raises(ValueError):
+        unit_vector(np.zeros((2, 3)))
+    with pytest.raises(ValueError):
+        unit_vector(np.zeros((2, 4)))
+
+
+def test_shortest_arc_quaternion() -> None:
     a = np.array([0.0, 0.0, 1.0])
     b = np.array([1.0, 0.0, 0.0])
-    rotation = shortest_arc_rotation(a, b)
-    assert np.allclose(rotation @ a, b)
-    assert np.isclose(np.linalg.det(rotation), 1.0)
-    assert np.allclose(rotation @ rotation.T, np.eye(3))
+    quaternion = shortest_arc_quaternion(a, b)
+    assert np.isclose(np.linalg.norm(quaternion), 1.0)
+    assert np.allclose(apply_quaternion(quaternion, a[None, :])[0], b)
 
-    identity = shortest_arc_rotation(a, a)
-    assert np.allclose(identity, np.eye(3))
+    identity = shortest_arc_quaternion(a, a)
+    assert np.allclose(apply_quaternion(identity, np.eye(3)), np.eye(3))
 
-    antiparallel = shortest_arc_rotation(a, -a)
-    assert np.allclose(antiparallel @ a, -a)
-    assert np.isclose(np.linalg.det(antiparallel), 1.0)
+    antiparallel = shortest_arc_quaternion(a, -a)
+    assert np.allclose(apply_quaternion(antiparallel, a[None, :])[0], -a)
 
     rng = np.random.default_rng(0)
     for _ in range(5):
         u = unit_vector(rng.normal(size=3))
         v = unit_vector(rng.normal(size=3))
-        matrix = shortest_arc_rotation(u, v)
-        assert np.allclose(matrix @ u, v, atol=1e-10)
-        assert np.isclose(np.linalg.det(matrix), 1.0, atol=1e-10)
+        q = shortest_arc_quaternion(u, v)
+        assert np.allclose(apply_quaternion(q, u[None, :])[0], v, atol=1e-10)
+        back = apply_quaternion(q, v[None, :], inverse=True)[0]
+        assert np.allclose(back, u, atol=1e-10)
 
 
 def test_anchor_resolution() -> None:
@@ -161,15 +191,27 @@ def test_place_is_rigid_and_does_not_mutate() -> None:
     reference = Atoms("CO")
     anchor = resolve_anchor(reference, "com")
     before = reference.positions.copy()
-    rotation = shortest_arc_rotation([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
+    quaternion = shortest_arc_quaternion([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
     target = np.array([1.0, 2.0, 3.0])
-    placed = place(reference, anchor=anchor, target=target, rotation=rotation)
+    placed = place(
+        reference,
+        anchor=anchor,
+        target=target,
+        quaternion=quaternion,
+    )
 
     assert np.array_equal(reference.positions, before)
-    assert np.allclose(placed.positions[0] - placed.positions[1], rotation @ (before[0] - before[1]))
+    bond = (before[0] - before[1])[None, :]
+    assert np.allclose(
+        placed.positions[0] - placed.positions[1],
+        apply_quaternion(quaternion, bond)[0],
+    )
     # the anchor lands on the target
     relative = before - anchor.position
-    assert np.allclose(target + relative @ rotation.T, placed.positions)
+    assert np.allclose(
+        target + apply_quaternion(quaternion, relative),
+        placed.positions,
+    )
 
 
 def test_first_neighbor_shell_matches_brute_force(slab: Atoms) -> None:
@@ -217,156 +259,16 @@ def test_site_geometry_defaults(slab: Atoms, cluster: Atoms) -> None:
     assert np.allclose(cluster_site.center, cluster.positions[cluster_index])
 
 
-def test_outward_normal(slab: Atoms) -> None:
-    top = top_surface_index(slab)
-    site = build_site(slab, [top])
-    normal = site.outward_normal
-    assert np.isclose(np.linalg.norm(normal), 1.0)
-    assert np.allclose(outward_normal(site.center, site.neighbor_positions, site.cell, site.pbc), normal)
-    # the reference normal of a (111) top site points away from the surface
-    assert normal[2] > 0.0
-
-
-def test_site_translation_covariance(slab: Atoms) -> None:
-    top = top_surface_index(slab)
-    shifted = slab.copy()
-    shifted.positions = slab.positions + slab.cell.array[0]
-    site_a = build_site(slab, [top])
-    site_b = build_site(shifted, [top])
-    shift = slab.cell.array[0]
-    assert np.allclose(site_b.center, site_a.center + shift)
-    directions_a = admissible_directions(site_a, 128)
-    directions_b = admissible_directions(site_b, 128)
-    assert directions_a.n_oa == directions_b.n_oa
-    assert np.allclose(directions_a.unit, directions_b.unit)
-
-
-def test_admissible_directions(slab: Atoms) -> None:
-    top = top_surface_index(slab)
-    site = build_site(slab, [top])
-    admissible = admissible_directions(site, 128)
-    assert isinstance(admissible, AdmissibleSet)
-    assert admissible.n_grid == 128
-    assert 0 <= admissible.n_oa <= 128
-    assert np.all(np.diff(admissible.grid_index) > 0)
-    assert admissible.fraction == pytest.approx(admissible.n_oa / 128)
-
-    # every survivor clears the filter set at r_s
-    radii = site.filter_radii + site.skin
-    distances = distances_mic(
-        site.center + site.radius * admissible.unit,
-        site.filter_positions,
-        site.cell,
-        site.pbc,
-    )
-    assert np.all(distances > radii[None, :])
-
-    # deterministic
-    again = admissible_directions(site, 128)
-    assert np.array_equal(admissible.unit, again.unit)
-    assert np.array_equal(admissible.grid_index, again.grid_index)
-
-
-def test_admissible_filter_parameters(slab: Atoms) -> None:
-    top = top_surface_index(slab)
-    site = build_site(slab, [top])
-    loose = admissible_directions(site, 128, skin=0.2)
-    tight = admissible_directions(site, 128, skin=1.5)
-    assert tight.n_oa <= loose.n_oa
-    with pytest.raises(ValueError):
-        admissible_directions(site, 128, skin=-1.0)
-    with pytest.raises(ValueError):
-        admissible_directions(site, 128, scale=0.0)
-
-
 def test_minimum_image_matches_ase(slab: Atoms) -> None:
     rng = np.random.default_rng(3)
     points_a = rng.uniform(-2, 6, size=(6, 3))
     points_b = rng.uniform(-2, 6, size=(4, 3))
-    got = distances_mic(points_a, points_b, slab.cell.array, slab.pbc)
     diff = points_b[None, :, :] - points_a[:, None, :]
-    expected = np.linalg.norm(find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0], axis=1).reshape(6, 4)
-    assert np.allclose(got, expected)
-    assert np.allclose(displacements_mic(diff, slab.cell.array, slab.pbc), find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0].reshape(diff.shape))
-
-
-def test_geometry_uses_no_random_numbers(monkeypatch: pytest.MonkeyPatch, slab: Atoms) -> None:
-    def forbidden(*args, **kwargs):
-        raise AssertionError("the geometric path must not draw random numbers")
-
-    monkeypatch.setattr(np.random, "default_rng", forbidden)
-    monkeypatch.setattr(np.random, "randint", forbidden)
-    monkeypatch.setattr(np.random, "rand", forbidden)
-    top = top_surface_index(slab)
-    site = build_site(slab, [top])
-    admissible = admissible_directions(site, 64)
-    assert admissible.n_oa > 0
-
-
-def test_proposition_2_fixed_radius_proxy(slab: Atoms) -> None:
-    """A direction admitted at r_s can still put the anchor inside an atom."""
-    top = top_surface_index(slab)
-    neighbours = inplane_neighbours(slab, top)
-    site = build_site(slab, [top, neighbours[0]])
-    admissible = admissible_directions(site, 256)
-    anchor_distance = 0.8
-    anchors = site.center + anchor_distance * admissible.unit
-    radii = site.filter_radii + site.skin
-    distances = distances_mic(anchors, site.filter_positions, site.cell, site.pbc)
-    overlapping = np.any(distances < radii[None, :], axis=1)
-    assert np.any(overlapping)
-
-
-def test_direct_adsorption_deterministic(slab: Atoms) -> None:
-    from adsorption import DirectAdsorption
-
-    top = top_surface_index(slab)
-    obj = DirectAdsorption(atoms=slab, core=[top], nfibonacci=64, calculator=None)
-    adsorbate = molecule("CO")
-    reference = adsorbate.positions.copy()
-    first, label = obj(adsorbate=adsorbate)
-    second, _ = obj(adsorbate=molecule("CO"))
-    assert label == -1
-    assert len(first) == len(slab) + 2
-    assert np.allclose(first.positions, second.positions)
-    # the input adsorbate is not mutated
-    assert np.allclose(adsorbate.positions, reference)
-    assert obj._distance > 0.0
-
-
-def test_direct_adsorption_anchor(slab: Atoms) -> None:
-    from adsorption import DirectAdsorption
-
-    top = top_surface_index(slab)
-    obj = DirectAdsorption(atoms=slab, core=[top], nfibonacci=64, calculator=None, anchor=0)
-    result, _ = obj(adsorbate="CO", distance=2.0)
-    target = obj._anchor_core + obj._distance * obj._direction_core
-    # atom 0 of CO is the carbon, i.e. the anchor
-    assert np.allclose(result.positions[len(slab)], target)
-
-
-def test_direct_seeded_indices_are_reproducible(slab: Atoms) -> None:
-    from adsorption import DirectAdsorption
-
-    top = top_surface_index(slab)
-    first = DirectAdsorption(atoms=slab, core=[top], nfibonacci=64, seed=11)
-    second = DirectAdsorption(atoms=slab, core=[top], nfibonacci=64, seed=11)
-    for _ in range(3):
-        left, _ = first(adsorbate="CO")
-        right, _ = second(adsorbate="CO")
-        assert np.allclose(left.positions, right.positions)
-
-
-def test_raw_adsorption_uses_outward_normal(slab: Atoms) -> None:
-    from adsorption import RawAdsorption
-
-    top = top_surface_index(slab)
-    obj = RawAdsorption(atoms=slab, core=[top], calculator=None)
-    result, _ = obj(adsorbate="O")
-    position = result.positions[len(slab)]
-    direction = position - obj.site_geometry.center
-    direction = direction / np.linalg.norm(direction)
-    assert np.allclose(direction, obj.site_geometry.outward_normal)
+    expected = find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0]
+    assert np.allclose(
+        displacements_mic(diff, slab.cell.array, slab.pbc),
+        expected.reshape(diff.shape),
+    )
 
 
 def test_direction_roll_set() -> None:
@@ -374,35 +276,21 @@ def test_direction_roll_set() -> None:
     orientations = DirectionRollSet(axis, 8, n_roll=4)
     assert orientations.count() == 32
     for index in (0, 1, 5, 31):
-        rotation = orientations.rotation(index)
-        assert np.allclose(rotation @ rotation.T, np.eye(3))
-        assert np.isclose(np.linalg.det(rotation), 1.0)
+        quaternion = orientations.quaternion(index)
+        assert np.isclose(np.linalg.norm(quaternion), 1.0)
+        image = apply_quaternion(quaternion, axis[None, :])[0]
+        assert np.allclose(image, orientations.image(index))
     # the first direction carries four rolls, one per roll index
-    first = orientations.rotation(0)
-    second = orientations.rotation(1)
-    relative = second @ first.T
-    angle = np.arccos(np.clip((np.trace(relative) - 1.0) / 2.0, -1.0, 1.0))
+    first = orientations.quaternion(0)
+    second = orientations.quaternion(1)
+    relative = quaternion_raw_multiply(second, quaternion_invert(first))
+    angle = 2.0 * np.arccos(np.clip(abs(relative[0]), -1.0, 1.0))
     assert np.isclose(angle, 2.0 * np.pi / 4)
     image = orientations.image(0)
-    assert np.allclose(relative @ image, image)
+    rolled = apply_quaternion(relative, image[None, :])[0]
+    assert np.allclose(rolled, image)
     # the roll leaves the placed axis invariant
     assert np.allclose(orientations.image(7), orientations.image(4))
-
-
-def test_so3_set_is_uniform_and_deterministic() -> None:
-    orientations = SO3Set(1024)
-    assert orientations.count() == 1024
-    assert np.array_equal(orientations.quaternions, SO3Set(1024).quaternions)
-    for index in (0, 1, 500, 1023):
-        rotation = orientations.rotation(index)
-        assert np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-10)
-        assert np.isclose(np.linalg.det(rotation), 1.0, atol=1e-10)
-    axis = np.array([0.0, 0.0, 1.0])
-    images = np.array([orientations.rotation(i) @ axis for i in range(1024)])
-    assert np.linalg.norm(images.mean(axis=0)) < 0.02
-    covariance = np.cov(images.T)
-    assert np.allclose(np.diag(covariance), 1.0 / 3.0, atol=0.02)
-    assert np.allclose(covariance - np.diag(np.diag(covariance)), 0.0, atol=0.01)
 
 
 def test_conformer_generation_is_deterministic() -> None:

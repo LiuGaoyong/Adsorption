@@ -1,23 +1,25 @@
 # Adsorption
 
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption)
-[![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption)
-[![Pypi version](https://img.shields.io/pypi/v/adsorption)](https://pypi.org/project/adsorption/)
+[![PyPI version](https://img.shields.io/pypi/v/adsorption)](https://pypi.org/project/adsorption/)
 [![PyPI Downloads](https://static.pepy.tech/badge/adsorption)](https://pepy.tech/projects/adsorption)
 
-Geometric pre-screening of molecular adsorption configurations on clusters and
-periodic surfaces, built on [ASE](https://ase-lib.org).
+Deterministic generation and geometric/energetic pre-screening of molecular
+adsorption configurations on clusters and periodic surfaces, built on
+[ASE](https://ase-lib.org).
 
-The package places an adsorbate on a site defined by a core set of substrate
-atoms. The placement is described by four quantities — the site centre `O`, the
-approach direction `OA`, the molecular orientation `AB`, and the anchor
-distance `d` — and the geometric stage never evaluates an energy. A downstream
-ASE calculator (EMT, a machine-learned potential, or DFT) performs the optional
-relaxation.
+The package is organised as two processes:
 
-The method and its pre-registered validation protocol are described in
-`paper-1/` (the live manuscript) and `paper/` (an earlier archived version of
-the manuscript).
+- **A — generation** (`AdsorptionConfigurationGeneratorABC`): a fixed-budget, deterministic
+  enumeration of the site `O`, the approach direction `OA` on a deterministic
+  near-uniform spherical point set (the spherical Fibonacci lattice by default),
+  the molecular orientation on `SO(3)` (Super-Fibonacci quaternions),
+  and the anchor distance `d`.
+- **B — filtering** (`AdsorptionConfigurationFilterABC`): a cheap pairwise distance floor, a
+  repulsive Lennard-Jones tier, and an optional relaxation tier.
+
+Generation never imports an ASE calculator; the energy engine is injected
+only in process B.
 
 ## Installation
 
@@ -31,167 +33,111 @@ Or with pixi:
 pixi install
 ```
 
-Requires Python 3.12–3.13, ASE, NumPy, SciPy, and
+Requires Python 3.12–3.13, ASE, NumPy, SciPy, Hydra, and
 [graphatoms](https://github.com/LiuGaoyong/graphatoms).
 
 ## Quick start
 
 ```python
+from ase import Atoms
 from ase.build import fcc111
-from ase.calculators.emt import EMT
-from adsorption import DirectAdsorption, RawAdsorption
+from adsorption import AdsorptionConfigurationPipeline, GeometryFilter
+from adsorption import SingleSiteGenerator
 
-slab = fcc111("Cu", size=(4, 4, 3), vacuum=12, orthogonal=True)
-site = [0, 1, 2]  # core atoms; top = 1 atom, bridge = 2, hollow = 3
-
-# Fibonacci-grid placement: scan the approach directions, then relax.
-direct = DirectAdsorption(
-    atoms=slab,
-    core=site,
-    calculator=EMT(),   # None keeps the unrelaxed structure
-    nfibonacci=200,
-    distance=2.0,       # optional; a hard-sphere heuristic is used by default
+slab = fcc111("Cu", size=(3, 4, 3), vacuum=10, orthogonal=True)
+oxygen = Atoms("O")
+generator = SingleSiteGenerator(
+    slab,
+    0,                     # adsorption centre: atom index 0
+    oxygen,                # adsorbate
+    n_oa=50,               # approach directions
+    n_rot=1,               # orientations (a single atom has none)
+    n_d=6,                 # anchor distances
+    d_min=2.0,
+    d_max=3.0,
 )
-atoms, stage = direct(adsorbate="CO")
-# stage: -1 not converged, 0/1/2 the number of converged stages
+filt = GeometryFilter({29: 2.338, 8: 3.0})  # Cu and O sigma
+pipeline = AdsorptionConfigurationPipeline(generator, [filt])
 
-# Conventional placement: anchor on an atom (or the centre of mass).
-raw = RawAdsorption(atoms=slab, core=site, calculator=None)
-atoms, stage = raw(adsorbate="CO", adsorbate_index=0)
+for record in pipeline.accepted():
+    print(record.trial.index, record.trial.meta["distance"])
 ```
 
-`DirectAdsorption` accepts `nfibonacci`, `distance`, `anchor` (`"com"`, an atom
-index, or an explicit point), `scale`, `skin`, `delta_nbr`, and an optional
-`seed`. Without a seed the placement is deterministic: the grid index defaults
-to `0`; pass a seed only when stochastic index selection is wanted.
+For a molecule, build the rotation set with
+`build_orientation("auto", adsorbate, n=200)`: linear molecules use `S^2`,
+planar and three-dimensional molecules use `SO(3)`.
 
-## Geometry primitives
+## Campaign runner
 
-The geometric layer is available directly, without building an adsorption
-object:
-
-```python
-import numpy as np
-from adsorption.geometry import (
-    FibonacciGrid,
-    admissible_directions,
-    build_site,
-    distance_array,
-    resolve_anchor,
-    shortest_arc_rotation,
-)
-
-site = build_site(slab, core=[0, 1, 2], scale=1.5, skin=0.5)
-grid = admissible_directions(site, n=200, grid=FibonacciGrid())
-print(site.center, site.radius, grid.n_oa, grid.fraction)
-
-# d_min, d_max, step -> M anchor distances (paper Eq. 11)
-d = distance_array(0.8, 3.0, 0.2)  # length 12
-
-# Shortest-arc rotation maps a body axis onto a grid direction.
-rotation = shortest_arc_rotation([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
-anchor = resolve_anchor(atoms, anchor="com")
+```bash
+adsorption-run                         # Hydra entry point, packaged run.yaml
+python -m adsorption.runner            # same entry point
+adsorption-run parallel.n_jobs=4       # Hydra config override
+adsorption-run start=1 stop=100 outputs=./runs/demo
 ```
 
-An `AdmissibleSet` keeps both the surviving unit vectors and their original
-grid indices, so a candidate can be regenerated from its index alone.
+`run.yaml` is a **single** file next to the runner package
+(`src/adsorption/runner/run.yaml`): it declares the
+substrate, the adsorbate, the site declaration, the generation protocol, the
+filter chain and the budget. Swappable objects are `_target_` nodes
+instantiated with `hydra.utils.instantiate`.
 
-## Relaxation
+The runner detects the adsorbate's rotatable bonds: when it finds any, it
+builds a conformer ensemble and uses `MultiAdsorbateGenerator`; otherwise it
+uses the single reference. The site declaration is adaptive too: one core set
+builds `SingleSiteGenerator`, several core sets build `MultiSiteGenerator`,
+and `sites: auto` selects every top-layer atom as a top site. Candidate
+intervals are evaluated in parallel with `joblib` (default backend `loky`);
+`records.jsonl` holds one JSON line per candidate, `accepted.xyz` holds the
+accepted structures as one extended-XYZ trajectory, and `summary.json` holds
+the campaign totals. A run refuses to start when the candidate count exceeds
+`budget.max_candidates`.
 
-`AdsorptionOptimizeABC.optimize_adsorption` performs the two-stage protocol: the
-substrate is frozen and the intra-adsorbate distances are constrained in stage
-one, and the whole system is relaxed in stage two. Supply an ASE calculator to
-enable it; without a calculator the unrelaxed structure is returned with stage
-label `-1`.
+## The two processes
 
-`adsorption.common.optimize` also provides `optimize`, `call_dimer`, and
-`call_neb` for plain optimization, dimer saddle-point search, and NEB/DyNEB
-minimum-energy paths.
+```text
+AdsConfGenABC                       AdsConfFilterABC
+├── SingleSiteGenerator   one site        ├── GeometryFilter   pairwise floor
+├── MultiSiteGenerator    many sites      ├── LJFilter         repulsive energy
+└── MultiAdsorbateGenerator  many         └── EnergyFilter     relaxation + E cut
+    conformers (consumed)
+```
+
+`AdsConfPipeline` applies the filters in order and stops at the first
+rejection. Every `Trial` carries its one-based index and budget; every
+`Verdict` carries the measured value and the reason.
 
 ## Package layout
 
-```
+```text
 src/adsorption/
-├── geometry/      # site, grids, admissibility, rotation, distance, placement
-├── common/        # AdsorptionABC, Site (legacy wrapper), optimize()
-├── interfaces/    # RawAdsorption, DirectAdsorption
-├── protocol/      # budget, kappa index, streaming campaigns, sidecar
-├── screen/        # Lennard-Jones steric tier and cascade
+├── process/       # Trial, Verdict, the two ABCs, pipeline
+├── generate/      # SingleSiteGenerator, MultiSiteGenerator, MultiAdsorbateGenerator
+├── filters/       # GeometryFilter, LJFilter, EnergyFilter
+├── geometry/      # site, grids, SuperFibonacciSO3, rotation, placement
+├── protocol/      # index, plan, sidecar, hashing
 ├── evaluation/    # single-point and two-stage relaxation
-├── metrics/       # coverage, ranking, cascade, and site metrics
-├── pairwise/      # Lennard-Jones calculator (arrayff backend)
-└── runner/        # adsorption-campaign CLI
+├── metrics/       # ranking, cascade, spherical, rotation metrics
+└── config/        # Hydra dataclasses, run.yaml and config groups
 ```
 
-The `geometry` subpackage is calculator-free: nothing in it imports ASE
-calculators, so candidate generation is engine-independent.
+## Deprecated
 
-## Deprecations
-
-The Torch/autodiff path (`DirectAdsorptionAD`, `Helper`, the Ray Tune runner,
-and the `adsorption-tune` command) has been removed. `adsorption.common.Site`
-and `Site.get_direction_grid` remain as wrappers around the `geometry` layer and
-will be removed after the protocol layer lands.
-
-## Fixed-budget campaigns
-
-The protocol layer turns the geometry into a deterministic candidate stream
-with a bijective index `kappa`, a sidecar record per candidate, an optional
-Lennard-Jones screen, and an optional evaluation tier. A campaign is described
-by a YAML file:
-
-```yaml
-name: co-on-cu111
-output: runs/co-on-cu111
-substrate:
-  target: ase.build.fcc111
-  kwargs: {symbol: Cu, size: [4, 4, 3], vacuum: 12, orthogonal: true}
-adsorbate:
-  reference: {target: ase.build.molecule, kwargs: {name: CO}}
-sites:
-  - {core: [0]}
-protocol:
-  n: 200
-  orientation: {kind: shortest_arc, n_ab: 200}
-  distances: {d_min: 1.2, d_max: 3.0, step: 0.2}
-screen:
-  kim: true
-  r_min: 1.0
-  e_cut: 50.0
-evaluation:
-  mode: single_point
-  calculator: {target: ase.calculators.emt.EMT}
-```
-
-```bash
-adsorption-campaign enumerate campaign.yaml   # budget, no files written
-adsorption-campaign run campaign.yaml --workers 4 --shard 0/4
-adsorption-campaign run campaign.yaml --resume
-```
-
-A run writes `structures/<kappa>.xyz`, `sidecar.jsonl` (one JSON record per
-candidate: index, radices, screen verdict, energy, converged stages, parameter
-hash), and `manifest.json`. Orientation sets are available on `S²`
-(`shortest_arc`), `S² × S¹` (`direction_roll`, with `n_roll`), and `SO(3)`
-(`so3`); conformers are enumerated per `(site, conformer)` variant.
-
-## Roadmap
-
-The reusable evaluation metrics live in `adsorption.metrics`; the equal-budget
-baselines B1-B7 and the driver notes are in `bench/`. Graph-based site
-enumeration and the six-class labels are provided by the companion `graphatoms`
-library through the adapters in `adsorption.providers`; this package does not
-reimplement them. The manuscript in `paper-1/` is updated with the code.
+The previous three-layer `AdsorptionABC` hierarchy, the `admissible_directions`
+filter, the `screen` and `runner` packages, and the pydantic protocol spec are
+frozen under [`deprecated/`](deprecated/README.md). They are not imported,
+tested, linted, or packaged.
 
 ## Development
 
 ```bash
-pixi run test        # pytest -s -vv
-pytest src/tests     # or with an existing virtual environment
+pixi run test              # pytest -s -vv
+pytest src/tests -m "not slow"
 ```
 
-The test suite includes the geometric primitives (`src/tests/test_geometry.py`),
-the adsorption interfaces, and the quaternion module.
+The 96 site-adsorbate examples live in `examples/0-SingleSite/<site>/<adsorbate>/`.
+Run them separately with `adsorption-run`, or all of them with
+`examples/0-SingleSite/run_all.sh`.
 
 ## Citation and license
 

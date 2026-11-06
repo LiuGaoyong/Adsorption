@@ -12,12 +12,13 @@ resolution-markers = [
 
 [[package]]
 name = "adsorption"
-version = "0.1.2"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "arrayff" },
     { name = "ase" },
     { name = "graphatoms" },
+    { name = "hydra-core" },
     { name = "joblib" },
     { name = "numpy" },
     { name = "pyyaml" },
@@ -29,6 +30,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "jupyterlab" },
+    { name = "matplotlib" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
@@ -36,9 +38,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arrayff" },
+    { name = "arrayff", specifier = ">=0.0.2" },
     { name = "ase" },
     { name = "graphatoms", specifier = ">=3.0" },
+    { name = "hydra-core" },
     { name = "joblib" },
     { name = "numpy" },
     { name = "pyyaml", specifier = ">=6" },
@@ -50,6 +53,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "jupyterlab" },
+    { name = "matplotlib", specifier = ">=3.8" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-xdist" },
     { name = "ruff", specifier = ">=0.11" },
@@ -149,7 +153,7 @@ wheels = [
 
 [[package]]
 name = "arrayff"
-version = "0.0.1"
+version = "0.0.2"
 source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
 dependencies = [
     { name = "ase" },
@@ -159,9 +163,9 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
 ]
-sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/cf/42/462753ec9cc34fbfbe0cc37c1d850b223e762341f594e8e1d61eb2806dc6/arrayff-0.0.1.tar.gz", hash = "sha256:9002e0aa31eedaab8943fa4ccb173741f757b5882ad0009d3bf42700d4cc7cfa", size = 63604, upload-time = "2026-10-29T07:52:53.694Z" }
+sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/7c/b6/fbd4052d4748e3eee0e7b12f23116e9e64afdff8fe34c5774cc0ab8e3bad/arrayff-0.0.2.tar.gz", hash = "sha256:bb2e8a969694e3c5cd6c7ddd03ff97b692174787b7e368beb6e7ad2048e61dc8", size = 68049, upload-time = "2026-11-03T02:03:17.825Z" }
 wheels = [
-    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/39/02/f4817a640bfc071cbcbd72c4615b9bf2c7412bce603a2390ec4faed6eb48/arrayff-0.0.1-py3-none-any.whl", hash = "sha256:f7a1bab2a15836f58fd19b67ffba6e59b9f3206a3d4c9f25425460bdc25d1688", size = 80926, upload-time = "2026-10-29T07:52:52.404Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/98/61/e1af46e73a4e166987f6936bbfc525b85d3c54cc07e866b9f05555343027/arrayff-0.0.2-py3-none-any.whl", hash = "sha256:be3329d6378a2ce9a8dad3e70a9c9fbc41960ec4713ef3a976cc7ee437472e36", size = 87002, upload-time = "2026-11-03T02:03:16.267Z" },
 ]
 
 [[package]]
