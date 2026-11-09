@@ -14,6 +14,10 @@ from collections.abc import Sequence
 from typing import Any
 
 from ase import Atoms
+from graphatoms.utils import rdutils
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from rdkit.Chem import Mol as RDMol
 
 __all__ = [
     "atoms_from_smiles",
@@ -33,7 +37,7 @@ __all__ = [
 _ROTATABLE_SMARTS = "[!$(*#*)&!D1]-&!@[!$(*#*)&!D1]"
 
 
-def to_ase(mol: Any, conformer_id: int = -1) -> Atoms:
+def to_ase(mol: RDMol, conformer_id: int = -1) -> Atoms:
     """Convert one RDKit conformer to an ASE ``Atoms`` object.
 
     Args:
@@ -43,17 +47,20 @@ def to_ase(mol: Any, conformer_id: int = -1) -> Atoms:
     Returns:
         Atoms: The structure, in the RDKit atom order.
     """
-    conformer = mol.GetConformer(int(conformer_id))
-    symbols = [atom.GetSymbol() for atom in mol.GetAtoms()]
-    positions = [
-        (
-            conformer.GetAtomPosition(index).x,
-            conformer.GetAtomPosition(index).y,
-            conformer.GetAtomPosition(index).z,
-        )
-        for index in range(mol.GetNumAtoms())
-    ]
-    return Atoms(symbols=symbols, positions=positions)
+    if conformer_id < 0:
+        return rdutils.rdmol2ase(mol)
+    else:
+        conformer = mol.GetConformer(int(conformer_id))
+        symbols = [atom.GetSymbol() for atom in mol.GetAtoms()]
+        positions = [
+            (
+                conformer.GetAtomPosition(index).x,
+                conformer.GetAtomPosition(index).y,
+                conformer.GetAtomPosition(index).z,
+            )
+            for index in range(mol.GetNumAtoms())
+        ]
+        return Atoms(symbols=symbols, positions=positions)
 
 
 def xyz_block(atoms: Atoms) -> str:
@@ -65,13 +72,13 @@ def xyz_block(atoms: Atoms) -> str:
     Returns:
         str: The XYZ block.
     """
-    lines = [str(len(atoms)), ""]
-    for symbol, (x, y, z) in zip(atoms.get_chemical_symbols(), atoms.positions):
-        lines.append(f"{symbol} {x:.10f} {y:.10f} {z:.10f}")
-    return "\n".join(lines) + "\n"
+    return rdutils.get_xyz_str(
+        geometry=atoms.positions,
+        numbers=atoms.numbers,
+    )
 
 
-def mol_from_atoms(atoms: Atoms, charge: int = 0) -> Any:
+def mol_from_atoms(atoms: Atoms, charge: int = 0) -> RDMol:
     """Perceive an RDKit molecule from an ASE structure.
 
     The XYZ block preserves the ASE atom order, so every returned index can
@@ -87,17 +94,16 @@ def mol_from_atoms(atoms: Atoms, charge: int = 0) -> Any:
     Raises:
         ValueError: If RDKit cannot read the structure.
     """
-    from rdkit import Chem
-    from rdkit.Chem import rdDetermineBonds
+    return rdutils.get_rdmol(
+        numbers=atoms.numbers,
+        geometry=atoms.positions,
+        charge=int(charge),
+        infer_order=True,
+        infer_bond=True,
+    )
 
-    molecule = Chem.MolFromXYZBlock(xyz_block(atoms))
-    if molecule is None:
-        raise ValueError("RDKit could not read the adsorbate structure.")
-    rdDetermineBonds.DetermineBonds(molecule, charge=int(charge))
-    return molecule
 
-
-def embed(mol: Any, seed: int) -> None:
+def embed(mol: RDMol, seed: int) -> None:
     """Embed one 3D reference conformer with ETKDG, single-threaded.
 
     Args:
@@ -107,8 +113,6 @@ def embed(mol: Any, seed: int) -> None:
     Raises:
         ValueError: If RDKit cannot embed the molecule.
     """
-    from rdkit.Chem import AllChem
-
     parameters = AllChem.ETKDGv3()  # type: ignore[attr-defined]
     parameters.randomSeed = int(seed)
     parameters.numThreads = 1
@@ -116,7 +120,7 @@ def embed(mol: Any, seed: int) -> None:
         raise ValueError("RDKit could not embed the adsorbate.")
 
 
-def rotatable_bonds(mol: Any) -> list[tuple[int, int, int, int]]:
+def rotatable_bonds(mol: RDMol) -> list[tuple[int, int, int, int]]:
     """Return the dihedral quadruples of the rotatable heavy-atom bonds.
 
     Exocyclic heavy-atom bonds are kept; bonds to terminal heavy atoms
@@ -129,8 +133,6 @@ def rotatable_bonds(mol: Any) -> list[tuple[int, int, int, int]]:
     Returns:
         list[tuple[int, int, int, int]]: The ``(c, a, b, d)`` quadruples.
     """
-    from rdkit import Chem
-
     pattern = Chem.MolFromSmarts(_ROTATABLE_SMARTS)
     matches = {
         tuple(sorted(int(value) for value in match))
@@ -242,8 +244,6 @@ def prepare_source(
     Raises:
         ValueError: If the source cannot be parsed or embedded.
     """
-    from rdkit import Chem
-
     if isinstance(source, Atoms):
         return mol_from_atoms(source, int(charge)), source.copy()
     if isinstance(source, str):
@@ -271,8 +271,6 @@ def smiles_from_mol(mol: Any) -> str:
     Returns:
         str: The SMILES string.
     """
-    from rdkit import Chem
-
     return Chem.MolToSmiles(Chem.RemoveHs(mol))
 
 
@@ -386,6 +384,7 @@ def rdkit_graph(
         from rdkit.Chem import rdDetermineBonds, rdMolDescriptors
     except ImportError:
         return None, 0
+
     if smiles:
         mol = Chem.MolFromSmiles(str(smiles))
         if mol is None:

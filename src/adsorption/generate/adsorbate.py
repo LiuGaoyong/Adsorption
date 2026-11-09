@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -337,28 +338,76 @@ def _apply_dihedrals(
     )
 
 
+def _normalize_dihedral_spec(value: Any) -> Any:
+    """Normalize a rotor declaration into int, float or nested tuples."""
+    if isinstance(value, bool):
+        raise TypeError("dihedrals must not contain a boolean.")
+    if isinstance(value, (int, np.integer)):
+        return int(value)
+    if isinstance(value, (float, np.floating)):
+        return float(value)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        items = tuple(_normalize_dihedral_spec(item) for item in value)
+        if len(items) == 0:
+            raise ValueError("dihedrals must not be empty.")
+        return items
+    raise TypeError(
+        "dihedrals must be an integer count, an angle, or a sequence of "
+        f"those, got {type(value)}."
+    )
+
+
+def _dihedral_payload(value: Any) -> Any:
+    """Return a JSON-serialisable view of a normalized declaration."""
+    if isinstance(value, (int, float)):
+        return value
+    return [_dihedral_payload(item) for item in value]
+
+
+def _dihedral_grid(spec: Any) -> tuple[float, ...]:
+    """Resolve one rotor specification into explicit angles."""
+    if isinstance(spec, (int, np.integer)) and not isinstance(spec, bool):
+        count = int(spec)
+        if count < 1:
+            raise ValueError(f"A dihedral count must be positive, got {count}.")
+        return tuple(
+            float(value)
+            for value in np.linspace(0.0, 360.0, count, endpoint=False)
+        )
+    if isinstance(spec, (float, np.floating)):
+        value = float(spec)
+        if not np.isfinite(value):
+            raise ValueError("A dihedral angle must be finite.")
+        return (value,)
+    values = tuple(float(value) for value in spec)  # type: ignore
+    if len(values) == 0:
+        raise ValueError("A dihedral grid must not be empty.")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("Dihedral angles must be finite.")
+    return values
+
+
 def _grids(
-    dihedrals: Sequence[float] | Sequence[Sequence[float]],
+    dihedrals: int | float | Sequence[Any],
     n_rotors: int,
 ) -> list[tuple[float, ...]]:
-    """Normalize the user dihedral declaration into one grid per rotor."""
-    values = list(dihedrals)
-    if len(values) == 0:
-        raise ValueError("dihedrals must not be empty.")
-    if all(
-        isinstance(value, (int, float, np.integer, np.floating))
-        for value in values
-    ):
-        return [tuple(float(value) for value in values)] * int(n_rotors)  # type: ignore
-    grids = [tuple(float(value) for value in grid) for grid in values]  # type: ignore
-    if len(grids) != int(n_rotors):
-        raise ValueError(
-            "The nested dihedrals declaration must provide one grid per "
-            f"rotor, got {len(grids)} and {n_rotors}."
-        )
-    if any(len(grid) == 0 for grid in grids):
-        raise ValueError("Every dihedral grid must not be empty.")
-    return grids
+    """Resolve the declaration into one explicit angle grid per rotor.
+
+    A scalar ``n`` applies the same count to every rotor; a flat list gives
+    one specification per rotor; a nested list gives explicit angles per
+    rotor.
+    """
+    if isinstance(dihedrals, (int, float, np.integer, np.floating)):
+        specs: list[Any] = [dihedrals] * int(n_rotors)
+    else:
+        specs = list(dihedrals)
+        if len(specs) != int(n_rotors):
+            raise ValueError(
+                "dihedrals must provide one specification per rotor "
+                "(an integer count or an explicit angle sequence), got "
+                f"{len(specs)} and {n_rotors}."
+            )
+    return [_dihedral_grid(spec) for spec in specs]
 
 
 @dataclass(frozen=True)
@@ -436,15 +485,22 @@ class RotamerEnsemble(AdsorbateSource):
     """A systematic ensemble of rigid rotamers.
 
     RDKit locates the rotatable heavy-atom bonds. The user declares the
-    dihedral values, either one sequence shared by every rotor
-    (``dihedrals=[60, 180, 300]``) or one sequence per rotor
-    (``dihedrals=[[60, 180], [180], [60, 180, 300]]``). The Cartesian
+    dihedral grid per rotor:
+
+    * a scalar integer ``n`` -- ``n`` uniform points for every rotor;
+    * a flat list of integers -- one count per rotor, e.g. ``[6, 6, 6]``;
+    * a list of angle sequences -- explicit angles per rotor, e.g.
+      ``[[60, 180], [180], [60, 180, 300]]``.
+
+    A count ``n`` takes ``n`` points in ``[0, 360)`` and excludes the last
+    one, so ``6`` expands to ``[0, 60, 120, 180, 240, 300]``. The Cartesian
     product is enumerated in lexicographic order; ASE's ``set_dihedral``
     applies each combination to a copy of the reference structure.
 
     Attributes:
         source: A SMILES string, an ASE ``Atoms`` or an RDKit ``Mol``.
-        dihedrals: One angle sequence, or one sequence per rotatable bond.
+        dihedrals: The rotor declaration: a scalar count, one count per
+            rotor, or explicit angle sequences per rotor.
         max_rotamers: Hard cap on enumerated rotamers; truncation is recorded
             in the provenance.
         prune_rmsd: RMSD pruning threshold in Angstrom; ``0`` disables it.
@@ -455,11 +511,7 @@ class RotamerEnsemble(AdsorbateSource):
     """
 
     source: str | Atoms | object
-    dihedrals: Sequence[float] | Sequence[Sequence[float]] = (
-        60.0,
-        180.0,
-        300.0,
-    )
+    dihedrals: int | float | Sequence[Any] = 3
     max_rotamers: int = 64
     prune_rmsd: float = 0.0
     seed: int = 20261030
@@ -475,24 +527,12 @@ class RotamerEnsemble(AdsorbateSource):
             )
         if float(self.prune_rmsd) < 0.0:
             raise ValueError("prune_rmsd must be non-negative.")
-        values = list(self.dihedrals)
-        if len(values) == 0:
-            raise ValueError("dihedrals must not be empty.")
-        if all(
-            isinstance(value, (int, float, np.integer, np.floating))
-            for value in values
-        ):
-            object.__setattr__(
-                self,
-                "dihedrals",
-                tuple(float(value) for value in values),  # type: ignore
+        normalized = _normalize_dihedral_spec(self.dihedrals)
+        if isinstance(normalized, int) and normalized < 1:
+            raise ValueError(
+                f"A dihedral count must be positive, got {normalized}."
             )
-        else:
-            object.__setattr__(
-                self,
-                "dihedrals",
-                tuple(tuple(float(value) for value in grid) for grid in values),  # type: ignore
-            )
+        object.__setattr__(self, "dihedrals", normalized)
 
     def resolve(self) -> tuple[RigidAdsorbate, ...]:
         """Enumerate and prepare the rotamers.
@@ -525,7 +565,7 @@ class RotamerEnsemble(AdsorbateSource):
                 ),
             )
         grids = _grids(self.dihedrals, len(rotors))
-        total = int(np.prod([len(grid) for grid in grids]))
+        total = math.prod(len(grid) for grid in grids)
         truncated = total > int(self.max_rotamers)
         combinations = itertools.islice(
             itertools.product(*grids),
@@ -566,17 +606,9 @@ class RotamerEnsemble(AdsorbateSource):
 
     def signature(self) -> Mapping[str, Any]:
         """Return a JSON-serialisable description of the source."""
-        first = self.dihedrals[0]
-        if isinstance(first, (int, float)):
-            dihedrals: Any = [float(value) for value in self.dihedrals]  # type: ignore
-        else:
-            dihedrals = [
-                [float(value) for value in grid]  # type: ignore
-                for grid in self.dihedrals  # type: ignore
-            ]
         return {
             "kind": "rotamer",
-            "dihedrals": dihedrals,
+            "dihedrals": _dihedral_payload(self.dihedrals),
             "max_rotamers": int(self.max_rotamers),
             "prune_rmsd": float(self.prune_rmsd),
             "seed": int(self.seed),

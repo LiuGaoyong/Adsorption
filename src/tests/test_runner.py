@@ -78,7 +78,7 @@ def test_rotamer_mode_builds_the_ensemble() -> None:
     cfg["adsorbate"] = {
         "smiles": "CCCC",
         "conformers": "rotamers",
-        "dihedrals": [60.0, 180.0, 300.0],
+        "dihedrals": [3],
         "max_rotamers": 4,
         "charge": 0,
     }

@@ -23,8 +23,9 @@ adsorbate:
   prune_rmsd: 0.5
   charge: 0
   # Only used by `conformers: rotamers`:
-  # dihedrals: [60, 180, 300]              # one grid shared by every rotor
-  # dihedrals: [[60, 180], [180], [60, 180, 300]]  # one grid per rotor
+  # dihedrals: 6                                  # 6 points per rotor
+  # dihedrals: [6, 6, 6]                          # one count per rotor
+  # dihedrals: [[60, 180], [180], [60, 180, 300]] # explicit per rotor
   # max_rotamers: 64
 
 # "auto" selects every top-layer atom as a top site. A flat list of integers is

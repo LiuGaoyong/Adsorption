@@ -163,7 +163,7 @@ def _adsorbate_parts(
         "conformer_seed": node.pop("conformer_seed", 20261030),
         "prune_rmsd": node.pop("prune_rmsd", 0.5),
         "charge": node.pop("charge", 0),
-        "dihedrals": node.pop("dihedrals", (60.0, 180.0, 300.0)),
+        "dihedrals": node.pop("dihedrals", 3),
         "max_rotamers": node.pop("max_rotamers", 64),
     }
     return node, settings

@@ -133,15 +133,17 @@ def test_rotamer_enumeration_is_deterministic() -> None:
     assert all(r.provenance["n_rotors"] == 3 for r in first)
 
 
-def test_flat_dihedral_sequence_is_a_grid() -> None:
+def test_uniform_dihedral_counts_are_grids() -> None:
     pytest.importorskip("rdkit")
     rigids = RotamerEnsemble(
         "CCCCCC",
-        dihedrals=(60.0, 180.0, 300.0),
+        dihedrals=(6, 6, 6),
         max_rotamers=9,
     ).resolve()
     assert len(rigids) == 9
     assert all(rigid.provenance["truncated"] for rigid in rigids)
+    assert rigids[0].provenance["dihedrals"] == (0.0, 0.0, 0.0)
+    assert rigids[1].provenance["dihedrals"] == (0.0, 0.0, 60.0)
 
 
 def test_ase_dihedrals_match_the_requested_sequence() -> None:
