@@ -1,0 +1,44 @@
+# Shared overrides for examples/2-FlexibleAdsorbate.
+#
+# run_all.sh deep-merges this file into every <system>/<adsorbate>/run.yaml
+# before running it. The per-case `sites` block uses the GraphAtoms
+# enumeration and the adsorbate is a rigid-rotamer ensemble.
+#
+# `dihedrals: 6` means six uniform points in [0, 360) for every rotatable
+# bond; use [6, 6, 6] for one count per rotor or a nested list for explicit
+# angles. `max_rotamers` caps the Cartesian product.
+adsorbate:
+  conformers: rotamers
+  dihedrals: 6
+  max_rotamers: 64
+
+protocol:
+  n_oa: 10
+  n_rot: 10
+  n_d: 6
+  d_min: 0.8
+  d_max: 3.0
+  d_min_radius_scale: 0.0
+  d_max_radius_scale: 0.0
+  anchor: com
+  orientation_kind: auto
+
+filters:
+  - _target_: adsorption.filters.GeometryFilter
+    scale: 1.0
+  - _target_: adsorption.filters.LennardJonesEnergyFilter
+    e_cut: null
+    max_steps: 10
+    fmax: 0.3
+    reject_on_unconverged: false
+
+budget:
+  max_candidates: 1000000
+
+start: 1
+stop: null
+outputs: ./results
+
+parallel:
+  backend: loky
+  n_jobs: -1

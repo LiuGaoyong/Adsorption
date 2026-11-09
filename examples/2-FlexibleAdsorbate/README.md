@@ -2,8 +2,8 @@
 
 Flexible-adsorbate cases built on the same six systems as
 `examples/1-MultiSite`. The layout mirrors `0-SingleSite` and `1-MultiSite`:
-one folder per system, one folder per flexible adsorbate, and a `run.yaml` in
-every adsorbate folder.
+one folder per system, one folder per flexible adsorbate, and a generated
+`run.yaml` in every adsorbate folder.
 
 ```text
 examples/2-FlexibleAdsorbate/
@@ -14,8 +14,8 @@ examples/2-FlexibleAdsorbate/
 ├── sites/
 ├── structures/S6-disordered-Cu.xyz
 ├── S1-Cu-octahedron/
-│   ├── n-hexane/run.yaml
-│   └── 1,5-hexadiene/run.yaml
+│   ├── n-hexane/run.yaml       # generated, ignored
+│   └── 1,5-hexadiene/run.yaml  # generated, ignored
 ├── S2-Cu111/...
 ...
 └── S6-disordered-Cu/...
@@ -23,20 +23,39 @@ examples/2-FlexibleAdsorbate/
 
 ## Adsorbates
 
-| Adsorbate | SMILES | Rotatable bonds | Conformers at `n_conformers=8` |
+| Adsorbate | SMILES | Rotatable bonds | Rotamers at `dihedrals: 6` |
 |:--|:--|--:|--:|
-| n-hexane | `CCCCCC` | 3 | 3 |
-| 1,5-hexadiene | `C=CCCC=C` | 3 | 5 |
+| n-hexane | `CCCCCC` | 3 | 64 (capped from `6^3 = 216`) |
+| 1,5-hexadiene | `C=CCCC=C` | 3 | 64 (capped from `6^3 = 216`) |
 
-Both are generated with RDKit ETKDG (seed 20261030, RMSD pruning 0.5 Å).
-The runner detects the rotatable bonds automatically and builds the conformer
-ensemble; the conformer count is recorded in `summary.json`.
+Both use the RDKit-detected rotatable bonds and ASE's dihedral rotation:
+`conformers: rotamers`, `dihedrals: 6` means six uniform points in
+`[0, 360)` per rotor, and `max_rotamers: 64` caps the Cartesian product.
+The cap is recorded in each structure's provenance (`truncated: true`).
 
 ## Systems and sites
 
-The six systems, substrates and all site cores are the same as
-`examples/1-MultiSite`; see [`gallery_index.csv`](gallery_index.csv) for the
-12 system–adsorbate rows and [`sites/`](sites/) for the frozen site metadata.
+The six systems and substrates are the same as `examples/1-MultiSite`.
+Each generated `run.yaml` uses `sites: {kind: graphatoms, ...}` with the same
+per-system core caps as the multi-site gallery; the curated site metadata
+remains in [`sites/`](sites/) for reference. See
+[`gallery_index.csv`](gallery_index.csv) for the 12 system–adsorbate rows.
+
+## Batch parameters
+
+`run_all.sh` renders one `run.yaml` per case from
+[`manifest.yaml`](manifest.yaml) and [`run.yaml.template`](run.yaml.template)
+before running. The manifest stores each system's extxyz substrate and
+GraphAtoms selection; the template stores the shared protocol, rotamer grid,
+filter chain and budget. Generated `run.yaml` files are ignored by git.
+
+```bash
+./run_all.sh                    # render the cases, then run them
+GENERATE_CASES=0 ./run_all.sh   # reuse the existing generated files
+```
+
+Substrates are in [`structures/`](structures/) as extxyz files; the two
+adsorbates are SMILES strings in the manifest.
 
 ## Protocol
 
@@ -60,6 +79,8 @@ The filter chain is `GeometryFilter(scale=1.0)` followed by
 
 ```bash
 # one system-adsorbate case
+# from this directory: render the generated run.yaml files once
+python ../build_cases.py manifest.yaml run.yaml.template --root .
 cd S2-Cu111/n-hexane
 adsorption-run --config-path "$PWD" --config-name run
 

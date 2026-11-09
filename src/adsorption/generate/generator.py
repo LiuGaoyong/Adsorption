@@ -27,18 +27,18 @@ from typing import Any
 import numpy as np
 from ase import Atoms
 
-from adsorption.generate.adsorbate import (
-    AdsorbateSource,
-    RigidAdsorbate,
-    SingleAdsorbate,
-    rigid_digest,
-)
 from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
 from adsorption.generate._axes import _SiteAxis_And_AdsorbateAxis_Mixin
 from adsorption.generate._component import (
     _Component,
     _decode,
     _prefix_sums,
+)
+from adsorption.generate.adsorbate import (
+    AdsorbateSource,
+    RigidAdsorbate,
+    SingleAdsorbate,
+    rigid_digest,
 )
 from adsorption.generate.orientation import OrientationShape
 from adsorption.generate.sampling import (
@@ -187,7 +187,7 @@ class AdsorptionConfigurationGenerator(
         if len(components) == 1:
             components = (
                 replace(
-                    components[0],
+                    components[0],  # type: ignore
                     site_index=int(site_index),
                     conformer=int(conformer),
                 ),

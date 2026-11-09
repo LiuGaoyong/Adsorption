@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from ase import Atoms
+from graphatoms.system.system import System
 
 from adsorption.geometry.site import SiteGeometry, build_site
 
@@ -337,14 +338,7 @@ class SiteSelection:
         }
 
 
-def _graphatoms_system(atoms: Atoms) -> Any:
-    """Return a ``graphatoms`` System with the atom tags analysed."""
-    from graphatoms.system.system import System
-
-    return System.from_ase(atoms, parse_atoms_is_outer_or_not=True)
-
-
-def _unique_cores(system: Any, max_ncore: int) -> list[tuple[int, ...]]:
+def _unique_cores(system: System, max_ncore: int) -> list[tuple[int, ...]]:
     """Return the symmetry-unique site cores of a GraphAtoms system."""
     masks = system.get_site_core(max_ncore=int(max_ncore))
     matrix = np.atleast_2d(np.asarray(masks, dtype=bool))
@@ -353,7 +347,7 @@ def _unique_cores(system: Any, max_ncore: int) -> list[tuple[int, ...]]:
     ]
 
 
-def _all_cores(system: Any, max_ncore: int) -> list[tuple[int, ...]]:
+def _all_cores(system: System, max_ncore: int) -> list[tuple[int, ...]]:
     """Return every outer site core without the GraphAtoms hash reduction."""
     outer = np.asarray(system.is_outer, dtype=bool)
     cores: set[tuple[int, ...]] = {
@@ -425,7 +419,7 @@ class GraphAtomsSites(SiteSource):
         Raises:
             ValueError: If the selection removes every site.
         """
-        system = _graphatoms_system(substrate)
+        system = System.from_ase(substrate, parse_atoms_is_outer_or_not=True)
         cores = (
             _unique_cores(system, int(self.max_ncore))
             if self.unique

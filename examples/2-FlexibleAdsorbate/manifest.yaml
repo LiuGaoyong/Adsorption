@@ -1,0 +1,70 @@
+# Case manifest consumed by examples/build_cases.py.
+layout: multi
+adsorbates:
+  1,5-hexadiene: C=CCCC=C
+  n-hexane: CCCCCC
+systems:
+  S1-Cu-octahedron:
+    substrate: structures/S1-Cu-octahedron.xyz
+    sites:
+      kind: graphatoms
+      max_ncore: 3
+      unique: true
+      selection:
+        per_core:
+          1: 2
+          2: 2
+          3: 2
+  S2-Cu111:
+    substrate: structures/S2-Cu111.xyz
+    sites:
+      kind: graphatoms
+      max_ncore: 3
+      unique: true
+      selection:
+        per_core:
+          1: 1
+          2: 1
+          3: 1
+  S3-Pd111:
+    substrate: structures/S3-Pd111.xyz
+    sites:
+      kind: graphatoms
+      max_ncore: 3
+      unique: true
+      selection:
+        per_core:
+          1: 1
+          2: 1
+          3: 1
+  S4-Fe110:
+    substrate: structures/S4-Fe110.xyz
+    sites:
+      kind: graphatoms
+      max_ncore: 3
+      unique: true
+      selection:
+        per_core:
+          1: 1
+          2: 1
+          3: 1
+  S5-Cu211-stepped:
+    substrate: structures/S5-Cu211-stepped.xyz
+    sites:
+      kind: graphatoms
+      max_ncore: 3
+      unique: true
+      selection:
+        per_core:
+          1: 2
+          2: 2
+  S6-disordered-Cu:
+    substrate: structures/S6-disordered-Cu.xyz
+    sites:
+      kind: graphatoms
+      max_ncore: 3
+      unique: true
+      selection:
+        per_core:
+          1: 1
+          2: 1

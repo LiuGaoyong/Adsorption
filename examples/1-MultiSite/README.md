@@ -3,7 +3,7 @@
 Multi-site cases summarized from `add-pipeline`, extended to the full
 `0-SingleSite` adsorbate set (methane, methanol, ethanol, ethane, ...). The file
 layout mirrors `examples/0-SingleSite`: one folder per system, one folder per
-adsorbate, and a `run.yaml` in every adsorbate folder.
+adsorbate, and a generated `run.yaml` in every adsorbate folder.
 
 ```text
 examples/1-MultiSite/
@@ -30,16 +30,48 @@ examples/1-MultiSite/
 └── S6-disordered-Cu/...
 ```
 
-Each `run.yaml` lists **all** site cores of its system, so the runner builds
-the multi-site candidate space (with an ETKDG ensemble when an adsorbate has
-multiple conformers). The frozen site cores are in [`sites/`](sites/), and
-the S6 structure is in [`structures/`](structures/).
+Each case's generated `run.yaml` selects a small **GraphAtoms** site set:
+
+```yaml
+sites:
+  kind: graphatoms
+  max_ncore: 3
+  unique: true
+  selection:
+    per_core: {1: 1, 2: 1, 3: 1}
+```
+
+The per-system `selection.per_core` cap keeps the candidate budget comparable
+to the curated matrix; the original cores and site-specific `N_OA` are kept in
+[`sites/`](sites/) (and as comments in each `run.yaml`) for reference. The S6
+structure is in [`structures/`](structures/).
+
+The adsorbate is a rigid-rotamer ensemble by default: `conformers: rotamers`
+with `dihedrals: 6` and `max_rotamers: 64`. RDKit detects the rotatable bonds
+and ASE applies the dihedrals; a molecule with no rotatable bond keeps one
+structure.
 
 There are now **56 configs**: the 23 paper-matrix cases plus 33 extensions.
 The extension adds CH4 to every system, C2H6, CH3OH, CH3CH2OH to every system,
 and furfural to S1, S2, S4, S5 and S6. Every system therefore carries the same
 eight base adsorbates as `0-SingleSite`, plus n-hexane (S1/S2) and furfural
 (S1/S2/S3/S4/S5/S6).
+
+## Batch parameters
+
+`run_all.sh` renders one `run.yaml` per case from
+[`manifest.yaml`](manifest.yaml) and [`run.yaml.template`](run.yaml.template)
+before running. The manifest stores each system's extxyz substrate and
+GraphAtoms selection; the template stores the shared protocol, rotamer grid,
+filter chain and budget. Generated `run.yaml` files are ignored by git.
+
+```bash
+./run_all.sh                    # render the cases, then run them
+GENERATE_CASES=0 ./run_all.sh   # reuse the existing generated files
+```
+
+Substrates are in [`structures/`](structures/) as extxyz files; adsorbates are
+SMILES strings in the manifest.
 
 ## Cases
 
@@ -82,6 +114,8 @@ the candidate counts are demonstration-scale, not paper-scale.
 
 ```bash
 # one system-adsorbate case
+# from this directory: render the generated run.yaml files once
+python ../build_cases.py manifest.yaml run.yaml.template --root .
 cd S2-Cu111/CO
 adsorption-run --config-path "$PWD" --config-name run
 

@@ -217,6 +217,7 @@ def _build_adsorbate_source(
                 source,
                 dihedrals=settings["dihedrals"],
                 max_rotamers=int(settings["max_rotamers"]),
+                seed=int(settings["conformer_seed"]),
                 anchor=anchor,
                 charge=int(settings["charge"]),
                 label_prefix=adsorbate.get_chemical_formula(),
