@@ -44,7 +44,7 @@ remains in [`sites/`](sites/) for reference. See
 ## Batch parameters
 
 `run_all.sh` renders one `run.yaml` per case from
-[`manifest.yaml`](manifest.yaml) and [`run.yaml.template`](run.yaml.template)
+[`manifest.yaml`](manifest.yaml) and [`run.template.yaml`](run.template.yaml)
 before running. The manifest stores each system's extxyz substrate and
 GraphAtoms selection; the template stores the shared protocol, rotamer grid,
 filter chain and budget. Generated `run.yaml` files are ignored by git.
@@ -53,6 +53,38 @@ filter chain and budget. Generated `run.yaml` files are ignored by git.
 ./run_all.sh                    # render the cases, then run them
 GENERATE_CASES=0 ./run_all.sh   # reuse the existing generated files
 ```
+
+### NequIP tier
+
+[`run.nequip.template.yaml`](run.nequip.template.yaml) appends a
+`NequIPOptimizedEnergyFilter` after the Lennard-Jones tier. It needs NequIP
+and a deployed model; the default is
+`~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth`. The tier relaxes the
+full structure (`fix_substrate: false`, `fix_adsorbate_bonds: false`).
+
+```bash
+# the default model is used automatically when it exists
+# ~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth
+./run_all.sh
+
+# force the plain LJ chain
+TEMPLATE=run.template.yaml ./run_all.sh
+
+# or point at another model; NEQUIP_MODEL selects the NequIP template
+NEQUIP_MODEL=/path/to/model.pth ./run_all.sh
+```
+
+`parallel.chunk_factor` controls how many chunks are created per worker, and
+`parallel.threads_per_worker` limits BLAS/Torch threads in each worker
+(`0` disables the limit). NequIP examples use `chunk_factor: 2`.
+
+`START`, `STOP`, `N_JOBS` and `CONTINUE_ON_ERROR` override the generated
+configuration and the runner for a quick sweep:
+
+```bash
+START=1 STOP=8 N_JOBS=2 CONTINUE_ON_ERROR=1 ./run_all.sh
+```
+
 
 Substrates are in [`structures/`](structures/) as extxyz files; the two
 adsorbates are SMILES strings in the manifest.
@@ -80,7 +112,7 @@ The filter chain is `GeometryFilter(scale=1.0)` followed by
 ```bash
 # one system-adsorbate case
 # from this directory: render the generated run.yaml files once
-python ../build_cases.py manifest.yaml run.yaml.template --root .
+python ../build_cases.py manifest.yaml run.template.yaml --root .
 cd S2-Cu111/n-hexane
 adsorption-run --config-path "$PWD" --config-name run
 
@@ -103,7 +135,6 @@ python examples/2-FlexibleAdsorbate/plot_sites.py --only S2-Cu111
 
 - The configs generate conformers from SMILES; no conformer structures are
   committed.
-- S5 uses `ase.build.fcc211`, which returns mixed PBC; the current
-  `GeometryFilter` requires all-periodic or non-periodic inputs, so the S5
-  configs are structural documentation until mixed-PBC support is added.
+- S5 uses the `fcc211` Cu(211) slab written to extxyz with all three axes
+  periodic and 15 A of vacuum along z, so the full filter chain runs on it.
 - `1,5-hexadiene` is written as `1,5-hexadiene` in folder and config names.

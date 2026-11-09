@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import shutil
 import time
 from collections import Counter
@@ -524,6 +525,24 @@ def _workers(n_jobs: int) -> int:
     return max(1, n_jobs)
 
 
+def _init_worker(threads: int) -> None:
+    """Limit BLAS and Torch threads in one joblib worker process."""
+    if int(threads) < 1:
+        return
+    for name in (
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        os.environ[name] = str(int(threads))
+    try:
+        import torch  # noqa: PLC0415 - optional dependency
+    except ImportError:
+        return
+    torch.set_num_threads(int(threads))
+
+
 def run_config(
     cfg: str | Path | Mapping[str, Any],
     *,
@@ -559,6 +578,23 @@ def run_config(
     )
     if n_jobs == 0:
         raise ValueError("n_jobs must not be zero.")
+    workers = _workers(n_jobs)
+    chunk_factor = int(parallel_cfg.get("chunk_factor", 4))
+    if chunk_factor < 1:
+        raise ValueError(
+            f"parallel.chunk_factor must be positive, got {chunk_factor}."
+        )
+    threads_per_worker = int(
+        parallel_cfg.get(
+            "threads_per_worker",
+            1 if workers > 1 else 0,
+        )
+    )
+    if threads_per_worker < 0:
+        raise ValueError(
+            "parallel.threads_per_worker must be non-negative, got "
+            f"{threads_per_worker}."
+        )
 
     generator, info = _build_generator(config)
     filters = _build_filters(config)
@@ -580,11 +616,11 @@ def run_config(
             f"{total_candidates} candidates."
         )
 
-    sample = generator.trial(first)
-    for filt in filters:
-        prepare = getattr(filt, "prepare", None)
-        if callable(prepare):
-            prepare(sample)
+    for sample in generator.iter_component_starts():
+        for filt in filters:
+            prepare = getattr(filt, "prepare", None)
+            if callable(prepare):
+                prepare(sample)
 
     raw_output = (
         output if output is not None else config.get("outputs", "./runs")
@@ -599,7 +635,7 @@ def run_config(
     chunks_dir.mkdir()
 
     chunk_count = (
-        1 if n_jobs == 1 else min(last - first + 1, _workers(n_jobs) * 4)
+        1 if n_jobs == 1 else min(last - first + 1, workers * chunk_factor)
     )
     ranges = _split(first, last, chunk_count)
     paths = [
@@ -615,7 +651,13 @@ def run_config(
             for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
         ]
     else:
-        results = Parallel(n_jobs=n_jobs, backend=backend, verbose=verbose)(
+        results = Parallel(
+            n_jobs=n_jobs,
+            backend=backend,
+            verbose=verbose,
+            initializer=_init_worker,
+            initargs=(threads_per_worker,),
+        )(
             delayed(_run_interval)(
                 generator, filters, begin, end, path, xyz_path
             )

@@ -1,6 +1,8 @@
 """Contract tests of the energetic filters and their constraints."""
 
-from types import SimpleNamespace
+import pickle
+import sys
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -12,8 +14,10 @@ from ase.constraints import FixAtoms, FixBondLengths
 from adsorption.base import Trial
 from adsorption.filters import (
     LennardJonesEnergyFilter,
+    NequIPOptimizedEnergyFilter,
     OptimizedEnergyFilter,
 )
+from adsorption.filters.nequip import DEFAULT_NEQUIP_MODEL
 
 
 def make_trial() -> Trial:
@@ -57,9 +61,7 @@ def test_fix_flags_are_normalised(
     assert filt.fix_adsorbate_bonds is bonds
 
 
-@pytest.mark.parametrize(
-    "e_cut", [float("nan"), float("inf"), float("-inf")]
-)
+@pytest.mark.parametrize("e_cut", [float("nan"), float("inf"), float("-inf")])
 def test_non_finite_ceiling_is_rejected(e_cut: float) -> None:
     """A non-finite energy ceiling is a construction error."""
     with pytest.raises(ValueError):
@@ -208,8 +210,7 @@ def test_adsorbate_bonds_use_the_adsorbate_count(
     assert pairs.min() >= trial.natoms_substrate
     assert pairs.max() < len(trial.atoms)
     local = {
-        tuple(sorted(row))
-        for row in (pairs - trial.natoms_substrate).tolist()
+        tuple(sorted(row)) for row in (pairs - trial.natoms_substrate).tolist()
     }
     assert local == {(0, 1)}
 
@@ -277,3 +278,42 @@ def test_lennard_jones_filter_instantiates_and_signs() -> None:
     assert signature["calculator"] == (
         "Lennard-Jones Potential by OpenKIM Parameters"
     )
+
+
+def test_nequip_filter_builds_a_calculator(monkeypatch) -> None:
+    """The NequIP tier builds its calculator from the deployed model."""
+
+    class FakeNequIPCalculator(EMT):
+        @classmethod
+        def from_deployed_model(cls, **kwargs):
+            return cls()
+
+    package = ModuleType("nequip")
+    module = ModuleType("nequip.ase")
+    module.NequIPCalculator = FakeNequIPCalculator  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nequip", package)
+    monkeypatch.setitem(sys.modules, "nequip.ase", module)
+
+    filt = NequIPOptimizedEnergyFilter(
+        "model.pth", device="cpu", e_cut=1e6, max_steps=1
+    )
+    assert filt.calculator is None
+    signature = filt.signature()
+    assert signature["kind"] == "nequip_optimized_energy"
+    assert signature["calculator"] == {
+        "model_path": "model.pth",
+        "device": "cpu",
+    }
+    assert signature["fix_substrate"] is False
+    assert signature["fix_adsorbate_bonds"] is False
+
+    default = NequIPOptimizedEnergyFilter(e_cut=1e6)
+    assert default.signature()["calculator"]["model_path"] == str(
+        DEFAULT_NEQUIP_MODEL
+    )
+
+    restored = pickle.loads(pickle.dumps(filt))
+    assert restored.signature() == signature
+    assert restored.calculator is None
+    restored.evaluate(make_trial())
+    assert restored.calculator is not None

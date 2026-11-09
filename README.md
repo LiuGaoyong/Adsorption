@@ -100,7 +100,8 @@ the campaign totals. A run refuses to start when the candidate count exceeds
 AdsConfGenABC                          AdsConfFilterABC
 └── AdsorptionConfigurationGenerator    ├── GeometryFilter   pairwise floor
     ├── sites: ExplicitSites            ├── LJFilter         repulsive energy
-    │           TopLayerSites           └── EnergyFilter     relaxation + E cut
+    │           TopLayerSites           ├── EnergyFilter     relaxation + E cut
+    │           GraphAtomsSites          └── NequIPFilter     MLP relaxation
     │           GraphAtomsSites
     └── adsorbates: SingleAdsorbate
                     ExplicitEnsemble
@@ -118,7 +119,7 @@ rejection. Every `Trial` carries its one-based index and budget; every
 src/adsorption/
 ├── process/       # Trial, Verdict, the two ABCs, pipeline
 ├── generate/      # AdsorptionConfigurationGenerator, Sampling, orientation
-├── filters/       # GeometryFilter, LJFilter, EnergyFilter
+├── filters/       # GeometryFilter, LJFilter, EnergyFilter, NequIPFilter
 ├── geometry/      # site, grids, SuperFibonacciSO3, rotation, placement
 ├── protocol/      # index, plan, sidecar, hashing
 ├── evaluation/    # single-point and two-stage relaxation

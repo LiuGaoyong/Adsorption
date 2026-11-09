@@ -60,7 +60,7 @@ eight base adsorbates as `0-SingleSite`, plus n-hexane (S1/S2) and furfural
 ## Batch parameters
 
 `run_all.sh` renders one `run.yaml` per case from
-[`manifest.yaml`](manifest.yaml) and [`run.yaml.template`](run.yaml.template)
+[`manifest.yaml`](manifest.yaml) and [`run.template.yaml`](run.template.yaml)
 before running. The manifest stores each system's extxyz substrate and
 GraphAtoms selection; the template stores the shared protocol, rotamer grid,
 filter chain and budget. Generated `run.yaml` files are ignored by git.
@@ -69,6 +69,38 @@ filter chain and budget. Generated `run.yaml` files are ignored by git.
 ./run_all.sh                    # render the cases, then run them
 GENERATE_CASES=0 ./run_all.sh   # reuse the existing generated files
 ```
+
+### NequIP tier
+
+[`run.nequip.template.yaml`](run.nequip.template.yaml) appends a
+`NequIPOptimizedEnergyFilter` after the Lennard-Jones tier. It needs NequIP
+and a deployed model; the default is
+`~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth`. The tier relaxes the
+full structure (`fix_substrate: false`, `fix_adsorbate_bonds: false`).
+
+```bash
+# the default model is used automatically when it exists
+# ~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth
+./run_all.sh
+
+# force the plain LJ chain
+TEMPLATE=run.template.yaml ./run_all.sh
+
+# or point at another model; NEQUIP_MODEL selects the NequIP template
+NEQUIP_MODEL=/path/to/model.pth ./run_all.sh
+```
+
+`parallel.chunk_factor` controls how many chunks are created per worker, and
+`parallel.threads_per_worker` limits BLAS/Torch threads in each worker
+(`0` disables the limit). NequIP examples use `chunk_factor: 2`.
+
+`START`, `STOP`, `N_JOBS` and `CONTINUE_ON_ERROR` override the generated
+configuration and the runner for a quick sweep:
+
+```bash
+START=1 STOP=8 N_JOBS=2 CONTINUE_ON_ERROR=1 ./run_all.sh
+```
+
 
 Substrates are in [`structures/`](structures/) as extxyz files; adsorbates are
 SMILES strings in the manifest.
@@ -85,7 +117,8 @@ SMILES strings in the manifest.
 | S6 | disordered Cu cluster, 200 atoms | 2 | O, CO, H2O, CH4, C6H6, C2H6, CH3OH, CH3CH2OH, furfural | tier0, tier1 |
 
 The original matrix has 66 tier configurations: 23 `tier0-glj` (runnable),
-23 `tier1-mlp` (needs a MACE engine), 14 `tier2-emt` (runnable), and 6
+23 `tier1-mlp` (needs an MLP engine; a NequIP template is provided),
+14 `tier2-emt` (runnable), and 6
 `tier3-dft-template` (VASP/POTCAR). The 33 extension configs use the same
 `GeometryFilter` + `LennardJonesEnergyFilter` chain and are not part of that
 paper matrix. The paper case index is [`case_index.csv`](case_index.csv), and the full
@@ -115,7 +148,7 @@ the candidate counts are demonstration-scale, not paper-scale.
 ```bash
 # one system-adsorbate case
 # from this directory: render the generated run.yaml files once
-python ../build_cases.py manifest.yaml run.yaml.template --root .
+python ../build_cases.py manifest.yaml run.template.yaml --root .
 cd S2-Cu111/CO
 adsorption-run --config-path "$PWD" --config-name run
 
@@ -144,11 +177,9 @@ python examples/1-MultiSite/plot_sites.py --only S2-Cu111
 
 ## Notes
 
-- `n-hexane` and `furfural` come from SMILES (`CCCCCC`, `O=Cc1ccco1`) through
-  RDKit ETKDG; the other adsorbates come from `ase.build.molecule`.
-- S5 uses `ase.build.fcc211`, which returns a mixed-PBC structure. The
-  `GeometryFilter` currently requires all-periodic or non-periodic inputs, so
-  the S5 configs are documentation of the sites rather than a guaranteed run
-  until mixed-PBC support is added.
+- Every adsorbate is a SMILES string; `n-hexane` and `furfural` use RDKit
+  rotatable-bond detection, the others resolve to a single rigid structure.
+- S5 uses the `fcc211` Cu(211) slab written to extxyz with all three axes
+  periodic and 15 A of vacuum along z, so the full filter chain runs on it.
 - The exact paper-scale configs came from add-pipeline's `pipeline/configs/`;
   they are not duplicated here.

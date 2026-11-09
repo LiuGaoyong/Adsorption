@@ -1,0 +1,46 @@
+# NequIP variant of run.template.yaml: the generic filters plus a
+# NequIP optimization tier. Use with:
+#   NEQUIP_MODEL=/path/model.pth TEMPLATE=run.nequip.template.yaml ./run_all.sh
+adsorbate:
+  conformers: rotamers
+  dihedrals: 6
+  max_rotamers: 64
+protocol:
+  n_oa: 10
+  n_rot: 10
+  n_d: 6
+  d_min: 0.8
+  d_max: 3.0
+  d_min_radius_scale: 0.0
+  d_max_radius_scale: 0.0
+  anchor: com
+  orientation_kind: auto
+filters:
+- _target_: adsorption.filters.GeometryFilter
+  scale: 1.0
+- _target_: adsorption.filters.LennardJonesEnergyFilter
+  e_cut: null
+  max_steps: 10
+  fmax: 0.3
+  reject_on_unconverged: false
+- _target_: adsorption.filters.NequIPOptimizedEnergyFilter
+  model_path: ${oc.env:NEQUIP_MODEL,""}
+  device: ${oc.env:NEQUIP_DEVICE,cpu}
+  chemical_species_to_atom_type_map: true
+  neighborlist_backend: matscipy
+  e_cut: null
+  fmax: 0.05
+  max_steps: 50
+  fix_substrate: false
+  fix_adsorbate_bonds: false
+  reject_on_unconverged: false
+budget:
+  max_candidates: 1000000
+start: 1
+stop: null
+outputs: ./results
+parallel:
+  backend: loky
+  n_jobs: 1
+  chunk_factor: 2
+  threads_per_worker: 1

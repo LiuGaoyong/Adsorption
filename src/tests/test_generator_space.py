@@ -164,3 +164,13 @@ def test_ase_dihedrals_match_the_requested_sequence() -> None:
             assert rigid.atoms.get_dihedral(*rotor) == pytest.approx(
                 target, abs=1e-6
             )
+
+
+def test_component_starts_cover_every_component(
+    generator: AdsorptionConfigurationGenerator,
+) -> None:
+    starts = list(generator.iter_component_starts())
+    assert len(starts) == generator.factors()["n_components"]
+    assert [trial.index for trial in starts] == [
+        offset + 1 for offset in generator.offsets
+    ]

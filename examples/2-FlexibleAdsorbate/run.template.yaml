@@ -1,3 +1,5 @@
+# Optional NequIP tier: use run.nequip.template.yaml with
+# NEQUIP_MODEL set; see README.
 # Shared overrides for examples/2-FlexibleAdsorbate.
 #
 # run_all.sh deep-merges this file into every <system>/<adsorbate>/run.yaml
@@ -40,5 +42,8 @@ stop: null
 outputs: ./results
 
 parallel:
+  # Demo cases are small; use N_JOBS=-1 for larger campaigns.
   backend: loky
-  n_jobs: -1
+  n_jobs: 1
+  chunk_factor: 4
+  threads_per_worker: 1

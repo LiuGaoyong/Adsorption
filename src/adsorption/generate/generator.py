@@ -337,6 +337,19 @@ class AdsorptionConfigurationGenerator(
         i, j, k = _decode(local, component.n_rot, component.n_d)
         return self._build(component, i, j, k, index)
 
+    def iter_component_starts(self) -> Iterator[Trial]:
+        """Yield the first trial of every component.
+
+        This gives one representative trial per ``(conformer, site)`` pair,
+        which is what a stateful filter needs to prepare per-component
+        caches before the parallel candidate loop.
+
+        Yields:
+            Trial: The first candidate of each component.
+        """
+        for offset in self._offsets:
+            yield self.trial(offset + 1)
+
     def generate(
         self,
         start: int = 1,
