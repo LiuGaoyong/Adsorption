@@ -8,7 +8,7 @@ that a candidate can be regenerated from its index.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from abc import ABC, abstractmethod
 
 import numpy as np
 from graphatoms.geometry.sample import fibonacci_lattice
@@ -23,20 +23,21 @@ __all__ = [
 ]
 
 
-@runtime_checkable
-class DirectionGrid(Protocol):
+class DirectionGrid(ABC):
     """A deterministic point set on the unit sphere."""
 
-    name: str
+    name: str = ""
     """Short name used in protocol records."""
 
+    @abstractmethod
     def size(self, n: int) -> int:
         """Return the number of points generated for the request ``n``."""
-        ...
+        raise NotImplementedError
 
+    @abstractmethod
     def points(self, n: int) -> np.ndarray:
         """Return unit vectors of shape ``(size(n), 3)``."""
-        ...
+        raise NotImplementedError
 
 
 def _check_n(n: int) -> int:
@@ -50,7 +51,7 @@ def _normalize(points: np.ndarray) -> np.ndarray:
     return unit_vector(np.asarray(points, dtype=float))
 
 
-class FibonacciGrid:
+class FibonacciGrid(DirectionGrid):
     """The spherical Fibonacci lattice of Eqs. (5)-(6).
 
     The point ordering is the lattice index order: ``z_i = 1 - (2i+1)/n``
@@ -71,7 +72,7 @@ class FibonacciGrid:
         return np.asarray(fibonacci_lattice(n), dtype=float)
 
 
-class LatLonGrid:
+class LatLonGrid(DirectionGrid):
     """An equal-angle latitude-longitude grid.
 
     ``n`` is only a request: the grid is a product of a polar and an azimuthal
@@ -110,7 +111,7 @@ class LatLonGrid:
         return _normalize(points)
 
 
-class SeededRandomGrid:
+class SeededRandomGrid(DirectionGrid):
     """A uniform random point set with an explicit seed.
 
     This is a baseline, never the default. The seed is part of the protocol

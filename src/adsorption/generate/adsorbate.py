@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from ase import Atoms
@@ -27,7 +28,13 @@ from adsorption.geometry.placement import (
     ResolvedAnchor,
     resolve_anchor,
 )
-from adsorption.utils.conformers import near_congruent
+from adsorption.utils.rdutils import (
+    generate_conformers,
+    moving_indices,
+    prepare_source,
+    rotatable_bonds,
+    rotor_order,
+)
 
 if TYPE_CHECKING:
     from adsorption.generate.sampling import Sampling
@@ -40,9 +47,9 @@ __all__ = [
     "RotamerEnsemble",
     "SingleAdsorbate",
     "rigid_digest",
+    "prune_by_energy",
+    "near_congruent",
 ]
-
-_ROTATABLE_SMARTS = "[!$(*#*)&!D1]-&!@[!$(*#*)&!D1]"
 
 
 @dataclass(frozen=True)
@@ -91,21 +98,22 @@ class RigidAdsorbate:
         object.__setattr__(self, "provenance", dict(self.provenance))
 
 
-@runtime_checkable
-class AdsorbateSource(Protocol):
+class AdsorbateSource(ABC):
     """A policy that resolves a declaration into rigid adsorbates."""
 
+    @abstractmethod
     def resolve(self) -> tuple[RigidAdsorbate, ...]:
         """Resolve the ordered rigid adsorbates.
 
         Returns:
             tuple[RigidAdsorbate, ...]: The non-empty ordered ensemble.
         """
-        ...
+        raise NotImplementedError
 
+    @abstractmethod
     def signature(self) -> Mapping[str, Any]:
         """Return a JSON-serialisable description of the source policy."""
-        ...
+        raise NotImplementedError
 
 
 def rigid_digest(rigids: Sequence[RigidAdsorbate]) -> str:
@@ -129,6 +137,50 @@ def rigid_digest(rigids: Sequence[RigidAdsorbate]) -> str:
     return "sha1:" + digest.hexdigest()
 
 
+def near_congruent(
+    left: Atoms,
+    right: Atoms,
+    *,
+    tolerance: float = 1e-3,
+) -> bool:
+    """Test whether two structures match after an optimal superposition.
+
+    The test keeps the atom order fixed (no permutation search), so it is a
+    fast pre-check rather than a graph-isomorphism test. Two ensembles are
+    compared with the same atom order, which is what a generator returns.
+
+    Args:
+        left: First structure.
+        right: Second structure.
+        tolerance: RMSD threshold in Angstrom.
+
+    Returns:
+        bool: True when the RMSD is below the tolerance.
+
+    Raises:
+        ValueError: If the composition or the size differs, or the tolerance
+            is negative.
+    """
+    if not np.isfinite(tolerance) or tolerance < 0.0:
+        raise ValueError(f"tolerance must be non-negative, got {tolerance}.")
+    if len(left) != len(right):
+        raise ValueError(f"Different sizes: {len(left)} and {len(right)}.")
+    if not np.array_equal(left.numbers, right.numbers):
+        raise ValueError("Different compositions.")
+    a = np.asarray(left.positions, dtype=float)
+    b = np.asarray(right.positions, dtype=float)
+    a = a - a.mean(axis=0)
+    b = b - b.mean(axis=0)
+    covariance = a.T @ b
+    u, _, vt = np.linalg.svd(covariance)
+    correction = np.eye(3)
+    correction[-1, -1] = np.sign(np.linalg.det(u @ vt))
+    rotation = u @ correction @ vt
+    fitted = a @ rotation
+    rmsd = float(np.sqrt(np.mean(np.sum((fitted - b) ** 2, axis=1))))
+    return rmsd <= float(tolerance)
+
+
 def _resolve(anchor: Anchor | ResolvedAnchor, atoms: Atoms) -> ResolvedAnchor:
     """Resolve an anchor declaration against one structure."""
     if isinstance(anchor, ResolvedAnchor):
@@ -137,7 +189,7 @@ def _resolve(anchor: Anchor | ResolvedAnchor, atoms: Atoms) -> ResolvedAnchor:
 
 
 @dataclass(frozen=True)
-class SingleAdsorbate:
+class SingleAdsorbate(AdsorbateSource):
     """One rigid adsorbate.
 
     Attributes:
@@ -170,7 +222,7 @@ class SingleAdsorbate:
 
 
 @dataclass(frozen=True)
-class ExplicitEnsemble:
+class ExplicitEnsemble(AdsorbateSource):
     """An explicit ordered ensemble of rigid adsorbates.
 
     Attributes:
@@ -235,165 +287,6 @@ class ExplicitEnsemble:
         return {"kind": "explicit", "n": len(self.adsorbates)}
 
 
-def _to_ase(mol: Any) -> Atoms:
-    """Convert one RDKit molecule to an ASE ``Atoms`` object."""
-    conformer = mol.GetConformer()
-    symbols = [atom.GetSymbol() for atom in mol.GetAtoms()]
-    positions = [
-        (
-            conformer.GetAtomPosition(index).x,
-            conformer.GetAtomPosition(index).y,
-            conformer.GetAtomPosition(index).z,
-        )
-        for index in range(mol.GetNumAtoms())
-    ]
-    return Atoms(symbols=symbols, positions=positions)
-
-
-def _xyz_block(atoms: Atoms) -> str:
-    """Return an XYZ block for RDKit's bond perception."""
-    lines = [str(len(atoms)), ""]
-    for symbol, (x, y, z) in zip(atoms.get_chemical_symbols(), atoms.positions):
-        lines.append(f"{symbol} {x:.10f} {y:.10f} {z:.10f}")
-    return "\n".join(lines) + "\n"
-
-
-def _mol_from_atoms(atoms: Atoms, charge: int) -> Any:
-    """Perceive an RDKit molecule from an ASE structure, keeping the order."""
-    from rdkit import Chem
-    from rdkit.Chem import rdDetermineBonds
-
-    molecule = Chem.MolFromXYZBlock(_xyz_block(atoms))
-    if molecule is None:
-        raise ValueError("RDKit could not read the adsorbate structure.")
-    rdDetermineBonds.DetermineBonds(molecule, charge=int(charge))
-    return molecule
-
-
-def _embed(mol: Any, seed: int) -> None:
-    """Embed one 3D reference conformer with ETKDG, single-threaded."""
-    from rdkit.Chem import AllChem
-
-    parameters = AllChem.ETKDGv3()  # type: ignore
-    parameters.randomSeed = int(seed)
-    parameters.numThreads = 1
-    if AllChem.EmbedMolecule(mol, parameters) != 0:  # type: ignore
-        raise ValueError("RDKit could not embed the adsorbate.")
-
-
-def _rotatable_bonds(mol: Any) -> list[tuple[int, int, int, int]]:
-    """Return the dihedral quadruples of the rotatable heavy-atom bonds.
-
-    The exocyclic heavy-atom bonds are kept; bonds to terminal heavy atoms
-    (rotating methyl groups) are excluded, matching RDKit's
-    ``CalcNumRotatableBonds``. The returned order is deterministic.
-    """
-    from rdkit import Chem
-
-    pattern = Chem.MolFromSmarts(_ROTATABLE_SMARTS)
-    matches = {
-        tuple(sorted(int(value) for value in match))
-        for match in mol.GetSubstructMatches(pattern)
-    }
-    rotors: list[tuple[int, int, int, int]] = []
-    for first, second in sorted(matches):
-        atom_first = mol.GetAtomWithIdx(first)
-        atom_second = mol.GetAtomWithIdx(second)
-        left = sorted(
-            neighbor.GetIdx()
-            for neighbor in atom_first.GetNeighbors()
-            if neighbor.GetIdx() != second and neighbor.GetAtomicNum() > 1
-        )
-        right = sorted(
-            neighbor.GetIdx()
-            for neighbor in atom_second.GetNeighbors()
-            if neighbor.GetIdx() != first and neighbor.GetAtomicNum() > 1
-        )
-        if left and right:
-            rotors.append((left[0], first, second, right[0]))
-    return sorted(set(rotors))
-
-
-def _prepare(
-    source: str | Atoms | object,
-    charge: int,
-    seed: int,
-) -> tuple[Any, Atoms]:
-    """Return an RDKit molecule and the ASE structure with the same order."""
-    from rdkit import Chem
-
-    if isinstance(source, Atoms):
-        return _mol_from_atoms(source, charge), source.copy()
-    if isinstance(source, str):
-        molecule = Chem.MolFromSmiles(source)
-        if molecule is None:
-            raise ValueError(f"Cannot parse the SMILES {source!r}.")
-        molecule = Chem.AddHs(molecule)
-        _embed(molecule, int(seed))
-        return molecule, _to_ase(molecule)
-    molecule = Chem.Mol(source)  # type: ignore
-    if molecule is None:
-        raise ValueError("The molecule must not be None.")
-    if molecule.GetNumConformers() == 0:
-        molecule = Chem.AddHs(molecule)
-        _embed(molecule, int(seed))
-    return molecule, _to_ase(molecule)
-
-
-def _moving_indices(mol: Any, first: int, second: int) -> list[int]:
-    """Return the atoms on the ``second`` side of the ``first-second`` bond."""
-    adjacency = {
-        index: [
-            neighbor.GetIdx()
-            for neighbor in mol.GetAtomWithIdx(index).GetNeighbors()
-        ]
-        for index in range(mol.GetNumAtoms())
-    }
-    seen = {int(second)}
-    stack = [int(second)]
-    while stack:
-        node = stack.pop()
-        for neighbor in adjacency[node]:
-            if {node, neighbor} == {int(first), int(second)}:
-                continue
-            if neighbor not in seen:
-                seen.add(neighbor)
-                stack.append(neighbor)
-    return sorted(seen)
-
-
-def _rotor_order(
-    mol: Any,
-    rotors: Sequence[tuple[int, int, int, int]],
-) -> list[tuple[int, int, int, int]]:
-    """Order the rotors from the molecular root towards the leaves."""
-    from collections import deque
-
-    adjacency = {
-        index: [
-            neighbor.GetIdx()
-            for neighbor in mol.GetAtomWithIdx(index).GetNeighbors()
-        ]
-        for index in range(mol.GetNumAtoms())
-    }
-    depth: dict[int, int] = {}
-    for start in range(mol.GetNumAtoms()):
-        if start in depth:
-            continue
-        depth[start] = 0
-        queue = deque([start])
-        while queue:
-            node = queue.popleft()
-            for neighbor in adjacency[node]:
-                if neighbor not in depth:
-                    depth[neighbor] = depth[node] + 1
-                    queue.append(neighbor)
-    return sorted(
-        rotors,
-        key=lambda rotor: max(depth.get(rotor[1], 0), depth.get(rotor[2], 0)),
-    )
-
-
 def _angle_error(current: float, target: float) -> float:
     """Return the absolute angular difference in degrees, modulo 360."""
     return abs((float(current) - float(target) + 180.0) % 360.0 - 180.0)
@@ -415,9 +308,9 @@ def _apply_dihedrals(
     """
     targets = dict(zip(rotors, (float(value) for value in angles)))
     moving = {
-        rotor: _moving_indices(mol, rotor[1], rotor[2]) for rotor in rotors
+        rotor: moving_indices(mol, rotor[1], rotor[2]) for rotor in rotors
     }
-    order = _rotor_order(mol, rotors)
+    order = rotor_order(mol, rotors)
     for _ in range(3):
         for rotor in order:
             first, second, third, fourth = rotor
@@ -469,7 +362,7 @@ def _grids(
 
 
 @dataclass(frozen=True)
-class ETKDGEnsemble:
+class ETKDGEnsemble(AdsorbateSource):
     """An ETKDG conformer ensemble.
 
     Attributes:
@@ -509,8 +402,6 @@ class ETKDGEnsemble:
             ImportError: If RDKit is not installed.
             ValueError: If no conformer is embedded.
         """
-        from adsorption.utils.conformers import generate_conformers
-
         structures = generate_conformers(
             self.source,
             n_conformers=int(self.n_conformers),
@@ -541,7 +432,7 @@ class ETKDGEnsemble:
 
 
 @dataclass(frozen=True)
-class RotamerEnsemble:
+class RotamerEnsemble(AdsorbateSource):
     """A systematic ensemble of rigid rotamers.
 
     RDKit locates the rotatable heavy-atom bonds. The user declares the
@@ -613,12 +504,12 @@ class RotamerEnsemble:
             ImportError: If RDKit is not installed.
             ValueError: If the reference structure cannot be prepared.
         """
-        molecule, atoms = _prepare(
+        molecule, atoms = prepare_source(
             self.source,
             int(self.charge),
             int(self.seed),
         )
-        rotors = _rotatable_bonds(molecule)
+        rotors = rotatable_bonds(molecule)
         if len(rotors) == 0:
             return (
                 RigidAdsorbate(
@@ -690,3 +581,42 @@ class RotamerEnsemble:
             "prune_rmsd": float(self.prune_rmsd),
             "seed": int(self.seed),
         }
+
+
+def prune_by_energy(
+    adsorbates: Sequence[Atoms],
+    energies: Sequence[float],
+    *,
+    window: float = 0.0,
+) -> tuple[Atoms, ...]:
+    """Keep the conformers within an energy window of the lowest one.
+
+    Args:
+        adsorbates: The conformers, in their original order.
+        energies: One energy per conformer (same units as ``window``).
+        window: Energy window above the minimum (inclusive).
+
+    Returns:
+        tuple[Atoms, ...]: The retained conformers in the original order.
+
+    Raises:
+        ValueError: If the lengths differ or the window is negative.
+    """
+    if len(adsorbates) != len(energies):
+        raise ValueError(
+            "adsorbates and energies must have the same length, got "
+            f"{len(adsorbates)} and {len(energies)}."
+        )
+    values = np.asarray(energies, dtype=float)
+    if len(values) == 0:
+        return ()
+    if not np.all(np.isfinite(values)):
+        raise ValueError("The energies must be finite.")
+    if not np.isfinite(window) or window < 0.0:
+        raise ValueError(f"window must be non-negative, got {window}.")
+    threshold = float(values.min()) + float(window)
+    return tuple(
+        adsorbate
+        for adsorbate, energy in zip(adsorbates, values)
+        if float(energy) <= threshold
+    )

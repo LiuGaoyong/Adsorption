@@ -24,22 +24,21 @@ from typing import Any
 
 import numpy as np
 import yaml
-from ase import Atoms
 from ase.io import write as ase_write
 from hydra.utils import instantiate
 from joblib import Parallel, cpu_count, delayed
 
-from adsorption.generate.adsorbate import (
-    AdsorbateSource,
-    ETKDGEnsemble,
-    RotamerEnsemble,
-    SingleAdsorbate,
-)
 from adsorption.base import AdsorptionConfigurationFilterABC
 from adsorption.base.pipeline import AdsorptionConfigurationPipeline, Record
 from adsorption.generate import (
     AdsorptionConfigurationGenerator,
     Sampling,
+)
+from adsorption.generate.adsorbate import (
+    AdsorbateSource,
+    ETKDGEnsemble,
+    RotamerEnsemble,
+    SingleAdsorbate,
 )
 from adsorption.geometry import (
     ExplicitSites,
@@ -47,7 +46,11 @@ from adsorption.geometry import (
     SiteSelection,
     TopLayerSites,
 )
-from adsorption.utils.conformers import generate_conformers
+from adsorption.utils.rdutils import (
+    atoms_from_smiles,
+    rdkit_graph,
+    smiles_from_mol,
+)
 
 __all__ = ["RunSummary", "load_config", "run_config"]
 
@@ -141,74 +144,6 @@ def _instantiate(node: Mapping[str, Any], what: str) -> Any:
     return instantiate(dict(node))
 
 
-def _xyz_block(atoms: Atoms) -> str:
-    """Return an XYZ block for RDKit's bond perception.
-
-    Args:
-        atoms: The structure.
-
-    Returns:
-        str: The XYZ block.
-    """
-    lines = [str(len(atoms)), ""]
-    for symbol, (x, y, z) in zip(atoms.get_chemical_symbols(), atoms.positions):
-        lines.append(f"{symbol} {x:.10f} {y:.10f} {z:.10f}")
-    return "\n".join(lines) + "\n"
-
-
-def _rdkit_graph(
-    adsorbate: Atoms,
-    smiles: str | None,
-    charge: int,
-) -> tuple[Any | None, int]:
-    """Return an RDKit molecule and its rotatable-bond count.
-
-    Args:
-        adsorbate: The ASE adsorbate structure.
-        smiles: Optional SMILES source.
-        charge: Total charge used by RDKit's bond perception.
-
-    Returns:
-        tuple[Any | None, int]: The molecule (or ``None``) and the count.
-    """
-    try:
-        from rdkit import Chem
-        from rdkit.Chem import rdDetermineBonds, rdMolDescriptors
-    except ImportError:
-        return None, 0
-    if smiles:
-        mol = Chem.MolFromSmiles(str(smiles))
-        if mol is None:
-            raise ValueError(f"Cannot parse the SMILES {smiles!r}.")
-        mol = Chem.AddHs(mol)
-    else:
-        mol = Chem.MolFromXYZBlock(_xyz_block(adsorbate))
-        if mol is None:
-            return None, 0
-        try:
-            rdDetermineBonds.DetermineBonds(mol, charge=int(charge))
-        except Exception:  # noqa: BLE001 - best-effort graph perception
-            return None, 0
-    count = int(rdMolDescriptors.CalcNumRotatableBonds(mol))
-    return mol, count
-
-
-def _atoms_from_smiles(smiles: str, seed: int) -> Atoms:
-    """Build one ASE adsorbate from a SMILES string.
-
-    Args:
-        smiles: The SMILES string.
-        seed: Embedding seed.
-
-    Returns:
-        Atoms: The embedded adsorbate.
-    """
-    generated = generate_conformers(smiles, n_conformers=1, seed=int(seed))
-    if len(generated) == 0:
-        raise ValueError(f"No conformer embedded for {smiles!r}.")
-    return generated[0]
-
-
 def _adsorbate_parts(
     cfg: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -260,13 +195,13 @@ def _build_adsorbate_source(
         raise ValueError("adsorbate must set '_target_' or 'smiles'.")
     if adsorbate is None:
         assert smiles is not None
-        adsorbate = _atoms_from_smiles(smiles, seed)
+        adsorbate = atoms_from_smiles(smiles, seed)
     anchor = protocol.get("anchor", "com")
 
     mol: Any | None = None
     n_rotatable = 0
     try:
-        mol, n_rotatable = _rdkit_graph(
+        mol, n_rotatable = rdkit_graph(
             adsorbate, smiles, int(settings["charge"])
         )
     except Exception as error:  # noqa: BLE001 - best-effort detection
@@ -308,9 +243,7 @@ def _build_adsorbate_source(
     if smiles is not None:
         source: Any = smiles
     else:
-        from rdkit import Chem  # noqa: PLC0415 - optional dependency
-
-        source = Chem.MolToSmiles(Chem.RemoveHs(mol))
+        source = smiles_from_mol(mol)
     return (
         ETKDGEnsemble(
             source,
@@ -384,8 +317,8 @@ def _build_site_source(
     if len(sequence) == 0:
         raise ValueError("sites must not be empty.")
     if all(isinstance(item, (int, np.integer)) for item in sequence):
-        return ExplicitSites([sequence], scale=scale, skin=skin)
-    return ExplicitSites(sequence, scale=scale, skin=skin)
+        return ExplicitSites([sequence], scale=scale, skin=skin)  # type: ignore
+    return ExplicitSites(sequence, scale=scale, skin=skin)  # type: ignore
 
 
 def _build_sampling(protocol: Mapping[str, Any]) -> Sampling:

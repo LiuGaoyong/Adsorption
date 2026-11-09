@@ -1,6 +1,11 @@
 # ruff: noqa D103 E501
 """Tests of the calculator-free geometric layer."""
 
+from __future__ import annotations
+
+
+import numpy as np
+from ase import Atoms
 import numpy as np
 import pytest
 from ase import Atoms
@@ -8,7 +13,7 @@ from ase.build import fcc111, molecule
 from ase.cluster import Octahedron
 from ase.data import covalent_radii as COV_R
 from ase.geometry import find_mic
-
+from collections.abc import Sequence
 from adsorption.geometry import (
     DELTA_NBR,
     DirectionRollSet,
@@ -29,11 +34,8 @@ from adsorption.geometry import (
     unit_vector,
 )
 from adsorption.geometry._quat import quaternion_invert, quaternion_raw_multiply
-from adsorption.utils.conformers import (
-    generate_conformers,
-    near_congruent,
-    prune_by_energy,
-)
+from adsorption.utils.rdutils import generate_conformers
+from adsorption.generate.adsorbate import prune_by_energy, near_congruent
 
 
 @pytest.fixture(scope="module")

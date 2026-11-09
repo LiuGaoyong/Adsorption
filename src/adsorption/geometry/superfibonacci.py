@@ -30,6 +30,7 @@ import numpy as np
 
 from adsorption.geometry._quat import standardize_quaternion
 from adsorption.geometry.rotation import apply_quaternion, unit_vector
+from adsorption.geometry.rotations import RotationSet
 
 __all__ = ["SuperFibonacciSO3"]
 
@@ -37,7 +38,7 @@ PSI: float = 1.533751168755204288118041
 """The second magic constant of the Super-Fibonacci construction."""
 
 
-class SuperFibonacciSO3:
+class SuperFibonacciSO3(RotationSet):
     """A low-discrepancy, indexed set of rotations on ``SO(3)``.
 
     The quaternions are evaluated lazily from the index, so the object stores
@@ -86,9 +87,7 @@ class SuperFibonacciSO3:
         """
         position = int(index)
         if position < 0 or position >= self.n:
-            raise IndexError(
-                f"index must be in [0, {self.n}), got {index}."
-            )
+            raise IndexError(f"index must be in [0, {self.n}), got {index}.")
         s = position + 0.5
         r = np.sqrt(s / self.n)
         big_r = np.sqrt(1.0 - s / self.n)

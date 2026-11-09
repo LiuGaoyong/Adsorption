@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from ase import Atoms
@@ -95,10 +96,10 @@ class ResolvedSites:
         )
 
 
-@runtime_checkable
-class SiteSource(Protocol):
+class SiteSource(ABC):
     """A policy that resolves a substrate into an ordered site tuple."""
 
+    @abstractmethod
     def resolve(self, substrate: Atoms) -> ResolvedSites:
         """Resolve the sites of one substrate.
 
@@ -108,7 +109,7 @@ class SiteSource(Protocol):
         Returns:
             ResolvedSites: The ordered, non-empty site set.
         """
-        ...
+        raise NotImplementedError
 
 
 def _digest_cores(cores: Any) -> str:
@@ -142,7 +143,7 @@ def _normalize_cores(
 
 
 @dataclass(frozen=True)
-class ExplicitSites:
+class ExplicitSites(SiteSource):
     """One caller-declared core set per site.
 
     A flat sequence of integers is one core set (a top, bridge or hollow
@@ -202,7 +203,7 @@ class ExplicitSites:
 
 
 @dataclass(frozen=True)
-class TopLayerSites:
+class TopLayerSites(SiteSource):
     """Every atom of the highest layer is a top site.
 
     This is the historical ``sites: auto`` heuristic: an atom belongs to the
@@ -380,7 +381,7 @@ def _all_cores(system: Any, max_ncore: int) -> list[tuple[int, ...]]:
 
 
 @dataclass(frozen=True)
-class GraphAtomsSites:
+class GraphAtomsSites(SiteSource):
     """Enumerate site cores from the substrate bond graph with GraphAtoms.
 
     With ``unique=True`` the cores are reduced to Weisfeiler-Lehman unique

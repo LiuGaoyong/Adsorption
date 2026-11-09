@@ -146,10 +146,10 @@ def test_flat_dihedral_sequence_is_a_grid() -> None:
 
 def test_ase_dihedrals_match_the_requested_sequence() -> None:
     pytest.importorskip("rdkit")
-    from adsorption.generate.adsorbate import _prepare, _rotatable_bonds
+    from adsorption.utils.rdutils import prepare_source, rotatable_bonds
 
-    molecule, atoms = _prepare("CCCCCC", 0, 20261030)
-    rotors = _rotatable_bonds(molecule)
+    molecule, atoms = prepare_source("CCCCCC", 0, 20261030)
+    rotors = rotatable_bonds(molecule)
     rigids = RotamerEnsemble(
         atoms,
         dihedrals=[[60.0, 180.0], [180.0], [60.0, 300.0]],

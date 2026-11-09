@@ -11,7 +11,7 @@ whatever construction is used. Quaternion algebra goes through
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from abc import ABC, abstractmethod
 
 import numpy as np
 
@@ -34,23 +34,24 @@ __all__ = [
 ]
 
 
-@runtime_checkable
-class RotationSet(Protocol):
+class RotationSet(ABC):
     """A deterministic, indexed set of rotations about an anchor."""
 
-    name: str
+    name: str = ""
     """Short name used in protocol records."""
 
+    @abstractmethod
     def count(self) -> int:
         """Return the number of rotations in the set."""
-        ...
+        raise NotImplementedError
 
+    @abstractmethod
     def quaternion(self, index: int) -> np.ndarray:
         """Return the unit quaternion ``(w, x, y, z)`` at ``index``."""
-        ...
+        raise NotImplementedError
 
 
-class FixedRotation:
+class FixedRotation(RotationSet):
     """The identity rotation, used when orientation does not matter.
 
     A single-atom adsorbate has no orientation degree of freedom; this set
@@ -72,7 +73,7 @@ class FixedRotation:
         return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
 
 
-class ShortestArcSet:
+class ShortestArcSet(RotationSet):
     """The direction-only orientation set of Eqs. (9)-(10).
 
     A body-frame reference axis is mapped onto every direction of a sphere
@@ -120,7 +121,7 @@ class ShortestArcSet:
         return np.asarray(self.directions[int(index)], dtype=float)
 
 
-class DirectionRollSet:
+class DirectionRollSet(RotationSet):
     """The direction-plus-roll orientation set on ``S^2 x S^1``.
 
     The reference axis is mapped onto every direction of a grid with the
@@ -173,9 +174,7 @@ class DirectionRollSet:
             for gamma in rolls:
                 roll = axis_angle_quaternion(direction, float(gamma))
                 quaternions.append(
-                    standardize_quaternion(
-                        quaternion_raw_multiply(roll, base)
-                    )
+                    standardize_quaternion(quaternion_raw_multiply(roll, base))
                 )
         self._quaternions = tuple(quaternions)
 
