@@ -19,7 +19,6 @@ from arrayff.optimize import call_optimization
 from ase import Atoms
 from ase.calculators.calculator import Calculator
 from ase.constraints import FixAtoms, FixBondLengths
-from graphatoms.system.sysGas import Gas
 
 from adsorption.base import AdsorptionConfigurationFilterABC, Trial, Verdict
 
@@ -82,9 +81,7 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
         digest = hashlib.sha1()
         digest.update(np.asarray(atoms.numbers, dtype=np.int64).tobytes())
         digest.update(np.asarray(atoms.positions, dtype=np.float64).tobytes())
-        digest.update(
-            np.asarray(atoms.cell.array, dtype=np.float64).tobytes()
-        )
+        digest.update(np.asarray(atoms.cell.array, dtype=np.float64).tobytes())
         digest.update(np.asarray(atoms.pbc, dtype=np.uint8).tobytes())
         return digest.hexdigest()
 
@@ -160,6 +157,8 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
             ids = list(range(trial.natoms_substrate))
             atoms.constraints = [FixAtoms(indices=ids)]
         if self.fix_adsorbate_bonds:
+            from graphatoms.system.sysGas import Gas  # noqa: PLC0415
+
             z = atoms.numbers[-trial.natoms_adsorbate :]
             r = atoms.positions[-trial.natoms_adsorbate :]
             gas_atoms = Atoms(numbers=z, positions=r)

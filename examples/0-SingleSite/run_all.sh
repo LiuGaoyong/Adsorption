@@ -9,6 +9,7 @@ START="${START:-}"
 STOP="${STOP:-}"
 N_JOBS="${N_JOBS:-}"
 CONTINUE_ON_ERROR="${CONTINUE_ON_ERROR:-0}"
+BATCH_DRIVER="${BATCH_DRIVER:-0}"
 
 PYTHON="${PYTHON:-}"
 if [[ -z "$PYTHON" ]]; then
@@ -23,6 +24,10 @@ if [[ -z "${NEQUIP_MODEL:-}" && -f "$DEFAULT_NEQUIP_MODEL" ]]; then
     NEQUIP_MODEL="$DEFAULT_NEQUIP_MODEL"
 fi
 export NEQUIP_MODEL
+
+MPLCONFIGDIR="${MPLCONFIGDIR:-${TMPDIR:-/tmp}/adsorption-matplotlib}"
+export MPLCONFIGDIR
+mkdir -p "$MPLCONFIGDIR"
 
 TEMPLATE="${TEMPLATE:-}"
 if [[ -z "$TEMPLATE" ]]; then
@@ -48,6 +53,12 @@ if [[ -n "$N_JOBS" ]]; then OVERRIDES="$OVERRIDES parallel.n_jobs=$N_JOBS"; fi
 
 if [[ "$GENERATE_CASES" == "1" ]]; then
     "$PYTHON" "$BUILD" "$MANIFEST" "$TEMPLATE" --root "$HERE"
+fi
+
+if [[ "$BATCH_DRIVER" == "1" ]]; then
+    export START STOP N_JOBS CONTINUE_ON_ERROR
+    "$PYTHON" "$HERE/../run_cases.py" "$HERE"
+    exit $?
 fi
 
 for site_dir in "$HERE"/*/; do

@@ -11,7 +11,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import numpy as np
-from graphatoms.geometry.sample import fibonacci_lattice
 
 from adsorption.geometry.rotation import unit_vector
 
@@ -51,6 +50,21 @@ def _normalize(points: np.ndarray) -> np.ndarray:
     return unit_vector(np.asarray(points, dtype=float))
 
 
+def _fibonacci_lattice(n: int) -> np.ndarray:
+    """Return the spherical Fibonacci lattice in the graphatoms ordering."""
+    values = np.arange(int(n), dtype=float)
+    a = 2.0 * values + 1.0
+    theta = np.arccos(1.0 - a / float(n))
+    psi = (1.0 + np.sqrt(5.0)) / 2.0 * a * np.pi
+    return np.column_stack(
+        (
+            np.sin(theta) * np.cos(psi),
+            np.sin(theta) * np.sin(psi),
+            np.cos(theta),
+        )
+    )
+
+
 class FibonacciGrid(DirectionGrid):
     """The spherical Fibonacci lattice of Eqs. (5)-(6).
 
@@ -69,7 +83,7 @@ class FibonacciGrid(DirectionGrid):
     def points(self, n: int) -> np.ndarray:
         """Return the ``n`` unit Fibonacci vectors in index order."""
         n = _check_n(n)
-        return np.asarray(fibonacci_lattice(n), dtype=float)
+        return _fibonacci_lattice(n)
 
 
 class LatLonGrid(DirectionGrid):

@@ -90,6 +90,13 @@ TEMPLATE=run.template.yaml ./run_all.sh
 NEQUIP_MODEL=/path/to/model.pth ./run_all.sh
 ```
 
+For an in-process sweep (one scientific-stack import instead of one per
+case) use the batch driver:
+
+```bash
+BATCH_DRIVER=1 STOP=8 ./run_all.sh
+```
+
 `parallel.chunk_factor` controls how many chunks are created per worker, and
 `parallel.threads_per_worker` limits BLAS/Torch threads in each worker
 (`0` disables the limit). NequIP examples use `chunk_factor: 2`.

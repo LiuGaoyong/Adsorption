@@ -24,12 +24,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from ase import Atoms
-from graphatoms.system.system import System
 
 from adsorption.geometry.site import SiteGeometry, build_site
 
 if TYPE_CHECKING:
     from adsorption.generate.sampling import Sampling
+    from graphatoms.system.system import System
 
 __all__ = [
     "ExplicitSites",
@@ -338,6 +338,13 @@ class SiteSelection:
         }
 
 
+def _graphatoms_system(atoms: Atoms) -> Any:
+    """Return a GraphAtoms System with the atom tags analysed."""
+    from graphatoms.system.system import System  # noqa: PLC0415
+
+    return System.from_ase(atoms, parse_atoms_is_outer_or_not=True)
+
+
 def _unique_cores(system: System, max_ncore: int) -> list[tuple[int, ...]]:
     """Return the symmetry-unique site cores of a GraphAtoms system."""
     masks = system.get_site_core(max_ncore=int(max_ncore))
@@ -419,7 +426,7 @@ class GraphAtomsSites(SiteSource):
         Raises:
             ValueError: If the selection removes every site.
         """
-        system = System.from_ase(substrate, parse_atoms_is_outer_or_not=True)
+        system = _graphatoms_system(substrate)
         cores = (
             _unique_cores(system, int(self.max_ncore))
             if self.unique
