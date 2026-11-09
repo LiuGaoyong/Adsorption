@@ -1,5 +1,14 @@
 """Adsorption: geometric pre-screening of adsorption configurations."""
 
+from adsorption.adsorbate import (
+    AdsorbateSource,
+    Conformer,
+    ETKDGEnsemble,
+    ExplicitEnsemble,
+    RigidAdsorbate,
+    RotamerEnsemble,
+    SingleAdsorbate,
+)
 from adsorption.base import (
     AdsorptionConfigurationFilterABC,
     AdsorptionConfigurationGeneratorABC,
@@ -16,24 +25,45 @@ from adsorption.filters import (
     OptimizedEnergyFilter,
 )
 from adsorption.generate import (
-    Conformer,
-    MultiAdsorbateGenerator,
-    MultiSiteGenerator,
-    SingleSiteGenerator,
+    AdsorptionConfigurationGenerator,
+    BoundAdsorbate,
+    Sampling,
+)
+from adsorption.geometry import (
+    ExplicitSites,
+    GraphAtomsSites,
+    ResolvedSites,
+    SiteSelection,
+    SiteSource,
+    SiteSpec,
+    TopLayerSites,
 )
 
 __all__ = [
+    "AdsorbateSource",
     "AdsorptionConfigurationFilterABC",
+    "AdsorptionConfigurationGenerator",
     "AdsorptionConfigurationGeneratorABC",
     "AdsorptionConfigurationPipeline",
+    "BoundAdsorbate",
     "Conformer",
+    "ETKDGEnsemble",
+    "ExplicitEnsemble",
+    "ExplicitSites",
     "GeometryFilter",
+    "GraphAtomsSites",
     "LennardJonesEnergyFilter",
-    "MultiAdsorbateGenerator",
-    "MultiSiteGenerator",
     "OptimizedEnergyFilter",
     "Record",
-    "SingleSiteGenerator",
+    "ResolvedSites",
+    "RigidAdsorbate",
+    "RotamerEnsemble",
+    "Sampling",
+    "SingleAdsorbate",
+    "SiteSelection",
+    "SiteSource",
+    "SiteSpec",
+    "TopLayerSites",
     "Trial",
     "Verdict",
 ]

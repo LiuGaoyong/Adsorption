@@ -42,11 +42,11 @@ Requires Python 3.12–3.13, ASE, NumPy, SciPy, Hydra, and
 from ase import Atoms
 from ase.build import fcc111
 from adsorption import AdsorptionConfigurationPipeline, GeometryFilter
-from adsorption import SingleSiteGenerator
+from adsorption import AdsorptionConfigurationGenerator
 
 slab = fcc111("Cu", size=(3, 4, 3), vacuum=10, orthogonal=True)
 oxygen = Atoms("O")
-generator = SingleSiteGenerator(
+generator = AdsorptionConfigurationGenerator(
     slab,
     0,                     # adsorption centre: atom index 0
     oxygen,                # adsorbate
@@ -82,12 +82,13 @@ substrate, the adsorbate, the site declaration, the generation protocol, the
 filter chain and the budget. Swappable objects are `_target_` nodes
 instantiated with `hydra.utils.instantiate`.
 
-The runner detects the adsorbate's rotatable bonds: when it finds any, it
-builds a conformer ensemble and uses `MultiAdsorbateGenerator`; otherwise it
-uses the single adsorbate. The site declaration is adaptive too: one core set
-builds `SingleSiteGenerator`, several core sets build `MultiSiteGenerator`,
-and `sites: auto` selects every top-layer atom as a top site. Candidate
-intervals are evaluated in parallel with `joblib` (default backend `loky`);
+The runner builds one `AdsorptionConfigurationGenerator` from three inputs:
+a site source (`sites: auto` selects every top-layer atom; a flat list is one
+core set; a list of lists declares several sites; a mapping can select the
+GraphAtoms enumeration), an adsorbate source (the rotatable-bond detection
+selects an ETKDG ensemble, otherwise the single adsorbate), and the sampling
+protocol. Candidate intervals are evaluated in parallel with `joblib` (default
+backend `loky`);
 `records.jsonl` holds one JSON line per candidate, `accepted.xyz` holds the
 accepted structures as one extended-XYZ trajectory, and `summary.json` holds
 the campaign totals. A run refuses to start when the candidate count exceeds
@@ -96,11 +97,15 @@ the campaign totals. A run refuses to start when the candidate count exceeds
 ## The two processes
 
 ```text
-AdsConfGenABC                       AdsConfFilterABC
-├── SingleSiteGenerator   one site        ├── GeometryFilter   pairwise floor
-├── MultiSiteGenerator    many sites      ├── LJFilter         repulsive energy
-└── MultiAdsorbateGenerator  many         └── EnergyFilter     relaxation + E cut
-    conformers (consumed)
+AdsConfGenABC                          AdsConfFilterABC
+└── AdsorptionConfigurationGenerator    ├── GeometryFilter   pairwise floor
+    ├── sites: ExplicitSites            ├── LJFilter         repulsive energy
+    │           TopLayerSites           └── EnergyFilter     relaxation + E cut
+    │           GraphAtomsSites
+    └── adsorbates: SingleAdsorbate
+                    ExplicitEnsemble
+                    ETKDGEnsemble
+                    RotamerEnsemble
 ```
 
 `AdsConfPipeline` applies the filters in order and stops at the first
@@ -112,7 +117,7 @@ rejection. Every `Trial` carries its one-based index and budget; every
 ```text
 src/adsorption/
 ├── process/       # Trial, Verdict, the two ABCs, pipeline
-├── generate/      # SingleSiteGenerator, MultiSiteGenerator, MultiAdsorbateGenerator
+├── generate/      # AdsorptionConfigurationGenerator, Sampling, orientation
 ├── filters/       # GeometryFilter, LJFilter, EnergyFilter
 ├── geometry/      # site, grids, SuperFibonacciSO3, rotation, placement
 ├── protocol/      # index, plan, sidecar, hashing

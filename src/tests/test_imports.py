@@ -27,17 +27,30 @@ TIMEOUT = 300
 
 REQUIRED_EXPORTS = frozenset(
     {
+        "AdsorbateSource",
         "AdsorptionConfigurationFilterABC",
+        "AdsorptionConfigurationGenerator",
         "AdsorptionConfigurationGeneratorABC",
         "AdsorptionConfigurationPipeline",
+        "BoundAdsorbate",
         "Conformer",
+        "ETKDGEnsemble",
+        "ExplicitEnsemble",
+        "ExplicitSites",
         "GeometryFilter",
+        "GraphAtomsSites",
         "LennardJonesEnergyFilter",
-        "MultiAdsorbateGenerator",
-        "MultiSiteGenerator",
         "OptimizedEnergyFilter",
         "Record",
-        "SingleSiteGenerator",
+        "ResolvedSites",
+        "RigidAdsorbate",
+        "RotamerEnsemble",
+        "Sampling",
+        "SingleAdsorbate",
+        "SiteSelection",
+        "SiteSource",
+        "SiteSpec",
+        "TopLayerSites",
         "Trial",
         "Verdict",
     }
@@ -72,7 +85,9 @@ def _relative_imports(path: Path) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.level:
             target = "." * node.level + (node.module or "")
-            found.append(f"{path.relative_to(PACKAGE_ROOT)}:{node.lineno} {target}")
+            found.append(
+                f"{path.relative_to(PACKAGE_ROOT)}:{node.lineno} {target}"
+            )
     return found
 
 
@@ -136,15 +151,19 @@ def test_root_exports_are_the_same_objects_as_their_modules() -> None:
     assert adsorption.Trial is sys.modules[f"{PACKAGE}.base"].Trial
     assert (
         adsorption.AdsorptionConfigurationPipeline
-        is sys.modules[f"{PACKAGE}.base.pipeline"].AdsorptionConfigurationPipeline
+        is sys.modules[
+            f"{PACKAGE}.base.pipeline"
+        ].AdsorptionConfigurationPipeline
     )
     assert (
         adsorption.GeometryFilter
         is sys.modules[f"{PACKAGE}.filters.geometry"].GeometryFilter
     )
     assert (
-        adsorption.SingleSiteGenerator
-        is sys.modules[f"{PACKAGE}.generate.single_site"].SingleSiteGenerator
+        adsorption.AdsorptionConfigurationGenerator
+        is sys.modules[
+            f"{PACKAGE}.generate.generator"
+        ].AdsorptionConfigurationGenerator
     )
 
 

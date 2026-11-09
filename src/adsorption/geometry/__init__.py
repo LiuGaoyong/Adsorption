@@ -59,17 +59,29 @@ from adsorption.geometry.rotations import (
 from adsorption.geometry.shell import first_neighbor_shell, mean_mic
 from adsorption.geometry.superfibonacci import SuperFibonacciSO3
 from adsorption.geometry.site import SiteGeometry, build_site
+from adsorption.geometry.sites import (
+    ExplicitSites,
+    GraphAtomsSites,
+    ResolvedSites,
+    SiteSelection,
+    SiteSource,
+    SiteSpec,
+    TopLayerSites,
+)
 
 __all__ = [
     "Anchor",
     "DELTA_NBR",
     "DirectionGrid",
     "DirectionRollSet",
+    "ExplicitSites",
     "FibonacciGrid",
     "FixedRotation",
+    "GraphAtomsSites",
     "LatLonGrid",
     "MAX_CORE_SIZE",
     "ResolvedAnchor",
+    "ResolvedSites",
     "RotationSet",
     "SCALE_MULTI",
     "SCALE_SINGLE",
@@ -78,7 +90,11 @@ __all__ = [
     "SeededRandomGrid",
     "ShortestArcSet",
     "SiteGeometry",
+    "SiteSelection",
+    "SiteSource",
+    "SiteSpec",
     "SuperFibonacciSO3",
+    "TopLayerSites",
     "apply_quaternion",
     "axis_angle_quaternion",
     "build_site",

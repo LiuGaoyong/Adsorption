@@ -29,9 +29,8 @@ examples/2-FlexibleAdsorbate/
 | 1,5-hexadiene | `C=CCCC=C` | 3 | 5 |
 
 Both are generated with RDKit ETKDG (seed 20261030, RMSD pruning 0.5 Å).
-The runner detects the rotatable bonds automatically, builds the conformer
-ensemble and uses `MultiAdsorbateGenerator`; the conformer count is recorded in
-`summary.json`.
+The runner detects the rotatable bonds automatically and builds the conformer
+ensemble; the conformer count is recorded in `summary.json`.
 
 ## Systems and sites
 

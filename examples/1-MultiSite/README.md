@@ -30,8 +30,8 @@ examples/1-MultiSite/
 └── S6-disordered-Cu/...
 ```
 
-Each `run.yaml` lists **all** site cores of its system, so the runner selects
-`MultiSiteGenerator` (or `MultiAdsorbateGenerator` when an adsorbate has
+Each `run.yaml` lists **all** site cores of its system, so the runner builds
+the multi-site candidate space (with an ETKDG ensemble when an adsorbate has
 multiple conformers). The frozen site cores are in [`sites/`](sites/), and
 the S6 structure is in [`structures/`](structures/).
 

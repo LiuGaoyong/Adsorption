@@ -1,11 +1,12 @@
 """Campaign engine: single YAML in, JSONL sidecar out.
 
-The engine builds process A from a substrate, an adsorbate and a site list,
-and process B from the declared filter chain. The site list is adaptive: one
-core builds a :class:`SingleSiteGenerator`, several cores build a
-:class:`MultiSiteGenerator`, and an adsorbate with rotatable bonds builds a
-:class:`MultiAdsorbateGenerator` over its conformers. Candidate intervals are
-evaluated in parallel with :mod:`joblib`.
+The engine builds process A from a substrate, a site source, an adsorbate
+source and a sampling protocol, and process B from the declared filter chain.
+The site source is adaptive: ``auto`` selects the top layer, a core list is
+explicit, and a mapping can select the GraphAtoms enumeration. The adsorbate
+source is adaptive too: rotatable bonds select an ETKDG ensemble, otherwise
+the single adsorbate is used. Candidate intervals are evaluated in parallel
+with :mod:`joblib`.
 """
 
 from __future__ import annotations
@@ -28,16 +29,23 @@ from ase.io import write as ase_write
 from hydra.utils import instantiate
 from joblib import Parallel, cpu_count, delayed
 
+from adsorption.adsorbate import (
+    AdsorbateSource,
+    ETKDGEnsemble,
+    SingleAdsorbate,
+)
 from adsorption.base import AdsorptionConfigurationFilterABC
 from adsorption.base.pipeline import AdsorptionConfigurationPipeline, Record
 from adsorption.generate import (
-    Conformer,
-    MultiAdsorbateGenerator,
-    MultiSiteGenerator,
-    SingleSiteGenerator,
-    build_orientation,
+    AdsorptionConfigurationGenerator,
+    Sampling,
 )
-from adsorption.geometry import build_site, distance_array, resolve_anchor
+from adsorption.geometry import (
+    ExplicitSites,
+    GraphAtomsSites,
+    SiteSelection,
+    TopLayerSites,
+)
 from adsorption.utils.conformers import generate_conformers
 
 __all__ = ["RunSummary", "load_config", "run_config"]
@@ -221,22 +229,23 @@ def _adsorbate_parts(
     return node, settings
 
 
-def _resolve_adsorbate(
+def _build_adsorbate_source(
     node: Mapping[str, Any],
     settings: Mapping[str, Any],
-) -> tuple[Atoms, list[Atoms], int]:
-    """Build the adsorbate and its conformer set.
+    protocol: Mapping[str, Any],
+) -> tuple[AdsorbateSource, int]:
+    """Build the adsorbate source and its detected rotatable-bond count.
 
     Args:
         node: The ``_target_`` node of the adsorbate structure.
         settings: The runner-only adsorbate settings.
+        protocol: The generation protocol, which carries the anchor.
 
     Returns:
-        tuple[Atoms, list[Atoms], int]: The adsorbate, the conformers and the
-        detected rotatable-bond count.
+        tuple[AdsorbateSource, int]: The source and the rotatable-bond count.
 
     Raises:
-        ValueError: If no adsorbate source is declared.
+        ValueError: If no adsorbate source is declared or a mode is unknown.
         RuntimeError: If an explicitly requested conformer generation fails.
     """
     smiles = None if settings["smiles"] is None else str(settings["smiles"])
@@ -247,6 +256,7 @@ def _resolve_adsorbate(
     if adsorbate is None:
         assert smiles is not None
         adsorbate = _atoms_from_smiles(smiles, seed)
+    anchor = protocol.get("anchor", "com")
 
     mol: Any | None = None
     n_rotatable = 0
@@ -259,7 +269,7 @@ def _resolve_adsorbate(
 
     mode = str(settings["conformers"]).strip().lower()
     if mode in {"none", "false", "off", "rigid"}:
-        return adsorbate, [adsorbate], n_rotatable
+        return SingleAdsorbate(adsorbate, anchor=anchor), n_rotatable
     if mode not in {"auto", "true", "yes", "all", "generate"}:
         raise ValueError(
             f"Unknown conformers mode: {settings['conformers']!r}."
@@ -270,11 +280,11 @@ def _resolve_adsorbate(
         raise ValueError(f"n_conformers must be positive, got {n_conformers}.")
     generate = mode != "auto" or n_rotatable > 0
     if not generate or n_conformers == 1:
-        return adsorbate, [adsorbate], n_rotatable
+        return SingleAdsorbate(adsorbate, anchor=anchor), n_rotatable
     if mol is None:
         if mode == "auto":
             _LOG.warning("RDKit graph perception failed; using one adsorbate.")
-            return adsorbate, [adsorbate], n_rotatable
+            return SingleAdsorbate(adsorbate, anchor=anchor), n_rotatable
         raise RuntimeError("Conformer generation requires RDKit.")
 
     if smiles is not None:
@@ -283,180 +293,134 @@ def _resolve_adsorbate(
         from rdkit import Chem  # noqa: PLC0415 - optional dependency
 
         source = Chem.MolToSmiles(Chem.RemoveHs(mol))
-    try:
-        conformers = generate_conformers(
+    return (
+        ETKDGEnsemble(
             source,
             n_conformers=n_conformers,
             seed=seed,
             prune_rmsd=float(settings["prune_rmsd"]),
-        )
-    except Exception as error:  # noqa: BLE001 - optional dependency
-        if mode == "auto":
-            _LOG.warning("Conformer generation failed: %s", error)
-            return adsorbate, [adsorbate], n_rotatable
-        raise
-    if len(conformers) == 0:
-        if mode == "auto":
-            return adsorbate, [adsorbate], n_rotatable
-        raise RuntimeError("No conformer was generated.")
-    return adsorbate, list(conformers), n_rotatable
+            anchor=anchor,
+            label_prefix=adsorbate.get_chemical_formula(),
+        ),
+        n_rotatable,
+    )
 
 
-def _build_conformers(
-    adsorbates: Sequence[Atoms],
-    protocol: Mapping[str, Any],
-    label: str,
-) -> list[Conformer]:
-    """Build the prepared conformer declarations.
-
-    Args:
-        adsorbates: The adsorbate structures.
-        protocol: The generation protocol.
-        label: A label prefix for the conformers.
-
-    Returns:
-        list[Conformer]: The prepared conformers.
-
-    Raises:
-        ValueError: If the number of orientations is not positive.
-    """
-    anchor = protocol.get("anchor", "com")
-    kind = protocol.get("orientation_kind", "auto")
-    n_rot = int(protocol.get("n_rot", 200))
-    if n_rot < 1:
-        raise ValueError(f"n_rot must be positive, got {n_rot}.")
-    n_d = int(protocol.get("n_d", 12))
-    d_min = float(protocol.get("d_min", 0.8))
-    d_max = float(protocol.get("d_max", 3.0))
-    d_min_scale = float(protocol.get("d_min_radius_scale", 0.0))
-    d_max_scale = float(protocol.get("d_max_radius_scale", 0.0))
-    conformers: list[Conformer] = []
-    for index, adsorbate in enumerate(adsorbates):
-        com = np.asarray(adsorbate.get_center_of_mass(), dtype=float)
-        offsets = np.asarray(adsorbate.positions, dtype=float) - com
-        radius = float(np.linalg.norm(offsets, axis=1).max())
-        _, orientation = build_orientation(kind, adsorbate, n=n_rot)
-        distances = distance_array(
-            d_min + d_min_scale * radius,
-            d_max + d_max_scale * radius,
-            n=n_d,
-        )
-        conformers.append(
-            Conformer(
-                adsorbate=adsorbate,
-                anchor=resolve_anchor(adsorbate, anchor),
-                orientation=orientation,
-                distances=distances,
-                label=f"{label}-{index}",
-            )
-        )
-    return conformers
-
-
-def _normalize_sites(
+def _build_site_source(
     raw: Any,
-    substrate: Atoms,
-) -> list[list[int]]:
-    """Resolve the site declaration into a list of core sets.
-
-    A flat sequence of integers is one core set; a sequence of sequences means
-    several sites. ``None`` or ``"auto"`` selects every top-layer atom as a
-    top site.
+    protocol: Mapping[str, Any],
+) -> Any:
+    """Resolve the ``sites`` declaration into a site source.
 
     Args:
         raw: The ``sites`` configuration value.
-        substrate: The substrate structure.
+        protocol: The generation protocol, which may carry ``scale``/``skin``.
 
     Returns:
-        list[list[int]]: One core-index list per site.
+        Any: A site source.
 
     Raises:
-        ValueError: If the declaration is empty or malformed.
+        ValueError: If the declaration is empty or unknown.
     """
-    if raw is None or (isinstance(raw, str) and raw.lower() == "auto"):
-        z = substrate.positions[:, 2]
-        top = np.flatnonzero(np.isclose(z, z.max(), atol=0.5))
-        if top.size == 0:
-            raise ValueError("auto sites found no top-layer atom.")
-        return [[int(index)] for index in top]
+    scale = protocol.get("scale")
+    skin = protocol.get("skin")
+    if raw is None or (
+        isinstance(raw, str) and raw.strip().lower() in {"auto", "top_layer"}
+    ):
+        return TopLayerSites(scale=scale, skin=skin)
+    if isinstance(raw, Mapping):
+        kind = str(raw.get("kind", "explicit")).strip().lower()
+        if kind in {"auto", "top_layer"}:
+            return TopLayerSites(
+                tolerance=float(raw.get("tolerance", 0.5)),
+                scale=scale,
+                skin=skin,
+            )
+        if kind == "explicit":
+            return ExplicitSites(
+                raw.get("cores", []),
+                scale=scale,
+                skin=skin,
+            )
+        if kind in {"graphatoms", "graph"}:
+            selection = raw.get("selection", {}) or {}
+            return GraphAtomsSites(
+                max_ncore=int(raw.get("max_ncore", 3)),
+                unique=bool(raw.get("unique", True)),
+                selection=SiteSelection(
+                    max_sites=(
+                        None
+                        if selection.get("max_sites") is None
+                        else int(selection["max_sites"])
+                    ),
+                    per_core=selection.get("per_core"),
+                ),
+                use_graph_shell=bool(raw.get("use_graph_shell", False)),
+                scale=scale,
+                skin=skin,
+            )
+        raise ValueError(f"Unknown sites kind: {kind!r}.")
     if isinstance(raw, (int, np.integer)):
-        return [[int(raw)]]
-    if isinstance(raw, str):
-        raise ValueError(f"Unknown sites declaration: {raw!r}.")
+        return ExplicitSites([[int(raw)]], scale=scale, skin=skin)
     sequence = list(raw)
-    if not sequence:
+    if len(sequence) == 0:
         raise ValueError("sites must not be empty.")
     if all(isinstance(item, (int, np.integer)) for item in sequence):
-        return [[int(item) for item in sequence]]
-    return [[int(item) for item in core] for core in sequence]
+        return ExplicitSites([sequence], scale=scale, skin=skin)
+    return ExplicitSites(sequence, scale=scale, skin=skin)
+
+
+def _build_sampling(protocol: Mapping[str, Any]) -> Sampling:
+    """Build the sampling protocol from the ``protocol`` node.
+
+    Args:
+        protocol: The generation protocol.
+
+    Returns:
+        Sampling: The sampling protocol.
+    """
+    grid_node = protocol.get("grid")
+    grid = (
+        None if grid_node is None else _instantiate(grid_node, "protocol.grid")
+    )
+    return Sampling(
+        n_oa=int(protocol.get("n_oa", 200)),
+        n_rot=int(protocol.get("n_rot", 200)),
+        n_d=int(protocol.get("n_d", 12)),
+        d_min=float(protocol.get("d_min", 0.8)),
+        d_max=float(protocol.get("d_max", 3.0)),
+        d_min_radius_scale=float(protocol.get("d_min_radius_scale", 0.0)),
+        d_max_radius_scale=float(protocol.get("d_max_radius_scale", 0.0)),
+        orientation_kind=protocol.get("orientation_kind", "auto"),
+        grid=grid,
+    )
 
 
 def _build_generator(
     cfg: Mapping[str, Any],
 ) -> tuple[Any, dict[str, int]]:
-    """Build the adaptive process-A generator.
+    """Build the process-A generator.
 
     Args:
         cfg: The campaign configuration.
 
     Returns:
-        tuple[Any, dict[str, int]]: The generator and its resolved feature
-        counts.
+        tuple[Any, dict[str, int]]: The generator and its resolved counts.
     """
     substrate = _instantiate(cfg["substrate"], "substrate")
     node, settings = _adsorbate_parts(cfg)
-    adsorbate, adsorbates, n_rotatable = _resolve_adsorbate(node, settings)
     protocol = cfg.get("protocol", {})
-    site_cores = _normalize_sites(cfg.get("sites", "auto"), substrate)
-    site_geometries = [
-        build_site(
-            substrate,
-            core,
-            scale=protocol.get("scale"),
-            skin=protocol.get("skin"),
-        )
-        for core in site_cores
-    ]
-    conformers = _build_conformers(
-        adsorbates, protocol, adsorbate.get_chemical_formula()
+    source, n_rotatable = _build_adsorbate_source(node, settings, protocol)
+    site_source = _build_site_source(cfg.get("sites", "auto"), protocol)
+    generator = AdsorptionConfigurationGenerator(
+        substrate,
+        site_source,
+        source,
+        sampling=_build_sampling(protocol),
     )
-    n_oa = int(protocol.get("n_oa", 200))
-
-    if len(conformers) == 1:
-        conformer = conformers[0]
-        components = [
-            SingleSiteGenerator(
-                substrate,
-                core,
-                conformer.adsorbate,
-                n_oa=n_oa,
-                anchor=conformer.anchor,
-                orientation=conformer.orientation,
-                distances=conformer.distances,
-                scale=site.scale,
-                skin=site.skin,
-                site_index=index,
-                conformer=0,
-            )
-            for index, (core, site) in enumerate(
-                zip(site_cores, site_geometries)
-            )
-        ]
-        generator = (
-            components[0]
-            if len(components) == 1
-            else MultiSiteGenerator(components)
-        )
-    else:
-        generator = MultiAdsorbateGenerator(
-            substrate,
-            site_geometries,
-            conformers,
-            n_oa=n_oa,
-        )
     info = {
-        "n_sites": len(site_cores),
-        "n_conformers": len(conformers),
+        "n_sites": len(generator.resolved.specs),
+        "n_conformers": len(generator.rigids),
         "n_rotatable_bonds": int(n_rotatable),
     }
     return generator, info

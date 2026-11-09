@@ -20,9 +20,9 @@ from adsorption.geometry import (
     SuperFibonacciSO3,
 )
 
-__all__ = ["Shape", "build_orientation", "detect_shape"]
+__all__ = ["OrientationShape", "build_orientation", "detect_shape"]
 
-Shape = Literal["fixed", "s2", "so3", "auto"]
+type OrientationShape = Literal["fixed", "s2", "so3", "auto"]
 
 
 def detect_shape(
@@ -56,7 +56,7 @@ def detect_shape(
 
 
 def build_orientation(
-    kind: Shape,
+    kind: OrientationShape,
     adsorbate: Atoms,
     *,
     n: int,
