@@ -60,8 +60,21 @@ stop: null
 outputs: ./runs
 
 parallel:
-  backend: loky
+  # auto: use Ray when it is importable, otherwise joblib; a single job
+  # (n_jobs: 1) stays in this process. Set to "ray" or "joblib" to force
+  # one engine.
+  engine: auto
+  # Worker count; with Ray this is the number of filter actors.
   n_jobs: -1
+  # joblib backend; ignored by Ray.
+  backend: loky
+  # BLAS/Torch threads per worker; with Ray this is also the number of CPUs
+  # reserved by each actor.
+  threads_per_worker: 1
+  # Chunks per worker (joblib) or in-flight tasks per actor (Ray).
+  chunk_factor: 4
+  # Ray cluster address; null starts a local Ray instance sized from n_jobs.
+  ray_address: null
 
 hydra:
   job:

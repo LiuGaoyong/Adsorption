@@ -88,11 +88,21 @@ core set; a list of lists declares several sites; a mapping can select the
 GraphAtoms enumeration), an adsorbate source (the rotatable-bond detection
 selects an ETKDG ensemble, otherwise the single adsorbate), and the sampling
 protocol. Candidate intervals are evaluated in parallel with `joblib` (default
-backend `loky`);
+backend `loky`) or, when the optional `ray` package is installed, by Ray
+filter actors behind a `ray.util.ActorPool`. The engine defaults to `auto`:
+Ray when it can be imported, joblib otherwise; a single-job run stays in
+the calling process. Install the optional backend
+with `pip install 'adsorption[ray]'` (or `uv sync --extra ray`) and force one
+engine with `parallel.engine=joblib` / `parallel.engine=ray`. With Ray,
+`parallel.n_jobs` is the actor count and `parallel.threads_per_worker` is the
+CPU reservation and thread budget of each actor. Each actor owns a private
+copy of the filter chain and consumes the `Trial` objects yielded by the
+generator; `records.jsonl` stays in candidate-index order regardless of the
+engine.
 `records.jsonl` holds one JSON line per candidate, `accepted.xyz` holds the
 accepted structures as one extended-XYZ trajectory, and `summary.json` holds
-the campaign totals. A run refuses to start when the candidate count exceeds
-`budget.max_candidates`.
+the campaign totals (including the resolved `engine` and `n_actors`). A run
+refuses to start when the candidate count exceeds `budget.max_candidates`.
 
 ## The two processes
 

@@ -18,7 +18,7 @@ from adsorption.base._base import (
     Verdict,
 )
 
-__all__ = ["AdsorptionConfigurationPipeline", "Record"]
+__all__ = ["AdsorptionConfigurationPipeline", "Record", "evaluate_trial"]
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,39 @@ class Record:
     verdicts: tuple[Verdict, ...] = field(default_factory=tuple)
     first_failed: str | None = None
     result: Any | None = None
+
+
+def evaluate_trial(
+    trial: Trial,
+    filters: Sequence[AdsorptionConfigurationFilterABC],
+) -> Record:
+    """Evaluate one trial through an ordered filter chain.
+
+    The chain stops at the first rejection, so a record never carries a
+    verdict from a filter that did not run. This is the single-trial kernel
+    shared by the in-process pipeline and by the filter actors of the runner.
+
+    Args:
+        trial: The generated trial.
+        filters: Process B tiers, applied in order.
+
+    Returns:
+        Record: The trial with the verdicts that were evaluated.
+    """
+    verdicts: list[Verdict] = []
+    first_failed: str | None = None
+    for filt in filters:
+        verdict = filt.evaluate(trial)
+        verdicts.append(verdict)
+        if not verdict.accepted:
+            first_failed = type(filt).__name__
+            break
+    return Record(
+        trial=trial,
+        verdicts=tuple(verdicts),
+        first_failed=first_failed,
+        result=verdicts[-1].detail if verdicts else None,
+    )
 
 
 class AdsorptionConfigurationPipeline:
@@ -75,20 +108,7 @@ class AdsorptionConfigurationPipeline:
             Record: One record per trial, in index order.
         """
         for trial in self.generator.generate(start, stop):
-            verdicts: list[Verdict] = []
-            first_failed: str | None = None
-            for filt in self.filters:
-                verdict = filt.evaluate(trial)
-                verdicts.append(verdict)
-                if not verdict.accepted:
-                    first_failed = type(filt).__name__
-                    break
-            yield Record(
-                trial=trial,
-                verdicts=tuple(verdicts),
-                first_failed=first_failed,
-                result=verdicts[-1].detail if verdicts else None,
-            )
+            yield evaluate_trial(trial, self.filters)
 
     def accepted(
         self,

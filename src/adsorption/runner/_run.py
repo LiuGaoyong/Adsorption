@@ -6,11 +6,15 @@ The site source is adaptive: ``auto`` selects the top layer, a core list is
 explicit, and a mapping can select the GraphAtoms enumeration. The adsorbate
 source is adaptive too: rotatable bonds select an ETKDG ensemble, otherwise
 the single adsorbate is used. Candidate intervals are evaluated in parallel
-with :mod:`joblib`.
+with :mod:`joblib`, or with :mod:`ray` actors behind a
+:class:`ray.util.ActorPool` when Ray is installed. Ray is optional: the
+parallel engine defaults to Ray when it can be imported and to joblib
+otherwise.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import math
@@ -25,12 +29,17 @@ from typing import Any
 
 import numpy as np
 import yaml
+from ase import Atoms
 from ase.io import write as ase_write
 from hydra.utils import instantiate
 from joblib import Parallel, cpu_count, delayed
 
-from adsorption.base import AdsorptionConfigurationFilterABC
-from adsorption.base.pipeline import AdsorptionConfigurationPipeline, Record
+from adsorption.base import AdsorptionConfigurationFilterABC, Trial
+from adsorption.base.pipeline import (
+    AdsorptionConfigurationPipeline,
+    Record,
+    evaluate_trial,
+)
 from adsorption.generate import (
     AdsorptionConfigurationGenerator,
     Sampling,
@@ -86,6 +95,9 @@ class RunSummary:
         n_sites: Number of resolved adsorption sites.
         n_conformers: Number of adsorbate conformers.
         n_rotatable_bonds: Detected rotatable-bond count.
+        engine: Resolved parallel engine: ``"serial"``, ``"joblib"`` or
+            ``"ray"``.
+        n_actors: Number of Ray filter actors; ``0`` for the other engines.
     """
 
     total: int
@@ -100,6 +112,8 @@ class RunSummary:
     n_sites: int
     n_conformers: int
     n_rotatable_bonds: int
+    engine: str = "serial"
+    n_actors: int = 0
 
 
 def load_config(config: str | Path | Mapping[str, Any]) -> dict[str, Any]:
@@ -457,6 +471,36 @@ def _record_payload(
     }
 
 
+def _accepted_atoms(record: Record) -> Atoms | None:
+    """Return the accepted structure of one record, or ``None``.
+
+    The structure is detached from its calculator and carries the provenance
+    that the accepted-XYZ sidecar publishes.
+
+    Args:
+        record: The evaluated record.
+
+    Returns:
+        Atoms | None: A copy of the accepted trial, or ``None`` when the
+        record was rejected.
+    """
+    if record.first_failed is not None:
+        return None
+    atoms = record.trial.atoms.copy()
+    atoms.calc = None
+    meta = record.trial.meta
+    atoms.info = {
+        "index": int(record.trial.index),
+        "site": int(meta.get("site", 0)),
+        "conformer": int(meta.get("conformer", 0)),
+        "i": int(meta.get("i", 0)),
+        "j": int(meta.get("j", 0)),
+        "k": int(meta.get("k", 0)),
+        "distance": float(meta.get("distance", 0.0)),
+    }
+    return atoms
+
+
 def _run_interval(
     generator: Any,
     filters: Sequence[AdsorptionConfigurationFilterABC],
@@ -482,24 +526,14 @@ def _run_interval(
                 failures[record.first_failed] += 1
                 continue
             accepted += 1
-            atoms = record.trial.atoms.copy()
-            atoms.calc = None
-            meta = record.trial.meta
-            atoms.info = {
-                "index": int(record.trial.index),
-                "site": int(meta.get("site", 0)),
-                "conformer": int(meta.get("conformer", 0)),
-                "i": int(meta.get("i", 0)),
-                "j": int(meta.get("j", 0)),
-                "k": int(meta.get("k", 0)),
-                "distance": float(meta.get("distance", 0.0)),
-            }
-            ase_write(
-                xyz_path,
-                atoms,
-                format="extxyz",
-                append=xyz_path.exists(),
-            )
+            atoms = _accepted_atoms(record)
+            if atoms is not None:
+                ase_write(
+                    xyz_path,
+                    atoms,
+                    format="extxyz",
+                    append=xyz_path.exists(),
+                )
     return {
         "total": total,
         "accepted": accepted,
@@ -525,16 +559,19 @@ def _workers(n_jobs: int) -> int:
     return max(1, n_jobs)
 
 
+_THREAD_ENV = (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+)
+
+
 def _init_worker(threads: int) -> None:
-    """Limit BLAS and Torch threads in one joblib worker process."""
+    """Limit BLAS and Torch threads in one worker process."""
     if int(threads) < 1:
         return
-    for name in (
-        "OMP_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-    ):
+    for name in _THREAD_ENV:
         os.environ[name] = str(int(threads))
     try:
         import torch  # noqa: PLC0415 - optional dependency
@@ -543,11 +580,390 @@ def _init_worker(threads: int) -> None:
     torch.set_num_threads(int(threads))
 
 
+_PARALLEL_ENGINES = ("auto", "joblib", "ray")
+
+
+@dataclass(frozen=True)
+class _TrialVerdict:
+    """One trial evaluated by a filter actor.
+
+    Attributes:
+        payload: The JSON-safe record payload of the trial.
+        atoms: The accepted structure, or ``None`` when the trial was
+            rejected.
+    """
+
+    payload: dict[str, Any]
+    atoms: Atoms | None = None
+
+
+class _FilterActor:
+    """Process-B actor: evaluate trials with a private filter chain.
+
+    The actor owns its own copy of the filters, so a stateful filter such as
+    the energetic tier never shares its caches between workers. It receives
+    the :class:`~adsorption.base.Trial` objects generated by process A and
+    returns one :class:`_TrialVerdict` per trial. Ray turns this class into a
+    remote actor; the class itself is a plain object so it can be tested
+    without Ray.
+    """
+
+    def __init__(
+        self,
+        filters: Sequence[AdsorptionConfigurationFilterABC],
+        threads: int = 0,
+    ) -> None:
+        """Store a private copy of the filter chain.
+
+        Args:
+            filters: Process-B tiers, applied in order.
+            threads: BLAS and Torch thread budget of this actor; ``0``
+                leaves the process defaults untouched.
+        """
+        _init_worker(int(threads))
+        self._filters: tuple[AdsorptionConfigurationFilterABC, ...] = tuple(
+            filters
+        )
+
+    def evaluate(self, trial: Trial) -> _TrialVerdict:
+        """Evaluate one trial through the filter chain.
+
+        Args:
+            trial: The trial generated by process A.
+
+        Returns:
+            _TrialVerdict: The record payload and the accepted structure, if
+            any.
+        """
+        record = evaluate_trial(trial, self._filters)
+        return _TrialVerdict(
+            payload=_record_payload(record, self._filters),
+            atoms=_accepted_atoms(record),
+        )
+
+
+def _ray_available() -> bool:
+    """Return whether the optional Ray dependency can be imported."""
+    return importlib.util.find_spec("ray") is not None
+
+
+def _resolve_engine(requested: str, n_jobs: int) -> str:
+    """Resolve the configured parallel engine.
+
+    Each candidate is evaluated either in the driver process (``"serial"``),
+    by joblib worker processes (``"joblib"``) or by Ray filter actors
+    (``"ray"``).
+
+    Args:
+        requested: ``"auto"``, ``"joblib"`` or ``"ray"``.
+        n_jobs: Configured joblib worker count.
+
+    Returns:
+        str: The resolved engine.
+
+    Raises:
+        ValueError: If the engine name is unknown.
+        ImportError: If Ray is requested but not installed.
+    """
+    mode = str(requested).strip().lower()
+    if mode not in _PARALLEL_ENGINES:
+        raise ValueError(
+            f"Unknown parallel engine: {requested!r}; expected one of "
+            f"{_PARALLEL_ENGINES}."
+        )
+    if mode == "auto":
+        if n_jobs == 1:
+            return "serial"
+        return "ray" if _ray_available() else "joblib"
+    if mode == "ray":
+        if not _ray_available():
+            raise ImportError(
+                "parallel.engine='ray' requires the optional ray dependency; "
+                "install it with `pip install 'adsorption[ray]'`."
+            )
+        return "ray"
+    return "serial" if n_jobs == 1 else "joblib"
+
+
+def _setup_ray(
+    workers: int,
+    cpus_per_actor: int,
+    address: str | None,
+) -> tuple[Any, int, int]:
+    """Initialise Ray and size the actor pool.
+
+    A local Ray instance is started with exactly as many logical CPUs as the
+    configured workers need, so the actor count follows ``parallel.n_jobs``
+    and every actor receives ``parallel.threads_per_worker`` CPUs. When an
+    existing cluster is reused, the pool is clamped to the CPUs it advertises.
+    An existing local instance is reused as-is.
+
+    Args:
+        workers: Configured worker count, i.e. the desired actor count.
+        cpus_per_actor: CPUs reserved by one actor.
+        address: Ray cluster address, or ``None`` for a local instance.
+
+    Returns:
+        tuple[Any, int, int]: The imported ``ray`` module, the actor count
+        and the CPU reservation per actor.
+
+    Raises:
+        Exception: If Ray cannot be initialised.
+    """
+    import ray  # noqa: PLC0415 - optional dependency # type: ignore
+
+    cpus = max(1, int(cpus_per_actor))
+    started_here = not ray.is_initialized()
+    try:
+        if started_here:
+            if address:
+                ray.init(address=str(address), ignore_reinit_error=True)
+            else:
+                ray.init(
+                    num_cpus=max(1, int(workers) * cpus),
+                    ignore_reinit_error=True,
+                    include_dashboard=False,
+                )
+        total = float(ray.cluster_resources().get("CPU", 0.0))
+        if total < cpus:
+            return ray, 1, max(1, int(total))
+        actors = max(1, min(int(workers), int(total // cpus)))
+        return ray, actors, cpus
+    except Exception:
+        if started_here and ray.is_initialized():
+            ray.shutdown()
+        raise
+
+
+def _run_ray(
+    generator: Any,
+    filters: Sequence[AdsorptionConfigurationFilterABC],
+    records_path: Path,
+    accepted_xyz_path: Path,
+    *,
+    first: int,
+    last: int,
+    workers: int,
+    threads_per_worker: int,
+    chunk_factor: int,
+    address: str | None,
+    allow_fallback: bool,
+) -> tuple[dict[str, Any] | None, int]:
+    """Evaluate an index interval with a Ray actor pool.
+
+    The generator runs in the driver process and yields
+    :class:`~adsorption.base.Trial` objects; every trial is submitted to one
+    actor of a :class:`ray.util.ActorPool`. A bounded in-flight window keeps
+    memory flat; results are drained as they finish and reordered by candidate
+    index before writing, so the sidecars stay in candidate-index order
+    without making a slow trial stall the other actors.
+
+    Args:
+        generator: Process A, iterated in this process.
+        filters: Process-B tiers, copied into every actor.
+        records_path: Path of the JSONL sidecar to write.
+        accepted_xyz_path: Path of the accepted-XYZ sidecar to write.
+        first: First one-based index (inclusive).
+        last: Last one-based index (inclusive).
+        workers: Configured worker count, i.e. the desired actor count.
+        threads_per_worker: BLAS and Torch thread budget and CPU reservation
+            of one actor.
+        chunk_factor: In-flight window multiplier over the actor count.
+        address: Ray cluster address, or ``None`` for a local instance.
+        allow_fallback: Whether an unavailable Ray falls back to joblib.
+
+    Returns:
+        tuple[dict[str, Any] | None, int]: The interval statistics and the
+        actor count, or ``(None, 0)`` when Ray is unavailable and a fallback
+        is allowed.
+    """
+    try:
+        import ray  # noqa: PLC0415 - optional dependency # type: ignore
+        from ray.util.actor_pool import ActorPool  # noqa: PLC0415 # type: ignore
+    except Exception as error:  # noqa: BLE001 - fallback needs any failure
+        if allow_fallback:
+            _LOG.warning("Ray is not importable (%s); using joblib.", error)
+            return None, 0
+        raise
+
+    try:
+        ray, n_actors, cpus = _setup_ray(
+            workers, max(1, int(threads_per_worker)), address
+        )
+    except Exception as error:
+        if allow_fallback:
+            _LOG.warning("Ray could not start (%s); using joblib.", error)
+            return None, 0
+        raise
+
+    actor_cls = ray.remote(num_cpus=cpus)(_FilterActor)
+    filters_ref = ray.put(tuple(filters))
+    actors: list[Any] = []
+    window = max(1, int(n_actors) * max(1, int(chunk_factor)))
+    trials = generator.generate(first, last)
+    pending = 0
+    exhausted = False
+    total = 0
+    accepted = 0
+    failures: Counter[str] = Counter()
+
+    def submit(actor: Any, trial: Trial) -> Any:
+        return actor.evaluate.remote(trial)
+
+    try:
+        for _ in range(n_actors):
+            actors.append(
+                actor_cls.remote(filters_ref, int(threads_per_worker))
+            )
+        pool = ActorPool(actors)
+        buffer: dict[int, _TrialVerdict] = {}
+        next_index = int(first)
+        with records_path.open("w", encoding="utf-8") as stream:
+
+            def consume(result: _TrialVerdict) -> None:
+                nonlocal total, accepted
+                stream.write(
+                    json.dumps(result.payload, ensure_ascii=False) + "\n"
+                )
+                total += 1
+                failed = result.payload["first_failed"]
+                if failed is not None:
+                    failures[str(failed)] += 1
+                    return
+                accepted += 1
+                if result.atoms is not None:
+                    ase_write(
+                        accepted_xyz_path,
+                        result.atoms,
+                        format="extxyz",
+                        append=accepted_xyz_path.exists(),
+                    )
+
+            while True:
+                while not exhausted and pending < window:
+                    try:
+                        trial = next(trials)
+                    except StopIteration:
+                        exhausted = True
+                        break
+                    pool.submit(submit, trial)
+                    pending += 1
+                if pending == 0:
+                    break
+                result = pool.get_next_unordered()
+                pending -= 1
+                buffer[int(result.payload["index"])] = result
+                while next_index in buffer:
+                    consume(buffer.pop(next_index))
+                    next_index += 1
+            for index in sorted(buffer):
+                consume(buffer.pop(index))
+    finally:
+        for actor in actors:
+            try:
+                ray.kill(actor, no_restart=True)
+            except Exception:  # noqa: BLE001 - best-effort cleanup
+                pass
+
+    accepted_xyz_path.touch(exist_ok=True)
+    return {
+        "total": total,
+        "accepted": accepted,
+        "first_failed": dict(failures),
+    }, n_actors
+
+
+def _run_chunks(
+    generator: Any,
+    filters: Sequence[AdsorptionConfigurationFilterABC],
+    records_path: Path,
+    accepted_xyz_path: Path,
+    *,
+    first: int,
+    last: int,
+    output_dir: Path,
+    n_jobs: int,
+    backend: str,
+    workers: int,
+    chunk_factor: int,
+    threads_per_worker: int,
+    verbose: int,
+) -> list[dict[str, Any]]:
+    """Evaluate an index interval in chunks and merge the chunk sidecars.
+
+    Args:
+        generator: Process A.
+        filters: Process-B tiers.
+        records_path: Path of the merged JSONL sidecar.
+        accepted_xyz_path: Path of the merged accepted-XYZ sidecar.
+        first: First one-based index (inclusive).
+        last: Last one-based index (inclusive).
+        output_dir: Campaign output directory.
+        n_jobs: Configured joblib worker count.
+        backend: joblib backend.
+        workers: Effective worker count used for chunk sizing.
+        chunk_factor: Chunks per worker.
+        threads_per_worker: BLAS and Torch thread budget per worker.
+        verbose: joblib verbosity.
+
+    Returns:
+        list[dict[str, Any]]: One interval statistic per chunk.
+    """
+    chunks_dir = output_dir / ".chunks"
+    if chunks_dir.exists():
+        shutil.rmtree(chunks_dir)
+    chunks_dir.mkdir()
+
+    chunk_count = (
+        1 if n_jobs == 1 else min(last - first + 1, workers * chunk_factor)
+    )
+    ranges = _split(first, last, chunk_count)
+    paths = [
+        chunks_dir / f"chunk_{index:05d}.jsonl" for index in range(len(ranges))
+    ]
+    xyz_paths = [
+        chunks_dir / f"chunk_{index:05d}.xyz" for index in range(len(ranges))
+    ]
+    if n_jobs == 1:
+        results = [
+            _run_interval(generator, filters, begin, end, path, xyz_path)
+            for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
+        ]
+    else:
+        results = Parallel(
+            n_jobs=n_jobs,
+            backend=backend,
+            verbose=verbose,
+            initializer=_init_worker,
+            initargs=(threads_per_worker,),
+        )(
+            delayed(_run_interval)(
+                generator, filters, begin, end, path, xyz_path
+            )
+            for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
+        )
+
+    with records_path.open("w", encoding="utf-8") as stream:
+        for path in paths:
+            with path.open("r", encoding="utf-8") as chunk:
+                shutil.copyfileobj(chunk, stream)
+            path.unlink()
+    with accepted_xyz_path.open("w", encoding="utf-8") as stream:
+        for xyz_path in xyz_paths:
+            if xyz_path.exists():
+                with xyz_path.open("r", encoding="utf-8") as chunk:
+                    shutil.copyfileobj(chunk, stream)
+                xyz_path.unlink()
+    chunks_dir.rmdir()
+    return results
+
+
 def run_config(
     cfg: str | Path | Mapping[str, Any],
     *,
     n_jobs: int | None = None,
     backend: str | None = None,
+    engine: str | None = None,
     output: str | Path | None = None,
     start: int | None = None,
     stop: int | None = None,
@@ -557,8 +973,10 @@ def run_config(
 
     Args:
         cfg: A mapping, or the path of a single YAML file.
-        n_jobs: joblib worker count; ``None`` uses ``parallel.n_jobs``.
+        n_jobs: worker and actor count; ``None`` uses ``parallel.n_jobs``.
         backend: joblib backend; ``None`` uses ``parallel.backend``.
+        engine: Parallel engine (``"auto"``, ``"joblib"`` or ``"ray"``);
+            ``None`` uses ``parallel.engine``.
         output: Output directory; ``None`` uses ``outputs``.
         start: First one-based index; ``None`` uses ``start``.
         stop: Last one-based index; ``None`` uses ``stop`` or the total.
@@ -568,7 +986,9 @@ def run_config(
         RunSummary: The campaign totals and output paths.
 
     Raises:
-        ValueError: If the interval or the candidate budget is invalid.
+        ValueError: If the interval, the candidate budget or a parallel
+            setting is invalid.
+        ImportError: If Ray is requested but not installed.
     """
     config = load_config(cfg)
     parallel_cfg = config.get("parallel", {})
@@ -576,6 +996,10 @@ def run_config(
     backend = str(
         parallel_cfg.get("backend", "loky") if backend is None else backend
     )
+    requested_engine = str(
+        parallel_cfg.get("engine", "auto") if engine is None else engine
+    )
+    ray_address = parallel_cfg.get("ray_address")
     if n_jobs == 0:
         raise ValueError("n_jobs must not be zero.")
     workers = _workers(n_jobs)
@@ -595,6 +1019,7 @@ def run_config(
             "parallel.threads_per_worker must be non-negative, got "
             f"{threads_per_worker}."
         )
+    selected_engine = _resolve_engine(requested_engine, n_jobs)
 
     generator, info = _build_generator(config)
     filters = _build_filters(config)
@@ -629,56 +1054,63 @@ def run_config(
         raise ValueError("outputs must be set in the configuration.")
     output_dir = Path(raw_output).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
-    chunks_dir = output_dir / ".chunks"
-    if chunks_dir.exists():
-        shutil.rmtree(chunks_dir)
-    chunks_dir.mkdir()
+    records_path = output_dir / "records.jsonl"
+    accepted_xyz_path = output_dir / "accepted.xyz"
 
-    chunk_count = (
-        1 if n_jobs == 1 else min(last - first + 1, workers * chunk_factor)
-    )
-    ranges = _split(first, last, chunk_count)
-    paths = [
-        chunks_dir / f"chunk_{index:05d}.jsonl" for index in range(len(ranges))
-    ]
-    xyz_paths = [
-        chunks_dir / f"chunk_{index:05d}.xyz" for index in range(len(ranges))
-    ]
     started = time.perf_counter()
-    if n_jobs == 1:
-        results = [
-            _run_interval(generator, filters, begin, end, path, xyz_path)
-            for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
-        ]
+    current_engine = selected_engine
+    n_actors = 0
+    if current_engine == "ray":
+        ray_results, n_actors = _run_ray(
+            generator,
+            filters,
+            records_path,
+            accepted_xyz_path,
+            first=first,
+            last=last,
+            workers=workers,
+            threads_per_worker=threads_per_worker,
+            chunk_factor=chunk_factor,
+            address=None if ray_address is None else str(ray_address),
+            allow_fallback=str(requested_engine).strip().lower() == "auto",
+        )
+        if ray_results is None:
+            current_engine = "joblib"
+            n_actors = 0
+            results = _run_chunks(
+                generator,
+                filters,
+                records_path,
+                accepted_xyz_path,
+                first=first,
+                last=last,
+                output_dir=output_dir,
+                n_jobs=n_jobs,
+                backend=backend,
+                workers=workers,
+                chunk_factor=chunk_factor,
+                threads_per_worker=threads_per_worker,
+                verbose=verbose,
+            )
+        else:
+            results = [ray_results]
     else:
-        results = Parallel(
+        results = _run_chunks(
+            generator,
+            filters,
+            records_path,
+            accepted_xyz_path,
+            first=first,
+            last=last,
+            output_dir=output_dir,
             n_jobs=n_jobs,
             backend=backend,
+            workers=workers,
+            chunk_factor=chunk_factor,
+            threads_per_worker=threads_per_worker,
             verbose=verbose,
-            initializer=_init_worker,
-            initargs=(threads_per_worker,),
-        )(
-            delayed(_run_interval)(
-                generator, filters, begin, end, path, xyz_path
-            )
-            for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
         )
     seconds = time.perf_counter() - started
-
-    records_path = output_dir / "records.jsonl"
-    with records_path.open("w", encoding="utf-8") as stream:
-        for path in paths:
-            with path.open("r", encoding="utf-8") as chunk:
-                shutil.copyfileobj(chunk, stream)
-            path.unlink()
-    accepted_xyz_path = output_dir / "accepted.xyz"
-    with accepted_xyz_path.open("w", encoding="utf-8") as stream:
-        for xyz_path in xyz_paths:
-            if xyz_path.exists():
-                with xyz_path.open("r", encoding="utf-8") as chunk:
-                    shutil.copyfileobj(chunk, stream)
-                xyz_path.unlink()
-    chunks_dir.rmdir()
 
     total = sum(int(result["total"]) for result in results)
     accepted = sum(int(result["accepted"]) for result in results)
@@ -694,7 +1126,9 @@ def run_config(
         "start": first,
         "stop": last,
         "n_jobs": n_jobs,
-        "backend": backend,
+        "engine": current_engine,
+        "backend": "ray" if current_engine == "ray" else backend,
+        "n_actors": n_actors,
         "seconds": seconds,
         "n_sites": info["n_sites"],
         "n_conformers": info["n_conformers"],
@@ -719,4 +1153,6 @@ def run_config(
         n_sites=info["n_sites"],
         n_conformers=info["n_conformers"],
         n_rotatable_bonds=info["n_rotatable_bonds"],
+        engine=current_engine,
+        n_actors=n_actors,
     )

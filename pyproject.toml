@@ -36,6 +36,11 @@ dependencies = [
     "pyyaml>=6",
 ]
 
+[project.optional-dependencies]
+# Optional parallel backend: the runner uses Ray when it is installed.
+ray = ["ray[default]>=2.50"]
+nequip = ["nequip>=0.17.0"]
+
 [project.scripts]
 adsorption-run = "adsorption.runner:run"
 
@@ -47,6 +52,7 @@ dev = [
     "jupyterlab",
     "matplotlib>=3.8",
     "nequip>=0.17.0",
+    "ray[default]>=2.50"
 ]
 
 # uv config
@@ -114,3 +120,4 @@ pytest-xdist = ">=3.8.0"
 jupyterlab = ">=4.5.8"
 hydra-core = ">=1.0"
 nequip = ">=0.17.0"
+ray-default = ">=2.50"
