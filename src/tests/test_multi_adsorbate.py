@@ -6,7 +6,7 @@ import pytest
 from ase import Atoms
 from ase.build import fcc111, molecule
 
-from adsorption.adsorbate import ExplicitEnsemble, RigidAdsorbate
+from adsorption.generate.adsorbate import ExplicitEnsemble, RigidAdsorbate
 from adsorption.generate import AdsorptionConfigurationGenerator, Sampling
 from adsorption.geometry import (
     ExplicitSites,

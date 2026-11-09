@@ -50,8 +50,9 @@ def detect_shape(
         return "fixed"
     if moments[0] / total < linear_tol:
         return "s2"
-    if abs(moments[2] - moments[0] - moments[1]) / total < planar_tol:
-        return "so3"
+    # if abs(moments[2] - moments[0] - moments[1]) / total < planar_tol:
+    #     TODO: do something when the adsorbate is planar.
+    #     return "so3"
     return "so3"
 
 
@@ -83,7 +84,11 @@ def build_orientation(
     if kind not in {"auto", "fixed", "s2", "so3"}:
         raise ValueError(f"Unknown orientation kind: {kind!r}.")
     resolved = (
-        detect_shape(adsorbate, linear_tol=linear_tol, planar_tol=planar_tol)
+        detect_shape(
+            adsorbate=adsorbate,
+            linear_tol=linear_tol,
+            planar_tol=planar_tol,
+        )
         if kind == "auto"
         else kind
     )

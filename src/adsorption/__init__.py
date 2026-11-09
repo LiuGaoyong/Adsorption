@@ -1,8 +1,7 @@
 """Adsorption: geometric pre-screening of adsorption configurations."""
 
-from adsorption.adsorbate import (
+from adsorption.generate.adsorbate import (
     AdsorbateSource,
-    Conformer,
     ETKDGEnsemble,
     ExplicitEnsemble,
     RigidAdsorbate,
@@ -46,7 +45,6 @@ __all__ = [
     "AdsorptionConfigurationGeneratorABC",
     "AdsorptionConfigurationPipeline",
     "BoundAdsorbate",
-    "Conformer",
     "ETKDGEnsemble",
     "ExplicitEnsemble",
     "ExplicitSites",

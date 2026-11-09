@@ -21,7 +21,7 @@ from adsorption.geometry.grids import DirectionGrid, FibonacciGrid
 from adsorption.geometry.rotations import RotationSet
 
 if TYPE_CHECKING:
-    from adsorption.adsorbate.rigid import RigidAdsorbate
+    from adsorption.generate.adsorbate import RigidAdsorbate
 
 __all__ = [
     "BoundAdsorbate",

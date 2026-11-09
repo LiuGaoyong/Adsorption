@@ -71,3 +71,18 @@ def test_several_sites_build_the_multi_site_space() -> None:
     assert type(generator) is AdsorptionConfigurationGenerator
     assert info["n_sites"] == 2
     assert info["n_conformers"] == 1
+
+
+def test_rotamer_mode_builds_the_ensemble() -> None:
+    cfg = _config([[4]])
+    cfg["adsorbate"] = {
+        "smiles": "CCCC",
+        "conformers": "rotamers",
+        "dihedrals": [60.0, 180.0, 300.0],
+        "max_rotamers": 4,
+        "charge": 0,
+    }
+    generator, info = _build_generator(cfg)
+    assert type(generator) is AdsorptionConfigurationGenerator
+    assert info["n_conformers"] == 3
+    assert info["n_rotatable_bonds"] == 1

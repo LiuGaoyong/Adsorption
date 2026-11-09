@@ -29,9 +29,10 @@ from ase.io import write as ase_write
 from hydra.utils import instantiate
 from joblib import Parallel, cpu_count, delayed
 
-from adsorption.adsorbate import (
+from adsorption.generate.adsorbate import (
     AdsorbateSource,
     ETKDGEnsemble,
+    RotamerEnsemble,
     SingleAdsorbate,
 )
 from adsorption.base import AdsorptionConfigurationFilterABC
@@ -59,6 +60,8 @@ _ADSORBATE_KEYS = (
     "conformer_seed",
     "prune_rmsd",
     "charge",
+    "dihedrals",
+    "max_rotamers",
 )
 
 
@@ -225,6 +228,8 @@ def _adsorbate_parts(
         "conformer_seed": node.pop("conformer_seed", 20261030),
         "prune_rmsd": node.pop("prune_rmsd", 0.5),
         "charge": node.pop("charge", 0),
+        "dihedrals": node.pop("dihedrals", (60.0, 180.0, 300.0)),
+        "max_rotamers": node.pop("max_rotamers", 64),
     }
     return node, settings
 
@@ -270,6 +275,19 @@ def _build_adsorbate_source(
     mode = str(settings["conformers"]).strip().lower()
     if mode in {"none", "false", "off", "rigid"}:
         return SingleAdsorbate(adsorbate, anchor=anchor), n_rotatable
+    if mode in {"rotamer", "rotamers"}:
+        source: Any = smiles if smiles is not None else adsorbate
+        return (
+            RotamerEnsemble(
+                source,
+                dihedrals=settings["dihedrals"],
+                max_rotamers=int(settings["max_rotamers"]),
+                anchor=anchor,
+                charge=int(settings["charge"]),
+                label_prefix=adsorbate.get_chemical_formula(),
+            ),
+            n_rotatable,
+        )
     if mode not in {"auto", "true", "yes", "all", "generate"}:
         raise ValueError(
             f"Unknown conformers mode: {settings['conformers']!r}."

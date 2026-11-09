@@ -15,11 +15,17 @@ adsorbate:
   # A SMILES source is enough; _target_ can be used for an ASE structure.
   smiles: CCCC
   # auto: generate conformers only when rotatable bonds are detected.
+  # rotamers: rotate the RDKit-detected rotatable bonds with ASE at the
+  #           declared dihedral angles; no random embedding is involved.
   conformers: auto
   n_conformers: 8
   conformer_seed: 20261030
   prune_rmsd: 0.5
   charge: 0
+  # Only used by `conformers: rotamers`:
+  # dihedrals: [60, 180, 300]              # one grid shared by every rotor
+  # dihedrals: [[60, 180], [180], [60, 180, 300]]  # one grid per rotor
+  # max_rotamers: 64
 
 # "auto" selects every top-layer atom as a top site. A flat list of integers is
 # one core set; a list of lists declares several sites explicitly.

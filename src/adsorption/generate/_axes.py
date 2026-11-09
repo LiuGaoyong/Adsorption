@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from adsorption.adsorbate.rigid import RigidAdsorbate
+from adsorption.generate.adsorbate import RigidAdsorbate
 from adsorption.generate._component import _Component
 from adsorption.generate.sampling import BoundAdsorbate, Sampling
 

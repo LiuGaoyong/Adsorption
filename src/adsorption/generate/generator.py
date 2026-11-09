@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 from ase import Atoms
 
-from adsorption.adsorbate.rigid import (
+from adsorption.generate.adsorbate import (
     AdsorbateSource,
     RigidAdsorbate,
     SingleAdsorbate,

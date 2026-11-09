@@ -8,7 +8,7 @@ import pytest
 from ase import Atoms
 from ase.build import fcc111, molecule
 
-from adsorption.adsorbate import RotamerEnsemble
+from adsorption.generate.adsorbate import RotamerEnsemble
 from adsorption.generate import (
     AdsorptionConfigurationGenerator,
     Sampling,
@@ -127,7 +127,38 @@ def test_rotamer_enumeration_is_deterministic() -> None:
     first = RotamerEnsemble("CCCCCC", max_rotamers=4).resolve()
     second = RotamerEnsemble("CCCCCC", max_rotamers=4).resolve()
     assert len(first) == len(second)
-    assert [tuple(r.provenance["angles"]) for r in first] == [
-        tuple(r.provenance["angles"]) for r in second
+    assert [tuple(r.provenance["dihedrals"]) for r in first] == [
+        tuple(r.provenance["dihedrals"]) for r in second
     ]
     assert all(r.provenance["n_rotors"] == 3 for r in first)
+
+
+def test_flat_dihedral_sequence_is_a_grid() -> None:
+    pytest.importorskip("rdkit")
+    rigids = RotamerEnsemble(
+        "CCCCCC",
+        dihedrals=(60.0, 180.0, 300.0),
+        max_rotamers=9,
+    ).resolve()
+    assert len(rigids) == 9
+    assert all(rigid.provenance["truncated"] for rigid in rigids)
+
+
+def test_ase_dihedrals_match_the_requested_sequence() -> None:
+    pytest.importorskip("rdkit")
+    from adsorption.generate.adsorbate import _prepare, _rotatable_bonds
+
+    molecule, atoms = _prepare("CCCCCC", 0, 20261030)
+    rotors = _rotatable_bonds(molecule)
+    rigids = RotamerEnsemble(
+        atoms,
+        dihedrals=[[60.0, 180.0], [180.0], [60.0, 300.0]],
+        max_rotamers=2,
+    ).resolve()
+    assert len(rigids) == 2
+    for rigid in rigids:
+        targets = rigid.provenance["dihedrals"]
+        for rotor, target in zip(rotors, targets):
+            assert rigid.atoms.get_dihedral(*rotor) == pytest.approx(
+                target, abs=1e-6
+            )
