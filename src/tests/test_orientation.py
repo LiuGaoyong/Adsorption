@@ -18,14 +18,14 @@ def test_detect_shape() -> None:
 
 
 def test_explicit_kind() -> None:
-    reference = molecule("CO")
-    kind, orientation = build_orientation("fixed", reference, n=8)
+    adsorbate = molecule("CO")
+    kind, orientation = build_orientation("fixed", adsorbate, n=8)
     assert kind == "fixed"
     assert orientation.count() == 1
-    kind, orientation = build_orientation("s2", reference, n=8)
+    kind, orientation = build_orientation("s2", adsorbate, n=8)
     assert kind == "s2"
     assert isinstance(orientation, ShortestArcSet)
-    kind, orientation = build_orientation("so3", reference, n=8)
+    kind, orientation = build_orientation("so3", adsorbate, n=8)
     assert kind == "so3"
     assert isinstance(orientation, SuperFibonacciSO3)
 

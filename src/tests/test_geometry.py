@@ -129,9 +129,7 @@ def test_distance_array_from_the_count() -> None:
 
 
 def test_unit_vector_normalises_a_batch() -> None:
-    vectors = np.array(
-        [[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, -4.0]]
-    )
+    vectors = np.array([[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, -4.0]])
     unit = unit_vector(vectors)
     assert unit.shape == vectors.shape
     assert np.allclose(np.linalg.norm(unit, axis=1), 1.0)
@@ -182,25 +180,28 @@ def test_anchor_resolution() -> None:
     with pytest.raises(ValueError):
         resolve_anchor(adsorbate, 7)
     with pytest.raises(ValueError):
-        resolve_anchor(adsorbate, "binding_atom")
+        resolve_anchor(adsorbate, "binding_atom")  # type: ignore
     with pytest.raises(ValueError):
         resolve_anchor(adsorbate, [1.0, 2.0])
 
 
 def test_place_is_rigid_and_does_not_mutate() -> None:
-    reference = Atoms("CO")
-    anchor = resolve_anchor(reference, "com")
-    before = reference.positions.copy()
-    quaternion = shortest_arc_quaternion([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
+    adsorbate = Atoms("CO")
+    anchor = resolve_anchor(adsorbate, "com")
+    before = adsorbate.positions.copy()
+    quaternion = shortest_arc_quaternion(
+        np.array([0.0, 0.0, 1.0]),
+        np.array([1.0, 0.0, 0.0]),
+    )
     target = np.array([1.0, 2.0, 3.0])
     placed = place(
-        reference,
+        adsorbate,
         anchor=anchor,
         target=target,
         quaternion=quaternion,
     )
 
-    assert np.array_equal(reference.positions, before)
+    assert np.array_equal(adsorbate.positions, before)
     bond = (before[0] - before[1])[None, :]
     assert np.allclose(
         placed.positions[0] - placed.positions[1],
@@ -228,9 +229,13 @@ def test_first_neighbor_shell_matches_brute_force(slab: Atoms) -> None:
         + COV_R[slab.numbers[np.tile(indices, len(core))]]
         + DELTA_NBR
     )
-    expected = np.setdiff1d(np.unique(np.tile(indices, len(core))[distances < cutoff]), core)
+    expected = np.setdiff1d(
+        np.unique(np.tile(indices, len(core))[distances < cutoff]), core
+    )
     assert np.array_equal(shell, expected)
-    assert np.allclose(slab.get_distances(core[0], shell, mic=True).min(), 2.55, atol=0.1)
+    assert np.allclose(
+        slab.get_distances(core[0], shell, mic=True).min(), 2.55, atol=0.1
+    )
 
 
 def test_site_geometry_defaults(slab: Atoms, cluster: Atoms) -> None:
@@ -251,7 +256,9 @@ def test_site_geometry_defaults(slab: Atoms, cluster: Atoms) -> None:
     assert multi.skin == pytest.approx(default_skin(2))
     # a multi-core site keeps the core atoms in the filter set
     assert len(multi.filter_positions) == len(multi.neighbor_positions) + 2
-    assert np.allclose(multi.center, mean_mic(slab.positions[two], slab.cell.array, slab.pbc))
+    assert np.allclose(
+        multi.center, mean_mic(slab.positions[two], slab.cell.array, slab.pbc)
+    )
 
     cluster_index = cluster_top_index(cluster)
     cluster_site = build_site(cluster, [cluster_index])
@@ -264,7 +271,11 @@ def test_minimum_image_matches_ase(slab: Atoms) -> None:
     points_a = rng.uniform(-2, 6, size=(6, 3))
     points_b = rng.uniform(-2, 6, size=(4, 3))
     diff = points_b[None, :, :] - points_a[:, None, :]
-    expected = find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0]
+    expected = find_mic(
+        diff.reshape(-1, 3),
+        slab.cell,
+        slab.pbc,  # type: ignore
+    )[0]
     assert np.allclose(
         displacements_mic(diff, slab.cell.array, slab.pbc),
         expected.reshape(diff.shape),
@@ -313,9 +324,9 @@ def test_conformer_pruning_and_congruence() -> None:
     with pytest.raises(ValueError):
         near_congruent(water, methane)
 
-    references = [water, rotated, molecule("H2O")]
-    kept = prune_by_energy(references, [0.0, 0.05, 0.2], window=0.1)
+    adsorbates = [water, rotated, molecule("H2O")]
+    kept = prune_by_energy(adsorbates, [0.0, 0.05, 0.2], window=0.1)
     assert len(kept) == 2
     assert kept[0] is water and kept[1] is rotated
     with pytest.raises(ValueError):
-        prune_by_energy(references, [0.0], window=0.1)
+        prune_by_energy(adsorbates, [0.0], window=0.1)

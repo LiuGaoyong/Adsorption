@@ -24,10 +24,10 @@ def sites(slab: Atoms):
     return [build_site(slab, core=[0]), build_site(slab, core=[1])]
 
 
-def make(reference: Atoms, distances: list[float], label: str) -> Conformer:
+def make(adsorbate: Atoms, distances: list[float], label: str) -> Conformer:
     return Conformer(
-        reference=reference,
-        anchor=resolve_anchor(reference, "com"),
+        adsorbate=adsorbate,
+        anchor=resolve_anchor(adsorbate, "com"),
         orientation=SuperFibonacciSO3(2),
         distances=np.array(distances),
         label=label,
@@ -96,7 +96,9 @@ def test_components_derive_their_sites_from_core_indices(
 ) -> None:
     """Each single-site component keeps the core of the site it stands for."""
     for component in generator.components:
+        print("1", type(component))
         for single in component.components:
+            print("2", type(single))
             assert list(single.core) == list(single.site.core_indices)
             assert np.allclose(
                 single.site.center,

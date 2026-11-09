@@ -26,15 +26,15 @@ Shape = Literal["fixed", "s2", "so3", "auto"]
 
 
 def detect_shape(
-    reference: Atoms,
+    adsorbate: Atoms,
     *,
     linear_tol: float = 1e-3,
     planar_tol: float = 1e-3,
 ) -> Literal["fixed", "s2", "so3"]:
-    """Classify the reference structure by its principal moments.
+    """Classify the adsorbate by its principal moments.
 
     Args:
-        reference: The reference structure.
+        adsorbate: The adsorbate structure.
         linear_tol: Relative threshold on the smallest principal moment.
         planar_tol: Relative threshold on the planar identity
             ``I3 = I1 + I2``.
@@ -42,9 +42,9 @@ def detect_shape(
     Returns:
         str: ``"fixed"``, ``"s2"`` or ``"so3"``.
     """
-    if len(reference) <= 1:
+    if len(adsorbate) <= 1:
         return "fixed"
-    moments = np.asarray(reference.get_moments_of_inertia(), dtype=float)
+    moments = np.asarray(adsorbate.get_moments_of_inertia(), dtype=float)
     total = float(moments.sum())
     if not np.isfinite(total) or total <= 1e-12:
         return "fixed"
@@ -57,18 +57,18 @@ def detect_shape(
 
 def build_orientation(
     kind: Shape,
-    reference: Atoms,
+    adsorbate: Atoms,
     *,
     n: int,
     axis: np.ndarray | None = None,
     linear_tol: float = 1e-3,
     planar_tol: float = 1e-3,
 ) -> tuple[str, RotationSet]:
-    """Build the rotation set of a reference structure.
+    """Build the rotation set of an adsorbate.
 
     Args:
         kind: ``"auto"``, ``"fixed"``, ``"s2"`` or ``"so3"``.
-        reference: The reference structure.
+        adsorbate: The adsorbate structure.
         n: Number of orientations.
         axis: Optional body-frame reference axis.
         linear_tol: Linearity threshold forwarded to :func:`detect_shape`.
@@ -83,7 +83,7 @@ def build_orientation(
     if kind not in {"auto", "fixed", "s2", "so3"}:
         raise ValueError(f"Unknown orientation kind: {kind!r}.")
     resolved = (
-        detect_shape(reference, linear_tol=linear_tol, planar_tol=planar_tol)
+        detect_shape(adsorbate, linear_tol=linear_tol, planar_tol=planar_tol)
         if kind == "auto"
         else kind
     )

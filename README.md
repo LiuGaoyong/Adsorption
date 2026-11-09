@@ -84,7 +84,7 @@ instantiated with `hydra.utils.instantiate`.
 
 The runner detects the adsorbate's rotatable bonds: when it finds any, it
 builds a conformer ensemble and uses `MultiAdsorbateGenerator`; otherwise it
-uses the single reference. The site declaration is adaptive too: one core set
+uses the single adsorbate. The site declaration is adaptive too: one core set
 builds `SingleSiteGenerator`, several core sets build `MultiSiteGenerator`,
 and `sites: auto` selects every top-layer atom as a top site. Candidate
 intervals are evaluated in parallel with `joblib` (default backend `loky`);

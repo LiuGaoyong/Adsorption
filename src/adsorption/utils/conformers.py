@@ -103,7 +103,7 @@ def generate_conformers(
 
 
 def prune_by_energy(
-    references: Sequence[Atoms],
+    adsorbates: Sequence[Atoms],
     energies: Sequence[float],
     *,
     window: float = 0.0,
@@ -111,7 +111,7 @@ def prune_by_energy(
     """Keep the conformers within an energy window of the lowest one.
 
     Args:
-        references: The conformers, in their original order.
+        adsorbates: The conformers, in their original order.
         energies: One energy per conformer (same units as ``window``).
         window: Energy window above the minimum (inclusive).
 
@@ -121,10 +121,10 @@ def prune_by_energy(
     Raises:
         ValueError: If the lengths differ or the window is negative.
     """
-    if len(references) != len(energies):
+    if len(adsorbates) != len(energies):
         raise ValueError(
-            "references and energies must have the same length, got "
-            f"{len(references)} and {len(energies)}."
+            "adsorbates and energies must have the same length, got "
+            f"{len(adsorbates)} and {len(energies)}."
         )
     values = np.asarray(energies, dtype=float)
     if len(values) == 0:
@@ -135,8 +135,8 @@ def prune_by_energy(
         raise ValueError(f"window must be non-negative, got {window}.")
     threshold = float(values.min()) + float(window)
     return tuple(
-        reference
-        for reference, energy in zip(references, values)
+        adsorbate
+        for adsorbate, energy in zip(adsorbates, values)
         if float(energy) <= threshold
     )
 

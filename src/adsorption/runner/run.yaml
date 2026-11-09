@@ -12,7 +12,7 @@ substrate:
   periodic: true
 
 adsorbate:
-  # A SMILES source is enough; _target_ can be used for an ASE reference.
+  # A SMILES source is enough; _target_ can be used for an ASE structure.
   smiles: CCCC
   # auto: generate conformers only when rotatable bonds are detected.
   conformers: auto

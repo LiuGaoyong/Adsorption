@@ -1,6 +1,6 @@
 """Process A for one adsorption site: enumerate ``(OA, AB, d)``.
 
-``SingleSiteGenerator`` owns one adsorption site and one reference adsorbate.
+``SingleSiteGenerator`` owns one adsorption site and one adsorbate.
 It enumerates the approach direction on a near-uniform spherical point set
 (the spherical Fibonacci lattice by default), the molecular orientation on a
 rotation set, and the anchor distance on a one-dimensional array. The
@@ -71,8 +71,8 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
         substrate: The substrate structure.
         core: The core atom indices of the adsorption centre.
         site: The site geometry built from ``core``.
-        reference: The reference adsorbate.
-        anchor: The resolved anchor in the reference frame.
+        adsorbate: The adsorbate.
+        anchor: The resolved anchor in the adsorbate frame.
         orientation: The rotation set.
         distances: The anchor-centre distances, shape ``(n_d,)``.
         n_oa: Number of approach directions realised by the grid.
@@ -84,7 +84,7 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
         self,
         substrate: Atoms,
         core: int | Sequence[int] | np.ndarray,
-        reference: Atoms,
+        adsorbate: Atoms,
         *,
         n_oa: int = DEFAULT_N_OA,
         n_rot: int = DEFAULT_N_ROT,
@@ -108,7 +108,7 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
         Args:
             substrate: The substrate structure.
             core: Index (or indices) of the adsorption-centre core atoms.
-            reference: The reference adsorbate molecule.
+            adsorbate: The adsorbate molecule.
             n_oa: Number of approach directions.
             n_rot: Number of molecular orientations.
             n_d: Number of anchor distances.
@@ -133,16 +133,16 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
             conformer: Zero-based index of the conformer.
 
         Raises:
-            TypeError: If ``substrate`` or ``reference`` is not ``Atoms``.
+            TypeError: If ``substrate`` or ``adsorbate`` is not ``Atoms``.
             ValueError: If a grid, a distance or an orientation is invalid.
         """
         if not isinstance(substrate, Atoms):
             raise TypeError(
                 f"substrate must be an ase.Atoms, got {type(substrate)}."
             )
-        if not isinstance(reference, Atoms):
+        if not isinstance(adsorbate, Atoms):
             raise TypeError(
-                f"reference must be an ase.Atoms, got {type(reference)}."
+                f"adsorbate must be an ase.Atoms, got {type(adsorbate)}."
             )
         if int(n_oa) < 1:
             raise ValueError(f"n_oa must be positive, got {n_oa}.")
@@ -154,27 +154,27 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
                 raise ValueError(f"{name} must be finite, got {value}.")
 
         self.substrate = substrate
-        self.reference = reference
+        self.adsorbate = adsorbate
         self.site = build_site(substrate, core, scale=scale, skin=skin)
         self.core = np.asarray(self.site.core_indices, dtype=int)
         self.anchor = (
             anchor
             if isinstance(anchor, ResolvedAnchor)
-            else resolve_anchor(reference, anchor)
+            else resolve_anchor(adsorbate, anchor)
         )
         if orientation is None:
             if int(n_rot) < 1:
                 raise ValueError(f"n_rot must be positive, got {n_rot}.")
             _, orientation = build_orientation(
-                orientation_kind, reference, n=int(n_rot)
+                orientation_kind, adsorbate, n=int(n_rot)
             )
         self.orientation = orientation
         if int(self.orientation.count()) < 1:
             raise ValueError("orientation must contain at least one rotation.")
         if distances is None:
             if d_min_radius_scale != 0.0 or d_max_radius_scale != 0.0:
-                com = np.asarray(reference.get_center_of_mass(), dtype=float)
-                v = np.asarray(reference.positions, dtype=float) - com
+                com = np.asarray(adsorbate.get_center_of_mass(), dtype=float)
+                v = np.asarray(adsorbate.positions, dtype=float) - com
                 radius = float(np.linalg.norm(v, axis=1).max())
                 d_min = float(d_min) + float(d_min_radius_scale) * radius
                 d_max = float(d_max) + float(d_max_radius_scale) * radius
@@ -243,7 +243,7 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
         )
         quaternion = self.orientation.quaternion(j - 1)
         placed = place(
-            self.reference,
+            self.adsorbate,
             anchor=self.anchor,
             target=target,
             quaternion=quaternion,
@@ -307,7 +307,7 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
             Mapping[str, Any]: A JSON-serialisable description.
         """
         digest = hashlib.sha1(
-            np.asarray(self.reference.positions, dtype=float).tobytes()
+            np.asarray(self.adsorbate.positions, dtype=float).tobytes()
         ).hexdigest()
         return {
             "kind": "single_site",
@@ -327,5 +327,5 @@ class SingleSiteGenerator(AdsorptionConfigurationGeneratorABC):
             "n_oa": self.n_oa,
             "n_d": self.n_d,
             "distances": [float(value) for value in self.distances],
-            "reference": digest,
+            "adsorbate": digest,
         }

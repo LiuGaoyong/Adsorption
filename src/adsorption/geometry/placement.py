@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -14,13 +14,13 @@ from adsorption.geometry.rotation import apply_quaternion
 __all__ = ["Anchor", "ResolvedAnchor", "place", "resolve_anchor"]
 
 
-Anchor = Literal["com"] | int | Sequence[float] | np.ndarray
+type Anchor = Literal["com"] | int | Sequence[float] | np.ndarray
 """Anchor declaration: the centre of mass, an atom index, or a point."""
 
 
 @dataclass(frozen=True)
 class ResolvedAnchor:
-    """An anchor point resolved in the reference (gas-phase) frame.
+    """An anchor point resolved in the adsorbate (gas-phase) frame.
 
     Attributes:
         position: The anchor position, shape ``(3,)``.
@@ -46,10 +46,10 @@ class ResolvedAnchor:
 
 
 def resolve_anchor(atoms: Atoms, anchor: Anchor = "com") -> ResolvedAnchor:
-    """Resolve an anchor declaration against a reference structure.
+    """Resolve an anchor declaration against an adsorbate structure.
 
     Args:
-        atoms: The reference structure (typically the gas-phase adsorbate).
+        atoms: The adsorbate structure (typically the gas-phase adsorbate).
         anchor: ``"com"`` for the centre of mass (the default), an integer atom
             index, or an explicit point.
 
@@ -63,8 +63,7 @@ def resolve_anchor(atoms: Atoms, anchor: Anchor = "com") -> ResolvedAnchor:
     if isinstance(anchor, str):
         if anchor != "com":
             raise ValueError(
-                "The only accepted string anchor is 'com', got "
-                f"{anchor!r}."
+                f"The only accepted string anchor is 'com', got {anchor!r}."
             )
         return ResolvedAnchor(
             position=np.asarray(atoms.get_center_of_mass(), dtype=float),
@@ -92,21 +91,21 @@ def resolve_anchor(atoms: Atoms, anchor: Anchor = "com") -> ResolvedAnchor:
 
 
 def place(
-    reference: Atoms,
+    adsorbate: Atoms,
     *,
     anchor: ResolvedAnchor,
     target: np.ndarray,
     quaternion: np.ndarray | None = None,
 ) -> Atoms:
-    """Place the rigid reference adsorbate at a target anchor position.
+    """Place the rigid adsorbate at a target anchor position.
 
-    The reference positions are rotated about the anchor with the given unit
+    The adsorbate positions are rotated about the anchor with the given unit
     quaternion and translated so that the anchor lands on ``target``, i.e.
     ``r = target + R (r0 - r_anchor0)`` (Eq. 10).
 
     Args:
-        reference: Reference (gas-phase) adsorbate. It is not modified.
-        anchor: Resolved anchor in the reference frame.
+        adsorbate: Gas-phase adsorbate. It is not modified.
+        anchor: Resolved anchor in the adsorbate frame.
         target: Target anchor position, shape ``(3,)``.
         quaternion: Optional unit quaternion ``(w, x, y, z)``. Defaults to
             the identity.
@@ -134,7 +133,7 @@ def place(
     if abs(norm - 1.0) > 1e-6:
         raise ValueError(f"quaternion must be a unit quaternion, got {q}.")
 
-    placed = reference.copy()
-    relative = np.asarray(reference.positions, dtype=float) - anchor.position
+    placed = adsorbate.copy()
+    relative = np.asarray(adsorbate.positions, dtype=float) - anchor.position
     placed.set_positions(target_array + apply_quaternion(q, relative))
     return placed

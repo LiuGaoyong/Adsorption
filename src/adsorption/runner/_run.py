@@ -140,22 +140,20 @@ def _xyz_block(atoms: Atoms) -> str:
         str: The XYZ block.
     """
     lines = [str(len(atoms)), ""]
-    for symbol, (x, y, z) in zip(
-        atoms.get_chemical_symbols(), atoms.positions
-    ):
+    for symbol, (x, y, z) in zip(atoms.get_chemical_symbols(), atoms.positions):
         lines.append(f"{symbol} {x:.10f} {y:.10f} {z:.10f}")
     return "\n".join(lines) + "\n"
 
 
 def _rdkit_graph(
-    reference: Atoms,
+    adsorbate: Atoms,
     smiles: str | None,
     charge: int,
 ) -> tuple[Any | None, int]:
     """Return an RDKit molecule and its rotatable-bond count.
 
     Args:
-        reference: The ASE reference structure.
+        adsorbate: The ASE adsorbate structure.
         smiles: Optional SMILES source.
         charge: Total charge used by RDKit's bond perception.
 
@@ -173,7 +171,7 @@ def _rdkit_graph(
             raise ValueError(f"Cannot parse the SMILES {smiles!r}.")
         mol = Chem.AddHs(mol)
     else:
-        mol = Chem.MolFromXYZBlock(_xyz_block(reference))
+        mol = Chem.MolFromXYZBlock(_xyz_block(adsorbate))
         if mol is None:
             return None, 0
         try:
@@ -185,14 +183,14 @@ def _rdkit_graph(
 
 
 def _atoms_from_smiles(smiles: str, seed: int) -> Atoms:
-    """Build one ASE reference from a SMILES string.
+    """Build one ASE adsorbate from a SMILES string.
 
     Args:
         smiles: The SMILES string.
         seed: Embedding seed.
 
     Returns:
-        Atoms: The embedded reference.
+        Atoms: The embedded adsorbate.
     """
     generated = generate_conformers(smiles, n_conformers=1, seed=int(seed))
     if len(generated) == 0:
@@ -227,41 +225,41 @@ def _resolve_adsorbate(
     node: Mapping[str, Any],
     settings: Mapping[str, Any],
 ) -> tuple[Atoms, list[Atoms], int]:
-    """Build the reference and the conformer set of the adsorbate.
+    """Build the adsorbate and its conformer set.
 
     Args:
-        node: The ``_target_`` node of the reference structure.
+        node: The ``_target_`` node of the adsorbate structure.
         settings: The runner-only adsorbate settings.
 
     Returns:
-        tuple[Atoms, list[Atoms], int]: The reference, the conformers and the
+        tuple[Atoms, list[Atoms], int]: The adsorbate, the conformers and the
         detected rotatable-bond count.
 
     Raises:
-        ValueError: If no reference source is declared.
+        ValueError: If no adsorbate source is declared.
         RuntimeError: If an explicitly requested conformer generation fails.
     """
     smiles = None if settings["smiles"] is None else str(settings["smiles"])
     seed = int(settings["conformer_seed"])
-    reference = _instantiate(node, "adsorbate") if node else None
-    if reference is None and smiles is None:
+    adsorbate = _instantiate(node, "adsorbate") if node else None
+    if adsorbate is None and smiles is None:
         raise ValueError("adsorbate must set '_target_' or 'smiles'.")
-    if reference is None:
+    if adsorbate is None:
         assert smiles is not None
-        reference = _atoms_from_smiles(smiles, seed)
+        adsorbate = _atoms_from_smiles(smiles, seed)
 
     mol: Any | None = None
     n_rotatable = 0
     try:
         mol, n_rotatable = _rdkit_graph(
-            reference, smiles, int(settings["charge"])
+            adsorbate, smiles, int(settings["charge"])
         )
     except Exception as error:  # noqa: BLE001 - best-effort detection
         _LOG.warning("Could not determine rotatable bonds: %s", error)
 
     mode = str(settings["conformers"]).strip().lower()
     if mode in {"none", "false", "off", "rigid"}:
-        return reference, [reference], n_rotatable
+        return adsorbate, [adsorbate], n_rotatable
     if mode not in {"auto", "true", "yes", "all", "generate"}:
         raise ValueError(
             f"Unknown conformers mode: {settings['conformers']!r}."
@@ -269,18 +267,14 @@ def _resolve_adsorbate(
 
     n_conformers = int(settings["n_conformers"])
     if n_conformers < 1:
-        raise ValueError(
-            f"n_conformers must be positive, got {n_conformers}."
-        )
+        raise ValueError(f"n_conformers must be positive, got {n_conformers}.")
     generate = mode != "auto" or n_rotatable > 0
     if not generate or n_conformers == 1:
-        return reference, [reference], n_rotatable
+        return adsorbate, [adsorbate], n_rotatable
     if mol is None:
         if mode == "auto":
-            _LOG.warning(
-                "RDKit graph perception failed; using one reference."
-            )
-            return reference, [reference], n_rotatable
+            _LOG.warning("RDKit graph perception failed; using one adsorbate.")
+            return adsorbate, [adsorbate], n_rotatable
         raise RuntimeError("Conformer generation requires RDKit.")
 
     if smiles is not None:
@@ -299,24 +293,24 @@ def _resolve_adsorbate(
     except Exception as error:  # noqa: BLE001 - optional dependency
         if mode == "auto":
             _LOG.warning("Conformer generation failed: %s", error)
-            return reference, [reference], n_rotatable
+            return adsorbate, [adsorbate], n_rotatable
         raise
     if len(conformers) == 0:
         if mode == "auto":
-            return reference, [reference], n_rotatable
+            return adsorbate, [adsorbate], n_rotatable
         raise RuntimeError("No conformer was generated.")
-    return reference, list(conformers), n_rotatable
+    return adsorbate, list(conformers), n_rotatable
 
 
 def _build_conformers(
-    references: Sequence[Atoms],
+    adsorbates: Sequence[Atoms],
     protocol: Mapping[str, Any],
     label: str,
 ) -> list[Conformer]:
     """Build the prepared conformer declarations.
 
     Args:
-        references: The reference structures.
+        adsorbates: The adsorbate structures.
         protocol: The generation protocol.
         label: A label prefix for the conformers.
 
@@ -337,11 +331,11 @@ def _build_conformers(
     d_min_scale = float(protocol.get("d_min_radius_scale", 0.0))
     d_max_scale = float(protocol.get("d_max_radius_scale", 0.0))
     conformers: list[Conformer] = []
-    for index, reference in enumerate(references):
-        com = np.asarray(reference.get_center_of_mass(), dtype=float)
-        offsets = np.asarray(reference.positions, dtype=float) - com
+    for index, adsorbate in enumerate(adsorbates):
+        com = np.asarray(adsorbate.get_center_of_mass(), dtype=float)
+        offsets = np.asarray(adsorbate.positions, dtype=float) - com
         radius = float(np.linalg.norm(offsets, axis=1).max())
-        _, orientation = build_orientation(kind, reference, n=n_rot)
+        _, orientation = build_orientation(kind, adsorbate, n=n_rot)
         distances = distance_array(
             d_min + d_min_scale * radius,
             d_max + d_max_scale * radius,
@@ -349,8 +343,8 @@ def _build_conformers(
         )
         conformers.append(
             Conformer(
-                reference=reference,
-                anchor=resolve_anchor(reference, anchor),
+                adsorbate=adsorbate,
+                anchor=resolve_anchor(adsorbate, anchor),
                 orientation=orientation,
                 distances=distances,
                 label=f"{label}-{index}",
@@ -411,7 +405,7 @@ def _build_generator(
     """
     substrate = _instantiate(cfg["substrate"], "substrate")
     node, settings = _adsorbate_parts(cfg)
-    reference, references, n_rotatable = _resolve_adsorbate(node, settings)
+    adsorbate, adsorbates, n_rotatable = _resolve_adsorbate(node, settings)
     protocol = cfg.get("protocol", {})
     site_cores = _normalize_sites(cfg.get("sites", "auto"), substrate)
     site_geometries = [
@@ -424,7 +418,7 @@ def _build_generator(
         for core in site_cores
     ]
     conformers = _build_conformers(
-        references, protocol, reference.get_chemical_formula()
+        adsorbates, protocol, adsorbate.get_chemical_formula()
     )
     n_oa = int(protocol.get("n_oa", 200))
 
@@ -434,7 +428,7 @@ def _build_generator(
             SingleSiteGenerator(
                 substrate,
                 core,
-                conformer.reference,
+                conformer.adsorbate,
                 n_oa=n_oa,
                 anchor=conformer.anchor,
                 orientation=conformer.orientation,
@@ -563,9 +557,7 @@ def _run_interval(
     with path.open("w", encoding="utf-8") as stream:
         for record in pipeline.run(start, stop):
             stream.write(
-                json.dumps(
-                    _record_payload(record, filters), ensure_ascii=False
-                )
+                json.dumps(_record_payload(record, filters), ensure_ascii=False)
                 + "\n"
             )
             total += 1
@@ -645,9 +637,7 @@ def run_config(
     """
     config = load_config(cfg)
     parallel_cfg = config.get("parallel", {})
-    n_jobs = int(
-        parallel_cfg.get("n_jobs", 1) if n_jobs is None else n_jobs
-    )
+    n_jobs = int(parallel_cfg.get("n_jobs", 1) if n_jobs is None else n_jobs)
     backend = str(
         parallel_cfg.get("backend", "loky") if backend is None else backend
     )
@@ -692,17 +682,15 @@ def run_config(
         shutil.rmtree(chunks_dir)
     chunks_dir.mkdir()
 
-    chunk_count = 1 if n_jobs == 1 else min(
-        last - first + 1, _workers(n_jobs) * 4
+    chunk_count = (
+        1 if n_jobs == 1 else min(last - first + 1, _workers(n_jobs) * 4)
     )
     ranges = _split(first, last, chunk_count)
     paths = [
-        chunks_dir / f"chunk_{index:05d}.jsonl"
-        for index in range(len(ranges))
+        chunks_dir / f"chunk_{index:05d}.jsonl" for index in range(len(ranges))
     ]
     xyz_paths = [
-        chunks_dir / f"chunk_{index:05d}.xyz"
-        for index in range(len(ranges))
+        chunks_dir / f"chunk_{index:05d}.xyz" for index in range(len(ranges))
     ]
     started = time.perf_counter()
     if n_jobs == 1:
@@ -711,15 +699,11 @@ def run_config(
             for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
         ]
     else:
-        results = Parallel(
-            n_jobs=n_jobs, backend=backend, verbose=verbose
-        )(
+        results = Parallel(n_jobs=n_jobs, backend=backend, verbose=verbose)(
             delayed(_run_interval)(
                 generator, filters, begin, end, path, xyz_path
             )
-            for (begin, end), path, xyz_path in zip(
-                ranges, paths, xyz_paths
-            )
+            for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
         )
     seconds = time.perf_counter() - started
 

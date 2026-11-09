@@ -1,7 +1,7 @@
 """Process A for several adsorbates: chain per-conformer site generators.
 
 Conformers are an *input* to process A (decision A-2): the generator consumes
-prepared reference structures, anchors, rotation sets and distance arrays. It
+prepared adsorbate structures, anchors, rotation sets and distance arrays. It
 never generates, weights or relaxes conformers itself.
 """
 
@@ -32,14 +32,14 @@ class Conformer:
     """One prepared adsorbate conformer.
 
     Attributes:
-        reference: The reference structure of the conformer.
-        anchor: The resolved anchor in the reference frame.
+        adsorbate: The adsorbate structure of the conformer.
+        anchor: The resolved anchor in the adsorbate frame.
         orientation: The rotation set of the conformer.
         distances: The anchor-centre distances in Angstrom.
         label: Optional human-readable label.
     """
 
-    reference: Atoms
+    adsorbate: Atoms
     anchor: ResolvedAnchor
     orientation: RotationSet
     distances: np.ndarray
@@ -47,9 +47,9 @@ class Conformer:
 
     def __post_init__(self) -> None:
         """Validate the conformer declaration."""
-        if not isinstance(self.reference, Atoms):
+        if not isinstance(self.adsorbate, Atoms):
             raise TypeError(
-                f"reference must be an ase.Atoms, got {type(self.reference)}."
+                f"adsorbate must be an ase.Atoms, got {type(self.adsorbate)}."
             )
         values = np.asarray(self.distances, dtype=float).ravel()
         if values.size == 0:
@@ -104,7 +104,7 @@ class MultiAdsorbateGenerator(_ChainedGenerator):
                 SingleSiteGenerator(
                     substrate,
                     site.core_indices,
-                    conformer.reference,
+                    conformer.adsorbate,
                     n_oa=n_oa,
                     anchor=conformer.anchor,
                     orientation=conformer.orientation,
@@ -131,7 +131,7 @@ class MultiAdsorbateGenerator(_ChainedGenerator):
             "conformers": [
                 {
                     "label": conformer.label,
-                    "formula": conformer.reference.get_chemical_formula(),
+                    "formula": conformer.adsorbate.get_chemical_formula(),
                     "n_rot": int(conformer.orientation.count()),
                     "n_d": int(len(conformer.distances)),
                 }

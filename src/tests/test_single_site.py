@@ -93,15 +93,13 @@ def test_explicit_distances_override_the_bounds(slab: Atoms) -> None:
 
 def test_distance_bounds_follow_the_adsorbate_radius(slab: Atoms) -> None:
     """The radius coefficients shift both bounds by the molecular radius."""
-    reference = molecule("C6H6")
-    center = reference.get_center_of_mass()
-    radius = float(
-        np.linalg.norm(reference.positions - center, axis=1).max()
-    )
+    adsorbate = molecule("C6H6")
+    center = adsorbate.get_center_of_mass()
+    radius = float(np.linalg.norm(adsorbate.positions - center, axis=1).max())
     generator = SingleSiteGenerator(
         slab,
         0,
-        reference,
+        adsorbate,
         n_oa=1,
         n_rot=1,
         n_d=2,
