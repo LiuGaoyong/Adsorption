@@ -317,3 +317,63 @@ def test_nequip_filter_builds_a_calculator(monkeypatch) -> None:
     assert restored.calculator is None
     restored.evaluate(make_trial())
     assert restored.calculator is not None
+
+
+def test_single_point_mode_does_not_move_the_trial() -> None:
+    """``relax=False`` only evaluates the energy and leaves the trial alone."""
+    filt = OptimizedEnergyFilter(e_cut=1e6, calculator=EMT(), relax=False)
+    trial = make_trial()
+    before = trial.atoms.positions.copy()
+    verdict = filt.evaluate(trial)
+    assert verdict.accepted is True
+    assert verdict.reason == "ok"
+    assert verdict.value is not None and np.isfinite(verdict.value)
+    assert verdict.value <= 1e6
+    assert getattr(verdict.detail, "converged") is True
+    assert np.allclose(trial.atoms.positions, before)
+    assert filt.relax is False
+    assert filt.signature()["relax"] is False
+
+
+def test_single_point_mode_rejects_above_the_ceiling() -> None:
+    """Single-point mode keeps the rejection contract of the tier."""
+    filt = OptimizedEnergyFilter(e_cut=-1e9, calculator=EMT(), relax=False)
+    verdict = filt.evaluate(make_trial())
+    assert verdict.accepted is False
+    assert verdict.reason == "e_cut"
+    assert verdict.value is not None and verdict.value > filt.e_cut
+
+
+def test_lennard_jones_filter_accepts_the_screening_flag() -> None:
+    """The Lennard-Jones tier forwards ``relax`` to the screening mode."""
+    filt = LennardJonesEnergyFilter(e_cut=None, relax=False)
+    assert filt.relax is False
+    assert filt.max_steps == 100
+    assert filt.signature()["relax"] is False
+
+
+def test_binding_cut_offsets_the_isolated_reference() -> None:
+    """``e_bind_cut`` shifts the ``e_cut=None`` ceiling by a fixed energy."""
+    trial = make_trial()
+    loose = OptimizedEnergyFilter(
+        e_cut=None, calculator=EMT(), relax=False, e_bind_cut=1e6
+    )
+    tight = OptimizedEnergyFilter(
+        e_cut=None, calculator=EMT(), relax=False, e_bind_cut=-1e6
+    )
+    assert loose.evaluate(trial).accepted is True
+    verdict = tight.evaluate(trial)
+    assert verdict.accepted is False
+    assert verdict.reason == "e_cut"
+    assert tight.signature()["e_bind_cut"] == -1e6
+
+
+def test_prepare_applies_the_binding_cut_to_the_cached_ceiling() -> None:
+    """The prepared ceiling is the isolated reference plus the offset."""
+    trial = make_trial()
+    filt = OptimizedEnergyFilter(
+        e_cut=None, calculator=EMT(), relax=False, e_bind_cut=-0.25
+    )
+    filt.prepare(trial)
+    reference = filt._reference_cutoff(trial)
+    assert filt._cutoffs[0] == pytest.approx(reference - 0.25)

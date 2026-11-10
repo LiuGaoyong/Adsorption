@@ -1,17 +1,22 @@
-"""Process B, energetic tier: relaxation followed by an energy threshold.
+"""Process B, energetic tier: single-point screening or relaxation.
 
-The filter wraps an ASE calculator: it relaxes a copy of the trial structure
-with :func:`arrayff.optimize.call_optimization` and accepts the trial when the
-relaxed energy is finite, at most the ceiling and the convergence policy
-allows it. With ``e_cut=None`` the ceiling is the sum of the isolated
-substrate and adsorbate single-point energies. The verdict carries the energy
-and the optimization result itself, so a caller never relaxes twice.
+The filter wraps an ASE calculator. By default it relaxes a copy of the trial
+structure with :func:`arrayff.optimize.call_optimization` and accepts the
+trial when the relaxed energy is finite, at most the ceiling and the
+convergence policy allows it. With ``relax=False`` it only evaluates the
+single-point energy of the placed trial, which makes the tier a cheap
+screen before an expensive relaxation tier. With ``e_cut=None`` the ceiling
+is the sum of the isolated substrate and adsorbate single-point energies,
+i.e. the trial must already bind (single-point mode) or must bind after the
+relaxation (relaxation mode). The verdict carries the energy and the
+optimization result itself, so a caller never relaxes twice.
 """
 
 from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -22,7 +27,30 @@ from ase.constraints import FixAtoms, FixBondLengths
 
 from adsorption.base import AdsorptionConfigurationFilterABC, Trial, Verdict
 
-__all__ = ["OptimizedEnergyFilter"]
+__all__ = ["OptimizedEnergyFilter", "SinglePointResult"]
+
+
+@dataclass(frozen=True)
+class SinglePointResult:
+    """The stand-in result of a single-point evaluation.
+
+    It mirrors the two attributes of
+    :class:`arrayff.optimize.OptimizationResult` the filter and the record
+    sidecar read (``latest`` and ``converged``), so a screening tier and a
+    relaxation tier produce the same verdict shape.
+
+    Attributes:
+        atoms: The evaluated structure, calculator attached.
+        converged: Always ``True``: a single point has no convergence test.
+    """
+
+    atoms: Atoms
+    converged: bool = True
+
+    @property
+    def latest(self) -> Atoms:
+        """Return the evaluated structure, as ``OptimizationResult`` does."""
+        return self.atoms
 
 
 class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
@@ -39,6 +67,8 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
         fix_substrate: bool = True,
         fix_adsorbate_bonds: bool = True,
         reject_on_unconverged: bool = True,
+        relax: bool = True,
+        e_bind_cut: float = 0.0,
         **kwargs,
     ) -> None:
         """Store the evaluator and the acceptance policy.
@@ -56,6 +86,17 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
                 distance of the adsorbate to its reference value.
             reject_on_unconverged: Whether to reject trials on unconverged
                 optimizations.
+            relax: Whether to relax the trial (``True``) or only evaluate its
+                single-point energy (``False``). Single-point mode turns the
+                tier into a cheap screen: no optimizer runs, ``fmax``,
+                ``max_steps`` and the convergence policy do not apply.
+            e_bind_cut: Binding-energy offset in eV added to the isolated
+                fragment reference when ``e_cut`` is ``None``. The trial is
+                accepted only when its energy is at most
+                ``reference + e_bind_cut``. The default ``0.0`` accepts every
+                non-repulsive placement; a negative value requires a minimum
+                binding energy, which is how a single-point screen rejects
+                weakly bound placements. Ignored when ``e_cut`` is set.
             **kwargs: unused arguments.
         """
         if fix_adsorbate_bonds:
@@ -70,6 +111,10 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
         self.fix_substrate = fix_substrate
         self.fix_adsorbate_bonds = fix_adsorbate_bonds
         self.reject_on_unconverged = reject_on_unconverged
+        self.relax = bool(relax)
+        if not np.isfinite(e_bind_cut):
+            raise ValueError(f"e_bind_cut must be finite, got {e_bind_cut}.")
+        self.e_bind_cut = float(e_bind_cut)
         self.calculator = calculator
         self.max_steps = max_steps
         self.method = method
@@ -129,7 +174,9 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
             return
         key = int(trial.meta.get("conformer", 0))
         if key not in self._cutoffs:
-            self._cutoffs[key] = self._reference_cutoff(trial)
+            self._cutoffs[key] = (
+                self._reference_cutoff(trial) + self.e_bind_cut
+            )
 
     def evaluate(self, trial: Trial) -> Verdict:
         """Evaluate one trial with the wrapped relaxation.
@@ -147,12 +194,21 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
             key = int(trial.meta.get("conformer", 0))
             cutoff = self._cutoffs.get(key)
             if cutoff is None:
-                cutoff = self._reference_cutoff(trial)
+                cutoff = self._reference_cutoff(trial) + self.e_bind_cut
                 self._cutoffs[key] = cutoff
             if not np.isfinite(cutoff):
                 return Verdict(False, cutoff, "nan", None)
         self.calculator.reset()
         atoms = trial.atoms.copy()
+        if not self.relax:
+            atoms.calc = self.calculator
+            result = SinglePointResult(atoms=atoms)
+            energy = float(result.latest.get_potential_energy())
+            if not np.isfinite(energy):
+                return Verdict(False, energy, "nan", result)
+            if energy > cutoff:
+                return Verdict(False, energy, "e_cut", result)
+            return Verdict(True, energy, "ok", result)
         if self.fix_substrate:
             ids = list(range(trial.natoms_substrate))
             atoms.constraints = [FixAtoms(indices=ids)]
@@ -202,4 +258,6 @@ class OptimizedEnergyFilter(AdsorptionConfigurationFilterABC):
             "fix_substrate": self.fix_substrate,
             "fix_adsorbate_bonds": self.fix_adsorbate_bonds,
             "reject_on_unconverged": self.reject_on_unconverged,
+            "relax": self.relax,
+            "e_bind_cut": self.e_bind_cut,
         }

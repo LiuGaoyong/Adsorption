@@ -43,3 +43,30 @@ def test_pipeline_index_interval() -> None:
     records = list(pipeline.run(2, 4))
     assert [record.trial.index for record in records] == [2, 3, 4]
     assert all(record.first_failed is None for record in records)
+
+
+class _Exploding(AdsorptionConfigurationFilterABC):
+    def evaluate(self, trial: Trial) -> Verdict:
+        raise ValueError("non-finite coordinates")
+
+
+def test_pipeline_rejects_a_filter_exception() -> None:
+    pipeline = AdsorptionConfigurationPipeline(CountingGenerator(3), [_Exploding()])
+    records = list(pipeline.run())
+    assert [record.first_failed for record in records] == ["_Exploding"] * 3
+    assert [len(record.verdicts) for record in records] == [1, 1, 1]
+    verdict = records[0].verdicts[0]
+    assert verdict.accepted is False
+    assert verdict.reason == "exception:ValueError"
+    assert verdict.value is None
+
+
+def test_pipeline_keeps_earlier_verdicts_when_a_filter_raises() -> None:
+    pipeline = AdsorptionConfigurationPipeline(
+        CountingGenerator(3), [_Even(), _Exploding()]
+    )
+    records = list(pipeline.run())
+    assert records[0].first_failed == "_Even"
+    assert len(records[0].verdicts) == 1
+    assert records[1].first_failed == "_Exploding"
+    assert [verdict.accepted for verdict in records[1].verdicts] == [True, False]

@@ -7,6 +7,7 @@ a rejection to the tier that produced it.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,6 +20,8 @@ from adsorption.base._base import (
 )
 
 __all__ = ["AdsorptionConfigurationPipeline", "Record", "evaluate_trial"]
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,50 @@ class Record:
     verdicts: tuple[Verdict, ...] = field(default_factory=tuple)
     first_failed: str | None = None
     result: Any | None = None
+
+
+_REPORTED_EXCEPTIONS: set[tuple[str, str]] = set()
+
+
+def _report_exception(
+    filt: AdsorptionConfigurationFilterABC,
+    trial: Trial,
+    error: Exception,
+) -> None:
+    """Log one filter exception, once per filter and exception type.
+
+    A campaign can evaluate hundreds of millions of trials, and a relaxation
+    that blows up on a few of them is expected (a very short anchor distance
+    can push a Lennard-Jones step to non-finite coordinates). The first
+    occurrence of every ``(filter, exception type)`` pair keeps its traceback
+    so the failure stays diagnosable; later ones are logged at debug level so
+    they cannot swamp the logs of a long run.
+
+    Args:
+        filt: The filter that raised.
+        trial: The trial being evaluated.
+        error: The exception that escaped the filter.
+    """
+    key = (type(filt).__name__, type(error).__name__)
+    if key in _REPORTED_EXCEPTIONS:
+        _LOG.debug(
+            "Filter %s raised %s on candidate %s.",
+            key[0],
+            key[1],
+            trial.index,
+        )
+        return
+    _REPORTED_EXCEPTIONS.add(key)
+    _LOG.warning(
+        "Filter %s raised %s on candidate %s; the trial is rejected and the "
+        "campaign continues (further %s/%s errors are logged at debug).",
+        key[0],
+        key[1],
+        trial.index,
+        key[0],
+        key[1],
+        exc_info=True,
+    )
 
 
 def evaluate_trial(
@@ -58,7 +105,19 @@ def evaluate_trial(
     verdicts: list[Verdict] = []
     first_failed: str | None = None
     for filt in filters:
-        verdict = filt.evaluate(trial)
+        try:
+            verdict = filt.evaluate(trial)
+        except Exception as error:  # noqa: BLE001 - one bad trial must not
+            # abort a campaign: a crashed relaxation (e.g. non-finite
+            # coordinates from a very short anchor distance) is a rejection,
+            # not a reason to stop the remaining candidates.
+            _report_exception(filt, trial, error)
+            verdict = Verdict(
+                False,
+                None,
+                f"exception:{type(error).__name__}",
+                None,
+            )
         verdicts.append(verdict)
         if not verdict.accepted:
             first_failed = type(filt).__name__
