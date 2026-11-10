@@ -284,10 +284,10 @@ class NequIPOptimizedEnergyFilter(OptimizedEnergyFilter):
         self._ensure_calculator()
         super().prepare(trial)
 
-    def evaluate(self, trial):
+    def _evaluate(self, trial):
         """Evaluate after loading the calculator lazily."""
         self._ensure_calculator()
-        return super().evaluate(trial)
+        return super()._evaluate(trial)
 
     def __getstate__(self) -> dict[str, Any]:
         """Drop the Torch model; it is rebuilt in the worker process."""

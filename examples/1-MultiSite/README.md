@@ -72,11 +72,19 @@ GENERATE_CASES=0 ./run_all.sh   # reuse the existing generated files
 
 ### NequIP tier
 
-[`run.nequip.template.yaml`](run.nequip.template.yaml) appends a
-`NequIPOptimizedEnergyFilter` after the Lennard-Jones tier. It needs NequIP
-and a deployed model; the default is
-`~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth`. The tier relaxes the
+[`run.nequip.template.yaml`](run.nequip.template.yaml) replaces the
+Lennard-Jones relaxation with a single-point Lennard-Jones screen and a
+`NequIPOptimizedEnergyFilter`:
+
+```text
+GeometryFilter -> LennardJonesScreenFilter -> NequIP
+```
+
+It needs NequIP and a deployed model; the default is
+`~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth`. The tiers relax the
 full structure (`fix_substrate: false`, `fix_adsorbate_bonds: false`).
+Duplicate rotamers of a flexible adsorbate are dropped when the ensemble is
+resolved (`deduplicate: true`, the default), before any candidate is built.
 
 ```bash
 # the default model is used automatically when it exists

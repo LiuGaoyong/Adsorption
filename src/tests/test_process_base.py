@@ -67,7 +67,7 @@ def test_verdict_defaults_and_validation() -> None:
 
 
 class _EvenFilter(AdsorptionConfigurationFilterABC):
-    def evaluate(self, trial: Trial) -> Verdict:
+    def _evaluate(self, trial: Trial) -> Verdict:
         accepted = trial.index % 2 == 0
         return Verdict(accepted, value=float(trial.index))
 

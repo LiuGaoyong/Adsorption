@@ -53,6 +53,8 @@ class GeometryFilter(AdsorptionConfigurationFilterABC):
         sigma: Mapping[int, float] = {
             i: KIM_LJ_PARAMETERS[i][2] for i in KIM_LJ_PARAMETERS
         },
+        record_key: bool = False,
+        key_cutoff: float = 5.0,
         **kw,
     ) -> None:
         """Store the parameter table and verify the internal bound.
@@ -66,11 +68,15 @@ class GeometryFilter(AdsorptionConfigurationFilterABC):
             r_cut: Pair cutoff. Defaults to ``1.05 * max floor``.
             floor_check: How to react when a floor exceeds the Lennard-Jones
                 equilibrium ``2**(1/6) * sigma_ij``.
+            record_key: Whether to store the canonical key of an accepted
+                trial in ``trial.meta``.
+            key_cutoff: Neighbor cutoff of that key, in Angstrom.
             kw: Unused arguments.
 
         Raises:
             ValueError: If the table or a threshold is invalid.
         """
+        super().__init__(record_key=record_key, key_cutoff=key_cutoff)
         if not sigma:
             raise ValueError("sigma must not be empty.")
         values = {int(key): float(value) for key, value in sigma.items()}
@@ -174,7 +180,7 @@ class GeometryFilter(AdsorptionConfigurationFilterABC):
             raise ValueError(message)
         warnings.warn(message, UserWarning, stacklevel=3)
 
-    def evaluate(self, trial: Trial) -> Verdict:
+    def _evaluate(self, trial: Trial) -> Verdict:
         """Return the minimum slack over the substrate-adsorbate pairs.
 
         Substrate-substrate and adsorbate-adsorbate distances are fixed by the

@@ -14,6 +14,7 @@ otherwise.
 
 from __future__ import annotations
 
+import gzip
 import importlib.util
 import json
 import logging
@@ -30,11 +31,11 @@ from typing import Any
 import numpy as np
 import yaml
 from ase import Atoms
-from ase.io import write as ase_write
+from ase.db import connect
 from hydra.utils import instantiate
 from joblib import Parallel, cpu_count, delayed
 
-from adsorption.base import AdsorptionConfigurationFilterABC, Trial
+from adsorption.base import FilterStage, Trial
 from adsorption.base.pipeline import (
     AdsorptionConfigurationPipeline,
     Record,
@@ -88,7 +89,7 @@ class RunSummary:
         rejected: Number of candidates rejected by some filter.
         first_failed: Rejection counts keyed by the first failing filter.
         records_path: Path of the merged ``records.jsonl`` sidecar.
-        accepted_xyz_path: Path of the merged accepted structures.
+        accepted_path: Path of the merged accepted-structure database.
         summary_path: Path of the ``summary.json`` sidecar.
         seconds: Wall-clock duration of the campaign.
         signature: The generator signature.
@@ -105,7 +106,7 @@ class RunSummary:
     rejected: int
     first_failed: Mapping[str, int]
     records_path: Path
-    accepted_xyz_path: Path
+    accepted_path: Path
     summary_path: Path
     seconds: float
     signature: Mapping[str, Any]
@@ -114,6 +115,85 @@ class RunSummary:
     n_rotatable_bonds: int
     engine: str = "serial"
     n_actors: int = 0
+
+
+_RECORD_MODES = ("all", "accepted", "none")
+_COMPRESSIONS = ("none", "gzip")
+_STRUCTURE_MODES = ("full", "adsorbate")
+
+
+@dataclass(frozen=True)
+class _Storage:
+    """How the campaign writes its two sidecars.
+
+    Attributes:
+        records: Which trials reach ``records.jsonl``: every candidate
+            (``"all"``), only the accepted ones (``"accepted"``, the default),
+            or none (``"none"``).
+        compression: ``"none"`` or ``"gzip"`` for the record stream.
+        structures: ``"full"`` stores the whole accepted structure in the
+            database, ``"adsorbate"`` (the default) stores only the adsorbate
+            atoms and keeps the substrate size in the row data, which is what
+            makes the database small: the substrate is identical for every
+            row of a campaign.
+    """
+
+    records: str = "accepted"
+    compression: str = "none"
+    structures: str = "adsorbate"
+
+    @classmethod
+    def from_config(cls, cfg: Mapping[str, Any]) -> _Storage:
+        """Read and validate the ``storage`` node.
+
+        Args:
+            cfg: The campaign configuration.
+
+        Returns:
+            _Storage: The resolved policy.
+
+        Raises:
+            TypeError: If the node is not a mapping.
+            ValueError: If a mode is unknown.
+        """
+        node = cfg.get("storage") or {}
+        if not isinstance(node, Mapping):
+            raise TypeError(f"storage must be a mapping, got {type(node)}.")
+        records = str(node.get("records", "accepted")).strip().lower()
+        compression = str(node.get("compression", "none")).strip().lower()
+        structures = str(node.get("structures", "adsorbate")).strip().lower()
+        for name, value, allowed in (
+            ("storage.records", records, _RECORD_MODES),
+            ("storage.compression", compression, _COMPRESSIONS),
+            ("storage.structures", structures, _STRUCTURE_MODES),
+        ):
+            if value not in allowed:
+                raise ValueError(
+                    f"Unknown {name}: {value!r}; expected one of {allowed}."
+                )
+        return cls(records, compression, structures)
+
+    def wants(self, first_failed: str | None) -> bool:
+        """Return whether a record reaches the JSONL sidecar.
+
+        Args:
+            first_failed: The rejecting stage of the record, or ``None``.
+
+        Returns:
+            bool: True when the record is written.
+        """
+        if self.records == "all":
+            return True
+        if self.records == "accepted":
+            return first_failed is None
+        return False
+
+
+def _open_text(path: Path, compression: str):
+    """Open a text stream, optionally gzip-compressed."""
+    if compression == "gzip":
+        return gzip.open(path, "wt", encoding="utf-8")
+    return path.open("w", encoding="utf-8")
 
 
 def load_config(config: str | Path | Mapping[str, Any]) -> dict[str, Any]:
@@ -395,25 +475,25 @@ def _build_generator(
 
 def _build_filters(
     cfg: Mapping[str, Any],
-) -> list[AdsorptionConfigurationFilterABC]:
+) -> list[FilterStage]:
     """Build the process-B filter chain.
 
     Args:
         cfg: The campaign configuration.
 
     Returns:
-        list[AdsorptionConfigurationFilterABC]: The filters, in declared order.
+        list[FilterStage]: The stages, in declared order.
     """
     nodes = cfg.get("filters", [])
     if isinstance(nodes, Mapping):
         nodes = [nodes]
-    filters: list[AdsorptionConfigurationFilterABC] = []
+    filters: list[FilterStage] = []
     for index, node in enumerate(nodes):
         filt = _instantiate(node, f"filters[{index}]")
-        if not isinstance(filt, AdsorptionConfigurationFilterABC):
+        if not isinstance(filt, FilterStage):
             raise TypeError(
-                f"filters[{index}] must implement "
-                f"AdsorptionConfigurationFilterABC, got {type(filt)}."
+                f"filters[{index}] must implement the evaluate() stage "
+                f"protocol, got {type(filt)}."
             )
         filters.append(filt)
     return filters
@@ -449,9 +529,15 @@ def _detail_payload(detail: Any) -> Any:
     return payload
 
 
+def _record_line(record: Record, filters: Sequence[FilterStage]) -> str:
+    """Return the JSONL line of one record."""
+    payload = _record_payload(record, filters)
+    return json.dumps(payload, ensure_ascii=False) + "\n"
+
+
 def _record_payload(
     record: Record,
-    filters: Sequence[AdsorptionConfigurationFilterABC],
+    filters: Sequence[FilterStage],
 ) -> dict[str, Any]:
     """Return the JSONL payload of one pipeline record."""
     return {
@@ -474,9 +560,6 @@ def _record_payload(
 def _accepted_atoms(record: Record) -> Atoms | None:
     """Return the accepted structure of one record, or ``None``.
 
-    The structure is detached from its calculator and carries the provenance
-    that the accepted-XYZ sidecar publishes.
-
     Args:
         record: The evaluated record.
 
@@ -489,8 +572,14 @@ def _accepted_atoms(record: Record) -> Atoms | None:
     atoms = record.trial.atoms.copy()
     atoms.calc = None
     meta = record.trial.meta
-    atoms.info = {
-        "index": int(record.trial.index),
+    atoms.info = _provenance(meta, record.trial.index)
+    return atoms
+
+
+def _provenance(meta: Mapping[str, Any], index: int) -> dict[str, Any]:
+    """Return the row data that identifies one accepted structure."""
+    return {
+        "index": int(index),
         "site": int(meta.get("site", 0)),
         "conformer": int(meta.get("conformer", 0)),
         "i": int(meta.get("i", 0)),
@@ -498,42 +587,107 @@ def _accepted_atoms(record: Record) -> Atoms | None:
         "k": int(meta.get("k", 0)),
         "distance": float(meta.get("distance", 0.0)),
     }
-    return atoms
+
+
+def _row_payload(
+    atoms: Atoms,
+    trial: Trial,
+    storage: _Storage,
+) -> tuple[Atoms, dict[str, Any]]:
+    """Return the atoms and the data row that the database stores.
+
+    Args:
+        atoms: The accepted structure.
+        trial: The trial it came from.
+        storage: The structure policy.
+
+    Returns:
+        tuple[Atoms, dict[str, Any]]: The atoms to store (the adsorbate only
+        when the policy says so) and the row data.
+    """
+    data = _provenance(trial.meta, trial.index)
+    if storage.structures != "adsorbate":
+        stored = atoms.copy()
+        stored.info = {}
+        return stored, data
+    n_substrate = int(trial.natoms_substrate)
+    n_adsorbate = int(trial.natoms_adsorbate)
+    data["n_substrate"] = n_substrate
+    data["natoms_adsorbate"] = n_adsorbate
+    stored = atoms[-n_adsorbate:]
+    stored.info = {}
+    return stored, data
+
+
+def _row_from_payload(
+    atoms: Atoms,
+    payload: Mapping[str, Any],
+    storage: _Storage,
+) -> tuple[Atoms, dict[str, Any]]:
+    """Return the database row of one accepted actor result."""
+    meta = payload.get("meta", {})
+    data = _provenance(meta, int(payload["index"]))
+    if storage.structures != "adsorbate":
+        stored = atoms.copy()
+        stored.info = {}
+        return stored, data
+    n_substrate = int(meta["n_substrate"])
+    n_adsorbate = len(atoms) - n_substrate
+    data["n_substrate"] = n_substrate
+    data["natoms_adsorbate"] = n_adsorbate
+    stored = atoms[-n_adsorbate:]
+    stored.info = {}
+    return stored, data
+
+
+def _merge_structures(chunks: Sequence[Path], path: Path) -> None:
+    """Merge the per-chunk databases into the campaign database."""
+    path.unlink(missing_ok=True)
+    if not chunks:
+        path.touch()
+        return
+    with connect(str(path)) as target:
+        for chunk in chunks:
+            if not chunk.exists():
+                continue
+            with connect(str(chunk)) as source:
+                for row in source.select():
+                    pairs = dict(row.key_value_pairs)
+                    target.write(row.toatoms(), key_value_pairs=pairs)
 
 
 def _run_interval(
     generator: Any,
-    filters: Sequence[AdsorptionConfigurationFilterABC],
+    filters: Sequence[FilterStage],
     start: int,
     stop: int,
-    path: Path,
-    xyz_path: Path,
+    records_path: Path,
+    structures_path: Path,
+    storage: _Storage,
 ) -> dict[str, Any]:
-    """Evaluate one index interval into JSONL and accepted-XYZ chunks."""
+    """Evaluate one index interval into record and structure chunks."""
     pipeline = AdsorptionConfigurationPipeline(generator, filters)
     total = 0
     accepted = 0
     failures: Counter[str] = Counter()
-    xyz_path.unlink(missing_ok=True)
-    with path.open("w", encoding="utf-8") as stream:
+    structures_path.unlink(missing_ok=True)
+    with open(records_path, "w", encoding="utf-8") as stream, connect(
+        str(structures_path)
+    ) as database:
         for record in pipeline.run(start, stop):
-            stream.write(
-                json.dumps(_record_payload(record, filters), ensure_ascii=False)
-                + "\n"
-            )
             total += 1
             if record.first_failed is not None:
                 failures[record.first_failed] += 1
+                if storage.wants(record.first_failed):
+                    stream.write(_record_line(record, filters))
                 continue
             accepted += 1
+            if storage.wants(None):
+                stream.write(_record_line(record, filters))
             atoms = _accepted_atoms(record)
             if atoms is not None:
-                ase_write(
-                    xyz_path,
-                    atoms,
-                    format="extxyz",
-                    append=xyz_path.exists(),
-                )
+                stored, data = _row_payload(atoms, record.trial, storage)
+                database.write(stored, key_value_pairs=data)
     return {
         "total": total,
         "accepted": accepted,
@@ -610,7 +764,7 @@ class _FilterActor:
 
     def __init__(
         self,
-        filters: Sequence[AdsorptionConfigurationFilterABC],
+        filters: Sequence[FilterStage],
         threads: int = 0,
     ) -> None:
         """Store a private copy of the filter chain.
@@ -621,7 +775,7 @@ class _FilterActor:
                 leaves the process defaults untouched.
         """
         _init_worker(int(threads))
-        self._filters: tuple[AdsorptionConfigurationFilterABC, ...] = tuple(
+        self._filters: tuple[FilterStage, ...] = tuple(
             filters
         )
 
@@ -737,10 +891,11 @@ def _setup_ray(
 
 def _run_ray(
     generator: Any,
-    filters: Sequence[AdsorptionConfigurationFilterABC],
+    filters: Sequence[FilterStage],
     records_path: Path,
-    accepted_xyz_path: Path,
+    accepted_path: Path,
     *,
+    storage: _Storage,
     first: int,
     last: int,
     workers: int,
@@ -762,7 +917,8 @@ def _run_ray(
         generator: Process A, iterated in this process.
         filters: Process-B tiers, copied into every actor.
         records_path: Path of the JSONL sidecar to write.
-        accepted_xyz_path: Path of the accepted-XYZ sidecar to write.
+        accepted_path: Path of the accepted-structure database to write.
+        storage: Which records and structures reach the sidecars.
         first: First one-based index (inclusive).
         last: Last one-based index (inclusive).
         workers: Configured worker count, i.e. the desired actor count.
@@ -818,26 +974,33 @@ def _run_ray(
         pool = ActorPool(actors)
         buffer: dict[int, _TrialVerdict] = {}
         next_index = int(first)
-        with records_path.open("w", encoding="utf-8") as stream:
+        accepted_path.unlink(missing_ok=True)
+        with connect(str(accepted_path)) as database, _open_text(
+            records_path, storage.compression
+        ) as stream:
 
             def consume(result: _TrialVerdict) -> None:
                 nonlocal total, accepted
-                stream.write(
-                    json.dumps(result.payload, ensure_ascii=False) + "\n"
-                )
                 total += 1
                 failed = result.payload["first_failed"]
                 if failed is not None:
                     failures[str(failed)] += 1
+                    if storage.wants(failed):
+                        stream.write(
+                            json.dumps(result.payload, ensure_ascii=False)
+                            + "\n"
+                        )
                     return
                 accepted += 1
-                if result.atoms is not None:
-                    ase_write(
-                        accepted_xyz_path,
-                        result.atoms,
-                        format="extxyz",
-                        append=accepted_xyz_path.exists(),
+                if storage.wants(None):
+                    stream.write(
+                        json.dumps(result.payload, ensure_ascii=False) + "\n"
                     )
+                if result.atoms is not None:
+                    stored, data = _row_from_payload(
+                        result.atoms, result.payload, storage
+                    )
+                    database.write(stored, key_value_pairs=data)
 
             while True:
                 while not exhausted and pending < window:
@@ -865,7 +1028,6 @@ def _run_ray(
             except Exception:  # noqa: BLE001 - best-effort cleanup
                 pass
 
-    accepted_xyz_path.touch(exist_ok=True)
     return {
         "total": total,
         "accepted": accepted,
@@ -875,10 +1037,11 @@ def _run_ray(
 
 def _run_chunks(
     generator: Any,
-    filters: Sequence[AdsorptionConfigurationFilterABC],
+    filters: Sequence[FilterStage],
     records_path: Path,
-    accepted_xyz_path: Path,
+    accepted_path: Path,
     *,
+    storage: _Storage,
     first: int,
     last: int,
     output_dir: Path,
@@ -895,7 +1058,8 @@ def _run_chunks(
         generator: Process A.
         filters: Process-B tiers.
         records_path: Path of the merged JSONL sidecar.
-        accepted_xyz_path: Path of the merged accepted-XYZ sidecar.
+        accepted_path: Path of the merged accepted-structure database.
+        storage: Which records and structures reach the sidecars.
         first: First one-based index (inclusive).
         last: Last one-based index (inclusive).
         output_dir: Campaign output directory.
@@ -921,13 +1085,15 @@ def _run_chunks(
     paths = [
         chunks_dir / f"chunk_{index:05d}.jsonl" for index in range(len(ranges))
     ]
-    xyz_paths = [
-        chunks_dir / f"chunk_{index:05d}.xyz" for index in range(len(ranges))
+    db_paths = [
+        chunks_dir / f"chunk_{index:05d}.db" for index in range(len(ranges))
     ]
     if n_jobs == 1:
         results = [
-            _run_interval(generator, filters, begin, end, path, xyz_path)
-            for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
+            _run_interval(
+                generator, filters, begin, end, path, db, storage
+            )
+            for (begin, end), path, db in zip(ranges, paths, db_paths)
         ]
     else:
         results = Parallel(
@@ -938,22 +1104,23 @@ def _run_chunks(
             initargs=(threads_per_worker,),
         )(
             delayed(_run_interval)(
-                generator, filters, begin, end, path, xyz_path
+                generator, filters, begin, end, path, db, storage
             )
-            for (begin, end), path, xyz_path in zip(ranges, paths, xyz_paths)
+            for (begin, end), path, db in zip(ranges, paths, db_paths)
         )
 
-    with records_path.open("w", encoding="utf-8") as stream:
-        for path in paths:
-            with path.open("r", encoding="utf-8") as chunk:
-                shutil.copyfileobj(chunk, stream)
-            path.unlink()
-    with accepted_xyz_path.open("w", encoding="utf-8") as stream:
-        for xyz_path in xyz_paths:
-            if xyz_path.exists():
-                with xyz_path.open("r", encoding="utf-8") as chunk:
-                    shutil.copyfileobj(chunk, stream)
-                xyz_path.unlink()
+    records_path.unlink(missing_ok=True)
+    if storage.records != "none":
+        with _open_text(records_path, storage.compression) as stream:
+            for path in paths:
+                if path.exists():
+                    with path.open("r", encoding="utf-8") as chunk:
+                        shutil.copyfileobj(chunk, stream)
+    _merge_structures(db_paths, accepted_path)
+    for path in paths:
+        path.unlink(missing_ok=True)
+    for path in db_paths:
+        path.unlink(missing_ok=True)
     chunks_dir.rmdir()
     return results
 
@@ -1052,10 +1219,14 @@ def run_config(
     )
     if raw_output is None:
         raise ValueError("outputs must be set in the configuration.")
+    storage = _Storage.from_config(config)
     output_dir = Path(raw_output).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
-    records_path = output_dir / "records.jsonl"
-    accepted_xyz_path = output_dir / "accepted.xyz"
+    records_name = (
+        "records.jsonl.gz" if storage.compression == "gzip" else "records.jsonl"
+    )
+    records_path = output_dir / records_name
+    accepted_path = output_dir / "accepted.db"
 
     started = time.perf_counter()
     current_engine = selected_engine
@@ -1065,7 +1236,8 @@ def run_config(
             generator,
             filters,
             records_path,
-            accepted_xyz_path,
+            accepted_path,
+            storage=storage,
             first=first,
             last=last,
             workers=workers,
@@ -1081,7 +1253,8 @@ def run_config(
                 generator,
                 filters,
                 records_path,
-                accepted_xyz_path,
+                accepted_path,
+                storage=storage,
                 first=first,
                 last=last,
                 output_dir=output_dir,
@@ -1099,7 +1272,8 @@ def run_config(
             generator,
             filters,
             records_path,
-            accepted_xyz_path,
+            accepted_path,
+            storage=storage,
             first=first,
             last=last,
             output_dir=output_dir,
@@ -1122,7 +1296,12 @@ def run_config(
         "accepted": accepted,
         "rejected": total - accepted,
         "first_failed": dict(failures),
-        "accepted_xyz": str(accepted_xyz_path),
+        "accepted_db": str(accepted_path),
+        "storage": {
+            "records": storage.records,
+            "compression": storage.compression,
+            "structures": storage.structures,
+        },
         "start": first,
         "stop": last,
         "n_jobs": n_jobs,
@@ -1146,7 +1325,7 @@ def run_config(
         rejected=total - accepted,
         first_failed=dict(failures),
         records_path=records_path,
-        accepted_xyz_path=accepted_xyz_path,
+        accepted_path=accepted_path,
         summary_path=summary_path,
         seconds=seconds,
         signature=dict(generator.signature()),

@@ -4,7 +4,12 @@ from collections.abc import Iterator
 
 from ase import Atoms
 
-from adsorption.base import AdsorptionConfigurationGeneratorABC, Trial
+from adsorption.base import (
+    AdsorptionConfigurationFilterABC,
+    AdsorptionConfigurationGeneratorABC,
+    Trial,
+    Verdict,
+)
 
 
 class CountingGenerator(AdsorptionConfigurationGeneratorABC):
@@ -39,3 +44,11 @@ class CountingGenerator(AdsorptionConfigurationGeneratorABC):
     def signature(self) -> dict[str, int]:
         """Return the generator signature."""
         return {"n": self._n}
+
+
+class EvenFilter(AdsorptionConfigurationFilterABC):
+    """Accept the trials with an even candidate index."""
+
+    def _evaluate(self, trial: Trial) -> Verdict:
+        """Accept even indices."""
+        return Verdict(trial.index % 2 == 0, float(trial.index), "even")

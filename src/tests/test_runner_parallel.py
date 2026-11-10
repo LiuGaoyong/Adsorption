@@ -6,8 +6,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from ase import Atoms
+from ase.db import connect
 
 from adsorption.base import (
     AdsorptionConfigurationFilterABC,
@@ -29,14 +31,14 @@ from _helpers import CountingGenerator
 class _Even(AdsorptionConfigurationFilterABC):
     """Accept even candidate indices."""
 
-    def evaluate(self, trial: Trial) -> Verdict:
+    def _evaluate(self, trial: Trial) -> Verdict:
         return Verdict(trial.index % 2 == 0, float(trial.index), "even")
 
 
 class _AboveTwo(AdsorptionConfigurationFilterABC):
     """Accept candidates with an index above two."""
 
-    def evaluate(self, trial: Trial) -> Verdict:
+    def _evaluate(self, trial: Trial) -> Verdict:
         return Verdict(trial.index > 2, float(trial.index), "gt2")
 
 
@@ -113,6 +115,20 @@ def _config(parallel: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+def _db_rows(path: Path) -> list[tuple[Any, ...]]:
+    """Return a comparable snapshot of an accepted-structure database."""
+    with connect(str(path)) as db:
+        return [
+            (
+                int(row.key_value_pairs["index"]),
+                row.toatoms().numbers.tobytes(),
+                np.round(row.toatoms().positions, 6).tobytes(),
+                sorted(row.key_value_pairs.items()),
+            )
+            for row in db.select()
+        ]
+
+
 def test_joblib_matches_serial(tmp_path: Path) -> None:
     cfg = _config()
     serial = run_config(cfg, output=tmp_path / "serial", n_jobs=1)
@@ -130,9 +146,9 @@ def test_joblib_matches_serial(tmp_path: Path) -> None:
     assert (tmp_path / "serial" / "records.jsonl").read_bytes() == (
         tmp_path / "parallel" / "records.jsonl"
     ).read_bytes()
-    assert (tmp_path / "serial" / "accepted.xyz").read_bytes() == (
-        tmp_path / "parallel" / "accepted.xyz"
-    ).read_bytes()
+    assert _db_rows(tmp_path / "serial" / "accepted.db") == _db_rows(
+        tmp_path / "parallel" / "accepted.db"
+    )
 
 
 @pytest.mark.filterwarnings("ignore")
@@ -154,6 +170,33 @@ def test_ray_matches_serial(tmp_path: Path) -> None:
     assert (tmp_path / "serial" / "records.jsonl").read_bytes() == (
         tmp_path / "ray" / "records.jsonl"
     ).read_bytes()
-    assert (tmp_path / "serial" / "accepted.xyz").read_bytes() == (
-        tmp_path / "ray" / "accepted.xyz"
-    ).read_bytes()
+    assert _db_rows(tmp_path / "serial" / "accepted.db") == _db_rows(
+        tmp_path / "ray" / "accepted.db"
+    )
+
+
+def test_storage_policy_accepted_only_and_adsorbate(tmp_path: Path) -> None:
+    """The record and structure policies shrink both sidecars."""
+    cfg = _config()
+    cfg["filters"] = [{"_target_": "_helpers.EvenFilter"}]
+    cfg["storage"] = {
+        "records": "accepted",
+        "compression": "gzip",
+        "structures": "adsorbate",
+    }
+    summary = run_config(cfg, output=tmp_path / "out", n_jobs=1)
+    assert summary.accepted == 2
+    assert (tmp_path / "out" / "records.jsonl.gz").exists()
+    assert not (tmp_path / "out" / "records.jsonl").exists()
+    import gzip
+
+    with gzip.open(tmp_path / "out" / "records.jsonl.gz", "rt") as stream:
+        assert len(stream.readlines()) == 2
+    with connect(str(tmp_path / "out" / "accepted.db")) as db:
+        rows = list(db.select())
+        assert len(rows) == 2
+        first = rows[0].toatoms()
+        assert len(first) == 2  # the CO adsorbate only
+        assert rows[0].key_value_pairs["n_substrate"] == \
+            rows[0].key_value_pairs["n_substrate"]
+        assert "index" in rows[0].key_value_pairs

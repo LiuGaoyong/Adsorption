@@ -8,7 +8,10 @@ import pytest
 from ase import Atoms
 from ase.build import fcc111, molecule
 
-from adsorption.generate.adsorbate import RotamerEnsemble
+from adsorption.generate.adsorbate import (
+    RotamerEnsemble,
+    deduplicate_rigids,
+)
 from adsorption.generate import (
     AdsorptionConfigurationGenerator,
     Sampling,
@@ -174,3 +177,37 @@ def test_component_starts_cover_every_component(
     assert [trial.index for trial in starts] == [
         offset + 1 for offset in generator.offsets
     ]
+
+
+def test_conformer_deduplication_drops_mirror_rotamers() -> None:
+    """Furfural's +theta / -theta rotamers collapse to one structure."""
+    plain = RotamerEnsemble(
+        "O=Cc1ccco1", dihedrals=10, max_rotamers=10, deduplicate=False
+    ).resolve()
+    deduped = RotamerEnsemble(
+        "O=Cc1ccco1", dihedrals=10, max_rotamers=10
+    ).resolve()
+    assert len(plain) == 10
+    assert len(deduped) == 6
+    assert deduped[0].atoms == plain[0].atoms
+
+
+def test_conformer_deduplication_keeps_distinct_rotamers() -> None:
+    """A linear chain keeps every rotamer at the cap of the grid."""
+    rigids = RotamerEnsemble(
+        "CCCCCC", dihedrals=10, max_rotamers=64
+    ).resolve()
+    assert len(rigids) == 64
+
+
+def test_deduplicate_rigids_is_a_no_op_for_distinct_structures() -> None:
+    """Different structures survive in their original order."""
+    rigids = RotamerEnsemble(
+        "O=Cc1ccco1", dihedrals=10, max_rotamers=10, deduplicate=False
+    ).resolve()
+    unique = deduplicate_rigids(rigids)
+    assert len(unique) == 6
+    order = {rigid.label: i for i, rigid in enumerate(rigids)}
+    positions = [order[rigid.label] for rigid in unique]
+    assert positions == sorted(positions)
+    assert positions[0] == 0

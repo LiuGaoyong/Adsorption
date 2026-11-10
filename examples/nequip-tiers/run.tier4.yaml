@@ -1,0 +1,52 @@
+# NequIP tier 4 of 5 (low -> high sampling density).
+# Chain: GeometryFilter -> LJ single-point screen -> NequIP.
+# Duplicate rotamers of a flexible adsorbate are dropped when the ensemble resolves.
+# Usage (TEMPLATE wants an absolute path or a path inside the example family):
+#   NEQUIP_MODEL=/abs/NequIP-OAM-S-0.1.nequip.pth \
+#   TEMPLATE=$PWD/examples/nequip-tiers/run.tier4.yaml RUNNER=adsorption-run \
+#   examples/0-SingleSite/run_all.sh
+# Grid per (site, conformer): 68600 = 70 directions x 70 orientations x 14 distances.
+# 128+ cores: switch parallel.engine to "joblib"; the ray path submits one
+# trial per RPC and its driver caps at ~300 trials/s regardless of actor count.
+adsorbate:
+  conformers: rotamers
+  dihedrals: 10
+  max_rotamers: 64
+protocol:
+  n_oa: 70
+  n_rot: 70
+  n_d: 14
+  d_min: 0.6
+  d_max: 3.0
+  d_min_radius_scale: 0.0
+  d_max_radius_scale: 0.0
+  anchor: com
+  orientation_kind: auto
+filters:
+- _target_: adsorption.filters.GeometryFilter
+  scale: 1.0
+# Cheap steric screen: single-point Lennard-Jones, no optimizer.
+- _target_: adsorption.filters.LennardJonesScreenFilter
+  e_cut: null
+- _target_: adsorption.filters.NequIPOptimizedEnergyFilter
+  model_path: ${oc.env:NEQUIP_MODEL,""}
+  device: ${oc.env:NEQUIP_DEVICE,cpu}
+  chemical_species_to_atom_type_map: true
+  neighborlist_backend: matscipy
+  e_cut: null
+  fmax: 0.05
+  max_steps: 50
+  fix_substrate: false
+  fix_adsorbate_bonds: false
+  reject_on_unconverged: false
+budget:
+  max_candidates: null
+start: 1
+stop: null
+outputs: ./results
+parallel:
+  backend: loky
+  engine: ray
+  n_jobs: 6
+  chunk_factor: 4
+  threads_per_worker: 1

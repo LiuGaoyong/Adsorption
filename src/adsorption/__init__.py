@@ -11,6 +11,7 @@ from adsorption.generate.adsorbate import (
 from adsorption.base import (
     AdsorptionConfigurationFilterABC,
     AdsorptionConfigurationGeneratorABC,
+    FilterStage,
     Trial,
     Verdict,
 )
@@ -18,9 +19,12 @@ from adsorption.base.pipeline import (
     AdsorptionConfigurationPipeline,
     Record,
 )
+from adsorption.dedup import TrialDeduplicator
 from adsorption.filters import (
+    EnergyFilter,
     GeometryFilter,
     LennardJonesEnergyFilter,
+    LennardJonesScreenFilter,
     NequIPOptimizedEnergyFilter,
     OptimizedEnergyFilter,
 )
@@ -47,11 +51,14 @@ __all__ = [
     "AdsorptionConfigurationPipeline",
     "BoundAdsorbate",
     "ETKDGEnsemble",
+    "EnergyFilter",
     "ExplicitEnsemble",
     "ExplicitSites",
+    "FilterStage",
     "GeometryFilter",
     "GraphAtomsSites",
     "LennardJonesEnergyFilter",
+    "LennardJonesScreenFilter",
     "NequIPOptimizedEnergyFilter",
     "OptimizedEnergyFilter",
     "Record",
@@ -65,5 +72,6 @@ __all__ = [
     "SiteSpec",
     "TopLayerSites",
     "Trial",
+    "TrialDeduplicator",
     "Verdict",
 ]

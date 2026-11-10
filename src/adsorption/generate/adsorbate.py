@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from ase import Atoms
 
+from adsorption.base import canonical_key
 from adsorption.geometry.placement import (
     Anchor,
     ResolvedAnchor,
@@ -50,6 +51,7 @@ __all__ = [
     "rigid_digest",
     "prune_by_energy",
     "near_congruent",
+    "deduplicate_rigids",
 ]
 
 
@@ -136,6 +138,38 @@ def rigid_digest(rigids: Sequence[RigidAdsorbate]) -> str:
         digest.update(np.asarray(rigid.atoms.positions, dtype=float).tobytes())
         digest.update(np.asarray(rigid.anchor.position, dtype=float).tobytes())
     return "sha1:" + digest.hexdigest()
+
+
+def deduplicate_rigids(
+    rigids: Sequence[RigidAdsorbate],
+    *,
+    cutoff: float = 5.0,
+) -> tuple[RigidAdsorbate, ...]:
+    """Drop the rigid adsorbates whose structure was already seen.
+
+    Two members are the same conformer when their bond-list hashes match (see
+    :func:`adsorption.base.canonical_key`): the same atoms at the same
+    interatomic distances to 0.01 Angstrom, up to a rigid motion. Mirror-image
+    rotamers collapse as well, which is the intended behaviour for an achiral
+    adsorbate: the two are the same molecule in an equivalent shape.
+
+    Args:
+        rigids: The rigid adsorbates in generation order.
+        cutoff: Neighbor cutoff of the bond list, in Angstrom.
+
+    Returns:
+        tuple[RigidAdsorbate, ...]: The first member of every distinct
+        structure, in the original order.
+    """
+    seen: set[str] = set()
+    kept: list[RigidAdsorbate] = []
+    for rigid in rigids:
+        key = canonical_key(rigid.atoms, cutoff=cutoff)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(rigid)
+    return tuple(kept)
 
 
 def near_congruent(
@@ -431,6 +465,7 @@ class ETKDGEnsemble(AdsorbateSource):
     optimize: bool = True
     anchor: Anchor | ResolvedAnchor = "com"
     label_prefix: str = "conformer"
+    deduplicate: bool = True
 
     def __post_init__(self) -> None:
         """Validate the numerical parameters."""
@@ -460,7 +495,7 @@ class ETKDGEnsemble(AdsorbateSource):
         )
         if len(structures) == 0:
             raise ValueError("RDKit did not embed any conformer.")
-        return tuple(
+        rigids = tuple(
             RigidAdsorbate(
                 atoms,
                 _resolve(self.anchor, atoms),
@@ -469,6 +504,7 @@ class ETKDGEnsemble(AdsorbateSource):
             )
             for index, atoms in enumerate(structures)
         )
+        return deduplicate_rigids(rigids) if self.deduplicate else rigids
 
     def signature(self) -> Mapping[str, Any]:
         """Return a JSON-serialisable description of the source."""
@@ -477,6 +513,7 @@ class ETKDGEnsemble(AdsorbateSource):
             "n_conformers": int(self.n_conformers),
             "seed": int(self.seed),
             "prune_rmsd": float(self.prune_rmsd),
+            "deduplicate": bool(self.deduplicate),
         }
 
 
@@ -518,6 +555,7 @@ class RotamerEnsemble(AdsorbateSource):
     charge: int = 0
     anchor: Anchor | ResolvedAnchor = "com"
     label_prefix: str = "rotamer"
+    deduplicate: bool = True
 
     def __post_init__(self) -> None:
         """Normalize and validate the declaration."""
@@ -589,7 +627,7 @@ class RotamerEnsemble(AdsorbateSource):
                 ):
                     kept.append(record)
             records = kept
-        return tuple(
+        rigids = tuple(
             RigidAdsorbate(
                 structure,
                 _resolve(self.anchor, structure),
@@ -603,6 +641,7 @@ class RotamerEnsemble(AdsorbateSource):
             )
             for index, (combination, structure) in enumerate(records)
         )
+        return deduplicate_rigids(rigids) if self.deduplicate else rigids
 
     def signature(self) -> Mapping[str, Any]:
         """Return a JSON-serialisable description of the source."""
@@ -612,6 +651,7 @@ class RotamerEnsemble(AdsorbateSource):
             "max_rotamers": int(self.max_rotamers),
             "prune_rmsd": float(self.prune_rmsd),
             "seed": int(self.seed),
+            "deduplicate": bool(self.deduplicate),
         }
 
 

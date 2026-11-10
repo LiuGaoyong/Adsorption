@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from adsorption.base._base import (
-    AdsorptionConfigurationFilterABC,
     AdsorptionConfigurationGeneratorABC,
+    FilterStage,
     Trial,
     Verdict,
 )
@@ -45,7 +45,7 @@ _REPORTED_EXCEPTIONS: set[tuple[str, str]] = set()
 
 
 def _report_exception(
-    filt: AdsorptionConfigurationFilterABC,
+    filt: FilterStage,
     trial: Trial,
     error: Exception,
 ) -> None:
@@ -87,7 +87,7 @@ def _report_exception(
 
 def evaluate_trial(
     trial: Trial,
-    filters: Sequence[AdsorptionConfigurationFilterABC],
+    filters: Sequence[FilterStage],
 ) -> Record:
     """Evaluate one trial through an ordered filter chain.
 
@@ -141,7 +141,7 @@ class AdsorptionConfigurationPipeline:
     def __init__(
         self,
         generator: AdsorptionConfigurationGeneratorABC,
-        filters: Sequence[AdsorptionConfigurationFilterABC],
+        filters: Sequence[FilterStage],
     ) -> None:
         """Store the generator and the filter chain.
 

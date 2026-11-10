@@ -12,12 +12,12 @@ from _helpers import CountingGenerator
 
 
 class _Even(AdsorptionConfigurationFilterABC):
-    def evaluate(self, trial: Trial) -> Verdict:
+    def _evaluate(self, trial: Trial) -> Verdict:
         return Verdict(trial.index % 2 == 0, float(trial.index), "even")
 
 
 class _AboveTwo(AdsorptionConfigurationFilterABC):
-    def evaluate(self, trial: Trial) -> Verdict:
+    def _evaluate(self, trial: Trial) -> Verdict:
         return Verdict(trial.index > 2, float(trial.index), "gt2")
 
 
@@ -46,7 +46,7 @@ def test_pipeline_index_interval() -> None:
 
 
 class _Exploding(AdsorptionConfigurationFilterABC):
-    def evaluate(self, trial: Trial) -> Verdict:
+    def _evaluate(self, trial: Trial) -> Verdict:
         raise ValueError("non-finite coordinates")
 
 
