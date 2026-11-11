@@ -29,15 +29,17 @@ def detect_shape(
     adsorbate: Atoms,
     *,
     linear_tol: float = 1e-3,
-    planar_tol: float = 1e-3,
 ) -> Literal["fixed", "s2", "so3"]:
     """Classify the adsorbate by its principal moments.
+
+    Only the linear case reduces the orientation manifold: a single atom has no
+    orientation at all, a linear rotor collapses ``SO(3)`` to ``S^2``, and every
+    other adsorbate - planar ones included, since a planar body still has a
+    finite point group - is sampled on the full ``SO(3)``.
 
     Args:
         adsorbate: The adsorbate structure.
         linear_tol: Relative threshold on the smallest principal moment.
-        planar_tol: Relative threshold on the planar identity
-            ``I3 = I1 + I2``.
 
     Returns:
         str: ``"fixed"``, ``"s2"`` or ``"so3"``.
@@ -50,9 +52,6 @@ def detect_shape(
         return "fixed"
     if moments[0] / total < linear_tol:
         return "s2"
-    # if abs(moments[2] - moments[0] - moments[1]) / total < planar_tol:
-    #     TODO: do something when the adsorbate is planar.
-    #     return "so3"
     return "so3"
 
 
@@ -63,7 +62,6 @@ def build_orientation(
     n: int,
     axis: np.ndarray | None = None,
     linear_tol: float = 1e-3,
-    planar_tol: float = 1e-3,
 ) -> tuple[str, RotationSet]:
     """Build the rotation set of an adsorbate.
 
@@ -73,7 +71,6 @@ def build_orientation(
         n: Number of orientations.
         axis: Optional body-frame reference axis.
         linear_tol: Linearity threshold forwarded to :func:`detect_shape`.
-        planar_tol: Planarity threshold forwarded to :func:`detect_shape`.
 
     Returns:
         tuple[str, RotationSet]: The resolved kind and the rotation set.
@@ -87,7 +84,6 @@ def build_orientation(
         detect_shape(
             adsorbate=adsorbate,
             linear_tol=linear_tol,
-            planar_tol=planar_tol,
         )
         if kind == "auto"
         else kind

@@ -110,13 +110,27 @@ class SiteGeometry:
 
     @property
     def radius(self) -> float:
-        """Return the direction-sphere radius ``r_s``."""
+        """Return the direction-sphere radius ``r_s``.
+
+        Note:
+            Used only by the optional direction-level steric filter of
+            Algorithm 1, which the default protocol leaves disabled: the
+            present construction enumerates every grid point and enforces
+            steric exclusion downstream, so ``r_s`` enters no default
+            computation. It is kept because the extension is specified and
+            recorded in the protocol.
+        """
         cov = np.asarray(COV_R[np.asarray(self.core_numbers, dtype=int)])
         return float(np.max(cov)) * float(self.scale)
 
     @property
     def filter_positions(self) -> np.ndarray:
-        """Return the positions of the steric filter set ``P(s)``."""
+        """Return the positions of the steric filter set ``P(s)``.
+
+        Note:
+            Like :attr:`radius`, this is consumed only by the disabled
+            direction-level filter of Algorithm 1.
+        """
         if self.core_size == 1:
             return np.asarray(self.neighbor_positions, dtype=float)
         return np.vstack(

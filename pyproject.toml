@@ -44,6 +44,7 @@ nequip = ["nequip>=0.17.0"]
 
 [project.scripts]
 adsorption-run = "adsorption.runner:run"
+adsorption-light = "adsorption.analysis.light:main"
 
 [dependency-groups]
 dev = [
