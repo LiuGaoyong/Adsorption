@@ -1,0 +1,72 @@
+# Case manifest consumed by examples/build_cases.py.
+layout: single
+adsorbates:
+  C2H6: CC
+  C6H6: c1ccccc1
+  CH3CH2OH: CCO
+  CH3OH: CO
+  CH4: C
+  CO: '[C-]#[O+]'
+  H2O: O
+  O: '[O]'
+sites:
+  cluster_edge_bri:
+    substrate: structures/cluster.xyz
+    core:
+    - 578
+    - 638
+  cluster_edge_fcc:
+    substrate: structures/cluster.xyz
+    core:
+    - 578
+    - 596
+    - 638
+  cluster_edge_top:
+    substrate: structures/cluster.xyz
+    core:
+    - 578
+  cluster_surface_bri:
+    substrate: structures/cluster.xyz
+    core:
+    - 608
+    - 610
+  cluster_surface_fcc:
+    substrate: structures/cluster.xyz
+    core:
+    - 607
+    - 608
+    - 610
+  cluster_surface_top:
+    substrate: structures/cluster.xyz
+    core:
+    - 610
+  cluster_vertex_bri:
+    substrate: structures/cluster.xyz
+    core:
+    - 303
+    - 334
+  cluster_vertex_fcc:
+    substrate: structures/cluster.xyz
+    core:
+    - 303
+    - 334
+    - 464
+  cluster_vertex_top:
+    substrate: structures/cluster.xyz
+    core:
+    - 303
+  slab_surface_bri:
+    substrate: structures/slab.xyz
+    core:
+    - 400
+    - 490
+  slab_surface_fcc:
+    substrate: structures/slab.xyz
+    core:
+    - 400
+    - 490
+    - 499
+  slab_surface_top:
+    substrate: structures/slab.xyz
+    core:
+    - 400

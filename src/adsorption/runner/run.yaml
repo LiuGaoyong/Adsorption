@@ -12,14 +12,21 @@ substrate:
   periodic: true
 
 adsorbate:
-  # A SMILES source is enough; _target_ can be used for an ASE reference.
+  # A SMILES source is enough; _target_ can be used for an ASE structure.
   smiles: CCCC
   # auto: generate conformers only when rotatable bonds are detected.
+  # rotamers: rotate the RDKit-detected rotatable bonds with ASE at the
+  #           declared dihedral angles; no random embedding is involved.
   conformers: auto
   n_conformers: 8
   conformer_seed: 20261030
   prune_rmsd: 0.5
   charge: 0
+  # Only used by `conformers: rotamers`:
+  # dihedrals: 6                                  # 6 points per rotor
+  # dihedrals: [6, 6, 6]                          # one count per rotor
+  # dihedrals: [[60, 180], [180], [60, 180, 300]] # explicit per rotor
+  # max_rotamers: 64
 
 # "auto" selects every top-layer atom as a top site. A flat list of integers is
 # one core set; a list of lists declares several sites explicitly.
@@ -29,8 +36,16 @@ protocol:
   n_oa: 8
   n_rot: 8
   n_d: 6
-  d_min: 0.8
+  # null (or "contact"): the lower bound is the hard-sphere contact distance
+  # of each site and adsorbate, derived from the KIM Lennard-Jones sigma
+  # table that GeometryFilter uses (d_contact_scale matches its `scale`).
+  # A number is an absolute lower bound in Angstrom.
+  d_min: null
   d_max: 3.0
+  d_contact_scale: 1.0
+  # true: keep only the approach directions on the outward side of each site
+  # (about half of n_oa); false: the full sphere, as in the manuscript.
+  hemisphere: false
   # Optional size-dependent bounds:
   # d_min_eff = d_min + d_min_radius_scale * R
   # d_max_eff = d_max + d_max_radius_scale * R
@@ -53,8 +68,21 @@ stop: null
 outputs: ./runs
 
 parallel:
-  backend: loky
+  # auto: use Ray when it is importable, otherwise joblib; a single job
+  # (n_jobs: 1) stays in this process. Set to "ray" or "joblib" to force
+  # one engine.
+  engine: auto
+  # Worker count; with Ray this is the number of filter actors.
   n_jobs: -1
+  # joblib backend; ignored by Ray.
+  backend: loky
+  # BLAS/Torch threads per worker; with Ray this is also the number of CPUs
+  # reserved by each actor.
+  threads_per_worker: 1
+  # Chunks per worker (joblib) or in-flight tasks per actor (Ray).
+  chunk_factor: 4
+  # Ray cluster address; null starts a local Ray instance sized from n_jobs.
+  ray_address: null
 
 hydra:
   job:

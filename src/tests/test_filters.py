@@ -1,6 +1,8 @@
 """Contract tests of the energetic filters and their constraints."""
 
-from types import SimpleNamespace
+import pickle
+import sys
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -11,9 +13,12 @@ from ase.constraints import FixAtoms, FixBondLengths
 
 from adsorption.base import Trial
 from adsorption.filters import (
+    EnergyFilter,
     LennardJonesEnergyFilter,
+    NequIPOptimizedEnergyFilter,
     OptimizedEnergyFilter,
 )
+from adsorption.filters.nequip import DEFAULT_NEQUIP_MODEL
 
 
 def make_trial() -> Trial:
@@ -57,9 +62,7 @@ def test_fix_flags_are_normalised(
     assert filt.fix_adsorbate_bonds is bonds
 
 
-@pytest.mark.parametrize(
-    "e_cut", [float("nan"), float("inf"), float("-inf")]
-)
+@pytest.mark.parametrize("e_cut", [float("nan"), float("inf"), float("-inf")])
 def test_non_finite_ceiling_is_rejected(e_cut: float) -> None:
     """A non-finite energy ceiling is a construction error."""
     with pytest.raises(ValueError):
@@ -94,7 +97,8 @@ def test_none_ceiling_uses_isolated_fragment_energies() -> None:
         reject_on_unconverged=False,
     )
     filt.prepare(trial)
-    assert 0 in filt._cutoffs
+    assert 0 in filt._adsorbate_cache
+    assert filt._ceiling(trial) == pytest.approx(cutoff)
     verdict = filt.evaluate(trial)
     assert filt.e_cut is None
     assert filt.signature()["e_cut"] is None
@@ -208,8 +212,7 @@ def test_adsorbate_bonds_use_the_adsorbate_count(
     assert pairs.min() >= trial.natoms_substrate
     assert pairs.max() < len(trial.atoms)
     local = {
-        tuple(sorted(row))
-        for row in (pairs - trial.natoms_substrate).tolist()
+        tuple(sorted(row)) for row in (pairs - trial.natoms_substrate).tolist()
     }
     assert local == {(0, 1)}
 
@@ -277,3 +280,131 @@ def test_lennard_jones_filter_instantiates_and_signs() -> None:
     assert signature["calculator"] == (
         "Lennard-Jones Potential by OpenKIM Parameters"
     )
+
+
+def test_nequip_filter_builds_a_calculator(monkeypatch) -> None:
+    """The NequIP tier builds its calculator from the deployed model."""
+
+    class FakeNequIPCalculator(EMT):
+        @classmethod
+        def from_deployed_model(cls, **kwargs):
+            return cls()
+
+    package = ModuleType("nequip")
+    module = ModuleType("nequip.ase")
+    module.NequIPCalculator = FakeNequIPCalculator  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "nequip", package)
+    monkeypatch.setitem(sys.modules, "nequip.ase", module)
+
+    filt = NequIPOptimizedEnergyFilter(
+        "model.pth", device="cpu", e_cut=1e6, max_steps=1
+    )
+    assert filt.calculator is None
+    signature = filt.signature()
+    assert signature["kind"] == "nequip_optimized_energy"
+    assert signature["calculator"] == {
+        "model_path": "model.pth",
+        "device": "cpu",
+    }
+    assert signature["fix_substrate"] is False
+    assert signature["fix_adsorbate_bonds"] is False
+
+    default = NequIPOptimizedEnergyFilter(e_cut=1e6)
+    assert default.signature()["calculator"]["model_path"] == str(
+        DEFAULT_NEQUIP_MODEL
+    )
+
+    restored = pickle.loads(pickle.dumps(filt))
+    assert restored.signature() == signature
+    assert restored.calculator is None
+    restored.evaluate(make_trial())
+    assert restored.calculator is not None
+
+
+def test_energy_filter_does_not_move_the_trial() -> None:
+    """The single-point tier only evaluates the energy, never relaxes."""
+    filt = EnergyFilter(e_cut=1e6, calculator=EMT())
+    trial = make_trial()
+    before = trial.atoms.positions.copy()
+    verdict = filt.evaluate(trial)
+    assert verdict.accepted is True
+    assert verdict.reason == "ok"
+    assert verdict.value is not None and np.isfinite(verdict.value)
+    assert verdict.value <= 1e6
+    assert getattr(verdict.detail, "converged") is True
+    assert np.allclose(trial.atoms.positions, before)
+    assert filt.signature()["kind"] == "energy"
+
+
+def test_energy_filter_rejects_above_the_ceiling() -> None:
+    """The single-point tier keeps the rejection contract."""
+    filt = EnergyFilter(e_cut=-1e9, calculator=EMT())
+    verdict = filt.evaluate(make_trial())
+    assert verdict.accepted is False
+    assert verdict.reason == "e_cut"
+    assert verdict.value is not None and verdict.value > filt.e_cut
+
+
+def test_optimized_energy_filter_inherits_the_energy_filter() -> None:
+    """The relaxation tier is the single-point tier plus an optimizer."""
+    assert issubclass(OptimizedEnergyFilter, EnergyFilter)
+    assert not issubclass(EnergyFilter, OptimizedEnergyFilter)
+    relaxed = OptimizedEnergyFilter(e_cut=1e6, calculator=EMT(), max_steps=2)
+    assert relaxed.signature()["kind"] == "optimized_energy"
+    assert relaxed.signature()["max_steps"] == 2
+    plain = EnergyFilter(e_cut=1e6, calculator=EMT())
+    assert plain.signature()["kind"] == "energy"
+
+
+def test_binding_cut_offsets_the_isolated_reference() -> None:
+    """``e_bind_cut`` shifts the ``e_cut=None`` ceiling by a fixed energy."""
+    trial = make_trial()
+    loose = EnergyFilter(e_cut=None, calculator=EMT(), e_bind_cut=1e6)
+    tight = EnergyFilter(e_cut=None, calculator=EMT(), e_bind_cut=-1e6)
+    assert loose.evaluate(trial).accepted is True
+    verdict = tight.evaluate(trial)
+    assert verdict.accepted is False
+    assert verdict.reason == "e_cut"
+    assert tight.signature()["e_bind_cut"] == -1e6
+
+
+def test_prepare_applies_the_binding_cut_to_the_cached_ceiling() -> None:
+    """The prepared ceiling is the isolated reference plus the offset."""
+    trial = make_trial()
+    filt = EnergyFilter(e_cut=None, calculator=EMT(), e_bind_cut=-0.25)
+    filt.prepare(trial)
+    reference = filt._reference_cutoff(trial)
+    assert filt._ceiling(trial) == pytest.approx(reference - 0.25)
+
+
+def test_record_key_writes_the_key_of_an_accepted_trial() -> None:
+    """The filter stores the canonical key and its cutoff in the metadata."""
+    filt = EnergyFilter(
+        e_cut=1e6, calculator=EMT(), record_key=True, key_cutoff=4.0
+    )
+    trial = make_trial()
+    assert filt.evaluate(trial).accepted is True
+    assert trial.meta["canonical_key"] == trial.get_canonical_key(cutoff=4.0)
+    assert trial.meta["canonical_key_cutoff"] == 4.0
+
+
+def test_record_key_is_off_by_default() -> None:
+    """Without the flag the metadata is left untouched."""
+    filt = EnergyFilter(e_cut=1e6, calculator=EMT())
+    trial = make_trial()
+    filt.evaluate(trial)
+    assert "canonical_key" not in trial.meta
+
+
+def test_record_key_skips_a_rejected_trial() -> None:
+    """A rejected trial never pays for the key."""
+    filt = EnergyFilter(e_cut=-1e9, calculator=EMT(), record_key=True)
+    trial = make_trial()
+    assert filt.evaluate(trial).accepted is False
+    assert "canonical_key" not in trial.meta
+
+
+def test_record_key_rejects_an_invalid_cutoff() -> None:
+    """A non-positive key cutoff is a construction error."""
+    with pytest.raises(ValueError):
+        EnergyFilter(e_cut=1e6, calculator=EMT(), key_cutoff=0.0)

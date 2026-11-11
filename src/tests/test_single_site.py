@@ -6,7 +6,7 @@ import pytest
 from ase import Atoms
 from ase.build import fcc111, molecule
 
-from adsorption.generate import SingleSiteGenerator
+from adsorption.generate import AdsorptionConfigurationGenerator
 from adsorption.geometry import FixedRotation, SuperFibonacciSO3
 
 
@@ -16,8 +16,8 @@ def slab() -> Atoms:
 
 
 @pytest.fixture(scope="module")
-def generator(slab: Atoms) -> SingleSiteGenerator:
-    return SingleSiteGenerator(
+def generator(slab: Atoms) -> AdsorptionConfigurationGenerator:
+    return AdsorptionConfigurationGenerator(
         slab,
         0,
         molecule("CO"),
@@ -29,7 +29,7 @@ def generator(slab: Atoms) -> SingleSiteGenerator:
     )
 
 
-def test_budget(generator: SingleSiteGenerator) -> None:
+def test_budget(generator: AdsorptionConfigurationGenerator) -> None:
     assert generator.n_oa == 6
     assert generator.n_rot == 4
     assert generator.n_d == 3
@@ -38,7 +38,7 @@ def test_budget(generator: SingleSiteGenerator) -> None:
 
 
 def test_site_is_derived_from_the_core_index(
-    generator: SingleSiteGenerator,
+    generator: AdsorptionConfigurationGenerator,
     slab: Atoms,
 ) -> None:
     """The core index selects the core set and the site centre."""
@@ -48,7 +48,7 @@ def test_site_is_derived_from_the_core_index(
 
 def test_multi_core_index_is_accepted(slab: Atoms) -> None:
     """A pair of indices builds a bridge site."""
-    generator = SingleSiteGenerator(
+    generator = AdsorptionConfigurationGenerator(
         slab,
         [0, 1],
         molecule("CO"),
@@ -63,7 +63,7 @@ def test_multi_core_index_is_accepted(slab: Atoms) -> None:
 
 def test_distance_array_is_built_from_the_bounds() -> None:
     """``n_d`` and the bounds define a uniform distance array."""
-    generator = SingleSiteGenerator(
+    generator = AdsorptionConfigurationGenerator(
         fcc111("Cu", (2, 2, 2), vacuum=8.0, orthogonal=True),
         0,
         molecule("CO"),
@@ -79,7 +79,7 @@ def test_distance_array_is_built_from_the_bounds() -> None:
 
 def test_explicit_distances_override_the_bounds(slab: Atoms) -> None:
     """An explicit array wins over ``n_d`` and the bounds."""
-    generator = SingleSiteGenerator(
+    generator = AdsorptionConfigurationGenerator(
         slab,
         0,
         molecule("CO"),
@@ -93,15 +93,13 @@ def test_explicit_distances_override_the_bounds(slab: Atoms) -> None:
 
 def test_distance_bounds_follow_the_adsorbate_radius(slab: Atoms) -> None:
     """The radius coefficients shift both bounds by the molecular radius."""
-    reference = molecule("C6H6")
-    center = reference.get_center_of_mass()
-    radius = float(
-        np.linalg.norm(reference.positions - center, axis=1).max()
-    )
-    generator = SingleSiteGenerator(
+    adsorbate = molecule("C6H6")
+    center = adsorbate.get_center_of_mass()
+    radius = float(np.linalg.norm(adsorbate.positions - center, axis=1).max())
+    generator = AdsorptionConfigurationGenerator(
         slab,
         0,
-        reference,
+        adsorbate,
         n_oa=1,
         n_rot=1,
         n_d=2,
@@ -131,10 +129,10 @@ def test_invalid_parameters_are_rejected(
 ) -> None:
     """Invalid named parameters raise a ``ValueError``."""
     with pytest.raises(ValueError):
-        SingleSiteGenerator(slab, 0, molecule("CO"), **kwargs)
+        AdsorptionConfigurationGenerator(slab, 0, molecule("CO"), **kwargs)
 
 
-def test_index_order(generator: SingleSiteGenerator) -> None:
+def test_index_order(generator: AdsorptionConfigurationGenerator) -> None:
     first = generator.trial(1)
     assert first.meta["i"] == 1
     assert first.meta["j"] == 1
@@ -150,7 +148,9 @@ def test_index_order(generator: SingleSiteGenerator) -> None:
         generator.trial(73)
 
 
-def test_trial_structure(generator: SingleSiteGenerator, slab: Atoms) -> None:
+def test_trial_structure(
+    generator: AdsorptionConfigurationGenerator, slab: Atoms
+) -> None:
     trial = generator.trial(5)
     assert len(trial.atoms) == len(slab) + 2
     assert trial.index == 5
@@ -159,7 +159,7 @@ def test_trial_structure(generator: SingleSiteGenerator, slab: Atoms) -> None:
     assert trial.atoms.get_chemical_formula() == "CCu8O"
 
 
-def test_generate_interval(generator: SingleSiteGenerator) -> None:
+def test_generate_interval(generator: AdsorptionConfigurationGenerator) -> None:
     chunk = list(generator.generate(10, 12))
     assert [trial.index for trial in chunk] == [10, 11, 12]
     assert len(list(generator.generate())) == 72
@@ -171,18 +171,21 @@ def test_generate_interval(generator: SingleSiteGenerator) -> None:
         list(generator.generate(5, 4))
 
 
-def test_signature_is_stable(generator: SingleSiteGenerator) -> None:
+def test_signature_is_stable(
+    generator: AdsorptionConfigurationGenerator,
+) -> None:
     left = generator.signature()
     right = generator.signature()
     assert left == right
-    assert left["kind"] == "single_site"
-    assert left["core"] == [0]
-    assert left["n_oa"] == 6
-    assert left["distances"] == pytest.approx([1.5, 2.0, 2.5])
+    assert left["kind"] == "adsorption"
+    assert left["factors"]["n_sites"] == 1
+    assert left["sampling"]["n_oa"] == 6
+    assert left["sampling"]["n_d"] == 3
+    assert left["sites"]["digest"].startswith("sha1:")
 
 
 def test_fixed_rotation_has_one_orientation(slab: Atoms) -> None:
-    generator = SingleSiteGenerator(
+    generator = AdsorptionConfigurationGenerator(
         slab,
         0,
         molecule("CO"),
@@ -194,9 +197,38 @@ def test_fixed_rotation_has_one_orientation(slab: Atoms) -> None:
     assert generator.n_candidates == 4
 
 
+def test_signature_reports_the_realised_orientation_count(slab: Atoms) -> None:
+    """A single atom realises one orientation whatever ``n_rot`` requests."""
+    generator = AdsorptionConfigurationGenerator(
+        slab, 0, Atoms("O"), n_oa=2, n_rot=50, n_d=1
+    )
+    signature = generator.signature()
+    assert signature["sampling"]["n_rot"] == 50
+    assert signature["sampling"]["n_rot_is_requested"] is True
+    assert signature["components"] == [
+        {
+            "conformer": 0,
+            "site": 0,
+            "n_oa": 2,
+            "n_rot": 1,
+            "n_d": 1,
+            "orientation": "fixed",
+            "d_min": pytest.approx(signature["components"][0]["d_min"]),
+            "d_max": pytest.approx(signature["components"][0]["d_max"]),
+        }
+    ]
+    # With n_d=1 the array collapses onto the contact distance of the site.
+    assert (
+        signature["components"][0]["d_min"]
+        == signature["components"][0]["d_max"]
+    )
+    assert signature["factors"]["n_rot_realised"] == [1]
+    assert signature["n_candidates"] == 2
+
+
 def test_orientation_kind_selects_the_rotation_set(slab: Atoms) -> None:
     """``orientation_kind`` builds the rotation set when none is given."""
-    generator = SingleSiteGenerator(
+    generator = AdsorptionConfigurationGenerator(
         slab,
         0,
         molecule("CO"),

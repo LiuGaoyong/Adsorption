@@ -1,0 +1,38 @@
+# Tier 1 (lowest sampling density) with the two cheap tiers only:
+# geometry floor + single-point Lennard-Jones energy screen. No NequIP.
+# Chain: GeometryFilter -> LennardJonesScreenFilter
+adsorbate:
+  conformers: rotamers
+  dihedrals: 4
+  max_rotamers: 8
+protocol:
+  n_oa: 10
+  n_rot: 10
+  n_d: 6
+  d_min: null  # hard-sphere contact distance of each site and adsorbate
+  d_max: 3.0
+  d_min_radius_scale: 0.0
+  d_max_radius_scale: 0.0
+  anchor: com
+  orientation_kind: auto
+filters:
+- _target_: adsorption.filters.GeometryFilter
+  scale: 1.0
+- _target_: adsorption.filters.LennardJonesScreenFilter
+  e_cut: null
+  e_bind_cut: 0.0
+budget:
+  max_candidates: null
+storage:
+  records: accepted
+  compression: gzip
+  structures: adsorbate
+start: 1
+stop: null
+outputs: ./results
+parallel:
+  backend: loky
+  engine: auto
+  n_jobs: 1
+  chunk_factor: 4
+  threads_per_worker: 1

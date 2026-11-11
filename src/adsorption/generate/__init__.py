@@ -1,23 +1,39 @@
 """Process A: deterministic generators of adsorption configurations."""
 
-from adsorption.generate.multi_adsorbate import (
-    Conformer,
-    MultiAdsorbateGenerator,
-)
-from adsorption.generate.multi_site import MultiSiteGenerator
+from adsorption.generate.generator import AdsorptionConfigurationGenerator
 from adsorption.generate.orientation import (
-    Shape,
+    OrientationShape,
     build_orientation,
     detect_shape,
 )
-from adsorption.generate.single_site import SingleSiteGenerator
+from adsorption.generate.sampling import (
+    DEFAULT_D_CONTACT_SCALE,
+    DEFAULT_D_MAX,
+    DEFAULT_D_MAX_RADIUS_SCALE,
+    DEFAULT_D_MIN,
+    DEFAULT_D_MIN_RADIUS_SCALE,
+    DEFAULT_HEMISPHERE,
+    DEFAULT_N_D,
+    DEFAULT_N_OA,
+    DEFAULT_N_ROT,
+    BoundAdsorbate,
+    Sampling,
+)
 
 __all__ = [
-    "Conformer",
-    "MultiAdsorbateGenerator",
-    "MultiSiteGenerator",
-    "Shape",
-    "SingleSiteGenerator",
+    "AdsorptionConfigurationGenerator",
+    "BoundAdsorbate",
+    "DEFAULT_D_CONTACT_SCALE",
+    "DEFAULT_D_MAX",
+    "DEFAULT_D_MAX_RADIUS_SCALE",
+    "DEFAULT_D_MIN",
+    "DEFAULT_D_MIN_RADIUS_SCALE",
+    "DEFAULT_HEMISPHERE",
+    "DEFAULT_N_D",
+    "DEFAULT_N_OA",
+    "DEFAULT_N_ROT",
+    "Sampling",
+    "OrientationShape",
     "build_orientation",
     "detect_shape",
 ]

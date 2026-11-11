@@ -28,6 +28,11 @@ from adsorption.geometry.constants import (
     default_scale,
     default_skin,
 )
+from adsorption.geometry.contact import (
+    DEFAULT_SIGMA,
+    contact_distance,
+    pair_floor,
+)
 from adsorption.geometry.distance import distance_array
 from adsorption.geometry.grids import (
     DirectionGrid,
@@ -59,17 +64,32 @@ from adsorption.geometry.rotations import (
 from adsorption.geometry.shell import first_neighbor_shell, mean_mic
 from adsorption.geometry.superfibonacci import SuperFibonacciSO3
 from adsorption.geometry.site import SiteGeometry, build_site
+from adsorption.geometry.sites import (
+    AutoSites,
+    ExplicitSites,
+    GraphAtomsSites,
+    ResolvedSites,
+    SiteSelection,
+    SiteSource,
+    SiteSpec,
+    TopLayerSites,
+)
 
 __all__ = [
     "Anchor",
+    "AutoSites",
+    "DEFAULT_SIGMA",
     "DELTA_NBR",
     "DirectionGrid",
     "DirectionRollSet",
+    "ExplicitSites",
     "FibonacciGrid",
     "FixedRotation",
+    "GraphAtomsSites",
     "LatLonGrid",
     "MAX_CORE_SIZE",
     "ResolvedAnchor",
+    "ResolvedSites",
     "RotationSet",
     "SCALE_MULTI",
     "SCALE_SINGLE",
@@ -78,10 +98,15 @@ __all__ = [
     "SeededRandomGrid",
     "ShortestArcSet",
     "SiteGeometry",
+    "SiteSelection",
+    "SiteSource",
+    "SiteSpec",
     "SuperFibonacciSO3",
+    "TopLayerSites",
     "apply_quaternion",
     "axis_angle_quaternion",
     "build_site",
+    "contact_distance",
     "default_scale",
     "default_skin",
     "displacements_mic",
@@ -89,6 +114,7 @@ __all__ = [
     "first_neighbor_shell",
     "is_periodic",
     "mean_mic",
+    "pair_floor",
     "place",
     "quaternion_from_scipy",
     "resolve_anchor",

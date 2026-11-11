@@ -9,7 +9,7 @@ Issues = "https://github.com/LiuGaoyong/Adsorption/issues/"
 
 [project]
 name = "adsorption"
-version = "0.2.0"
+version = "0.3.0"
 readme = "README.md"
 description = "Adsorption Based on ASE."
 keywords = ["chemistry", "adsorption"]
@@ -32,12 +32,19 @@ dependencies = [
     "scikit-learn",
     "typing-extensions",
     "graphatoms>=3.0",
+    "rdkit>=2025",
     'hydra-core',
     "pyyaml>=6",
 ]
 
+[project.optional-dependencies]
+# Optional parallel backend: the runner uses Ray when it is installed.
+ray = ["ray[default]>=2.50"]
+nequip = ["nequip>=0.17.0"]
+
 [project.scripts]
 adsorption-run = "adsorption.runner:run"
+adsorption-light = "adsorption.analysis.light:main"
 
 [dependency-groups]
 dev = [
@@ -46,6 +53,8 @@ dev = [
     "pytest-xdist",
     "jupyterlab",
     "matplotlib>=3.8",
+    "nequip>=0.17.0",
+    "ray[default]>=2.50"
 ]
 
 # uv config
@@ -70,10 +79,11 @@ filterwarnings = [
 [tool.ruff]
 line-length = 80
 indent-width = 4
+extend-exclude = ["deprecated"]
+[tool.ruff.lint]
 select = ["F", "E", "W", "UP", "D"]
 ignore = ["F722", 'D100']
-extend-exclude = ["deprecated"]
-[tool.ruff.pydocstyle]
+[tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.pixi.package]
@@ -106,9 +116,12 @@ scipy = ">=0.0"
 scikit-learn = ">=0.0"
 typing-extensions = ">=0.0"
 graphatoms = ">=3.0"
+rdkit = ">=2025"
 pyyaml = ">=6"
 ruff = ">=0.11"
 pytest = ">=8.3"
 pytest-xdist = ">=3.8.0"
 jupyterlab = ">=4.5.8"
 hydra-core = ">=1.0"
+nequip = ">=0.17.0"
+ray-default = ">=2.50"

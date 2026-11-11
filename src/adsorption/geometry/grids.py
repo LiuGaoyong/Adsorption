@@ -8,10 +8,9 @@ that a candidate can be regenerated from its index.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from abc import ABC, abstractmethod
 
 import numpy as np
-from graphatoms.geometry.sample import fibonacci_lattice
 
 from adsorption.geometry.rotation import unit_vector
 
@@ -23,20 +22,21 @@ __all__ = [
 ]
 
 
-@runtime_checkable
-class DirectionGrid(Protocol):
+class DirectionGrid(ABC):
     """A deterministic point set on the unit sphere."""
 
-    name: str
+    name: str = ""
     """Short name used in protocol records."""
 
+    @abstractmethod
     def size(self, n: int) -> int:
         """Return the number of points generated for the request ``n``."""
-        ...
+        raise NotImplementedError
 
+    @abstractmethod
     def points(self, n: int) -> np.ndarray:
         """Return unit vectors of shape ``(size(n), 3)``."""
-        ...
+        raise NotImplementedError
 
 
 def _check_n(n: int) -> int:
@@ -50,7 +50,22 @@ def _normalize(points: np.ndarray) -> np.ndarray:
     return unit_vector(np.asarray(points, dtype=float))
 
 
-class FibonacciGrid:
+def _fibonacci_lattice(n: int) -> np.ndarray:
+    """Return the spherical Fibonacci lattice in the graphatoms ordering."""
+    values = np.arange(int(n), dtype=float)
+    a = 2.0 * values + 1.0
+    theta = np.arccos(1.0 - a / float(n))
+    psi = (1.0 + np.sqrt(5.0)) / 2.0 * a * np.pi
+    return np.column_stack(
+        (
+            np.sin(theta) * np.cos(psi),
+            np.sin(theta) * np.sin(psi),
+            np.cos(theta),
+        )
+    )
+
+
+class FibonacciGrid(DirectionGrid):
     """The spherical Fibonacci lattice of Eqs. (5)-(6).
 
     The point ordering is the lattice index order: ``z_i = 1 - (2i+1)/n``
@@ -68,10 +83,10 @@ class FibonacciGrid:
     def points(self, n: int) -> np.ndarray:
         """Return the ``n`` unit Fibonacci vectors in index order."""
         n = _check_n(n)
-        return np.asarray(fibonacci_lattice(n), dtype=float)
+        return _fibonacci_lattice(n)
 
 
-class LatLonGrid:
+class LatLonGrid(DirectionGrid):
     """An equal-angle latitude-longitude grid.
 
     ``n`` is only a request: the grid is a product of a polar and an azimuthal
@@ -110,7 +125,7 @@ class LatLonGrid:
         return _normalize(points)
 
 
-class SeededRandomGrid:
+class SeededRandomGrid(DirectionGrid):
     """A uniform random point set with an explicit seed.
 
     This is a baseline, never the default. The seed is part of the protocol

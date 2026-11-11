@@ -11,24 +11,93 @@ loses the evidence.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import (
+    Generator,
+    Iterable,
+    Iterator,
+    Mapping,
+    MutableMapping,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Any, Literal
-
+from typing import Any, Literal, Protocol, runtime_checkable
+import numpy as np
+from arrayff.neighbors import neighbor_list
 from ase import Atoms
+from graphatoms.utils.bytestool import hash_string
 
 __all__ = [
     "AdsorptionConfigurationFilterABC",
     "AdsorptionConfigurationGeneratorABC",
-    "Verdict",
+    "FilterStage",
     "Trial",
+    "Verdict",
+    "canonical_key",
 ]
 
 
-@dataclass(frozen=True)
+def canonical_key(
+    atoms: Atoms,
+    cutoff: float = 5.0,
+    *,
+    resolution: float = 0.01,
+) -> str:
+    """Return the bond-list hash of one structure.
+
+    The bond list comes from :func:`arrayff.neighbors.neighbor_list`. Every
+    bond contributes three little-endian ``int64`` values — the atomic
+    numbers ``Z_i``, ``Z_j`` and the interatomic distance in units of
+    ``resolution`` Angstrom — and the rows are sorted by those values, so the
+    payload is the sorted ``(nbonds, 3)`` integer block and the key is its
+    blake2b-128 digest (:func:`graphatoms.utils.bytestool.hash_string`).
+
+    The key is invariant to rigid rotation, translation and reflection, and,
+    because the rows are ordered by value rather than by atom index, to any
+    reordering of the atoms. Two placements that are the same structure up to
+    a permutation of equivalent atoms (the six-fold rotation of a benzene
+    ring, the twelve equivalent orientations of methane, a translation of a
+    top site to an equivalent lattice atom) therefore share it.
+
+    Args:
+        atoms: The structure to key.
+        cutoff: Neighbor cutoff in Angstrom. It must stay below half the
+            smallest cell edge of a periodic structure, otherwise a periodic
+            image of a pair enters the bond list as a second bond.
+        resolution: Distance bin width in Angstrom. ``0.01`` identifies
+            placements of one rigid enumeration; a coarser value such as
+            ``0.1`` groups relaxed structures that converged to one basin
+            with slightly different residual coordinates.
+
+    Returns:
+        str: The 32-character hash of the bond list.
+
+    Raises:
+        ValueError: If ``resolution`` is not a positive finite number.
+    """
+    if not np.isfinite(resolution) or resolution <= 0.0:
+        raise ValueError(f"resolution must be positive, got {resolution}.")
+    i, j, distance = neighbor_list("ijd", atoms, cutoff=cutoff)
+    numbers = np.asarray(atoms.numbers, dtype=np.int64)
+    z_i = numbers[np.asarray(i, dtype=int)]
+    z_j = numbers[np.asarray(j, dtype=int)]
+    int_d = np.rint(np.asarray(distance, dtype=float) / resolution).astype(
+        np.int64
+    )
+    order = np.lexsort((int_d, z_j, z_i))
+    payload = np.column_stack([z_i[order], z_j[order], int_d[order]])
+    return hash_string(payload.astype("<i8").tobytes())
+
+
+@dataclass(frozen=True, eq=False)
 class Trial:
     """One generated configuration with its provenance.
+
+    Two trials are equal when they carry the same candidate index and budget
+    and the same structure (atomic numbers and positions); the hash only uses
+    the index, the budget and the size, so a trial can be a member of a set or
+    a dictionary key. ``ase.Atoms`` itself is neither hashable nor safely
+    comparable, which is why the dataclass does not derive ``__eq__``.
 
     Attributes:
         atoms: The trial structure, substrate atoms first.
@@ -42,6 +111,25 @@ class Trial:
     index: int
     n_total: int
     meta: Mapping[str, Any] = field(default_factory=dict)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare the candidate index, the budget and the structure."""
+        if not isinstance(other, Trial):
+            return NotImplemented
+        if (
+            int(self.index) != int(other.index)
+            or int(self.n_total) != int(other.n_total)
+            or len(self.atoms) != len(other.atoms)
+        ):
+            return False
+        return bool(
+            np.array_equal(self.atoms.numbers, other.atoms.numbers)
+            and np.array_equal(self.atoms.positions, other.atoms.positions)
+        )
+
+    def __hash__(self) -> int:
+        """Hash the candidate index, the budget and the structure size."""
+        return hash((int(self.index), int(self.n_total), len(self.atoms)))
 
     def __post_init__(self) -> None:
         """Validate the structure and the index range."""
@@ -102,6 +190,27 @@ class Trial:
         """
         return len(self.atoms) - self.natoms_substrate
 
+    def get_canonical_key(
+        self,
+        cutoff: float = 5.0,
+        *,
+        resolution: float = 0.01,
+    ) -> str:
+        """Return the bond-list hash of the trial.
+
+        It is :func:`canonical_key` applied to the trial structure; see there
+        for the invariants. The key identifies two trials with the same atoms
+        at the same distances, whatever their index, site or conformer.
+
+        Args:
+            cutoff: Neighbor cutoff in Angstrom.
+            resolution: Distance bin width in Angstrom.
+
+        Returns:
+            str: The 32-character hash of the bond list.
+        """
+        return canonical_key(self.atoms, cutoff=cutoff, resolution=resolution)
+
 
 @dataclass(frozen=True)
 class Verdict:
@@ -111,7 +220,8 @@ class Verdict:
         accepted: Whether the trial survives the filter.
         value: The measured quantity (distance, energy, ...), if any.
         reason: A short machine-readable reason: ``"ok"``, ``"floor"``,
-            ``"e_cut"`` or ``"unconverged"``.
+            ``"e_cut"``, ``"unconverged"``, ``"duplicate"``, ``"nan"`` or
+            ``"exception:<type>"``.
         detail: Optional rich payload, e.g. an ``EvalResult``.
     """
 
@@ -270,15 +380,83 @@ class AdsorptionConfigurationGeneratorABC(
         raise NotImplementedError
 
 
+@runtime_checkable
+class FilterStage(Protocol):
+    """One stage of a filter chain.
+
+    Both :class:`AdsorptionConfigurationFilterABC` and
+    :class:`~adsorption.dedup.TrialDeduplicator` satisfy the protocol: the
+    pipeline only needs ``evaluate``, and it stops the chain at the first
+    rejected stage.
+    """
+
+    def evaluate(self, trial: Trial) -> Verdict:
+        """Evaluate one trial.
+
+        Args:
+            trial: The trial to judge.
+
+        Returns:
+            Verdict: The verdict of this stage.
+        """
+        ...
+
+
 class AdsorptionConfigurationFilterABC(ABC):
     """Process B: geometric or energetic filtering.
 
-    A concrete filter evaluates one trial and returns a :class:`Verdict`. It
-    never generates or mutates configurations.
+    A concrete filter implements :meth:`_evaluate` and returns a
+    :class:`Verdict`. It never generates or mutates configurations — except
+    for the optional canonical key, see below. A filter is one kind of
+    pipeline stage; :class:`~adsorption.dedup.TrialDeduplicator` is the other
+    (see :class:`FilterStage`).
+
+    With ``record_key=True`` the filter writes the canonical key of every
+    trial it *accepts* into ``trial.meta["canonical_key"]``, so a later stage
+    or the record sidecar can deduplicate the survivors without recomputing
+    the bond list. The key is computed only after the filter accepted the
+    trial, which keeps the cost on the survivors of the cheap screens.
     """
 
-    @abstractmethod
+    def __init__(
+        self,
+        *,
+        record_key: bool = False,
+        key_cutoff: float = 5.0,
+    ) -> None:
+        """Store the optional canonical-key recorder.
+
+        Args:
+            record_key: Whether to compute the canonical key of an accepted
+                trial and store it in ``trial.meta["canonical_key"]``.
+            key_cutoff: Neighbor cutoff in Angstrom of that key; it is stored
+                as ``trial.meta["canonical_key_cutoff"]`` so a consumer can
+                check that it matches its own cutoff before reusing the key.
+
+        Raises:
+            ValueError: If the cutoff is not a positive finite number.
+        """
+        if not np.isfinite(key_cutoff) or key_cutoff <= 0.0:
+            raise ValueError(f"key_cutoff must be positive, got {key_cutoff}.")
+        self.record_key = bool(record_key)
+        self.key_cutoff = float(key_cutoff)
+
     def evaluate(self, trial: Trial) -> Verdict:
+        """Evaluate one trial and record its key when it is accepted.
+
+        Args:
+            trial: The trial to judge.
+
+        Returns:
+            Verdict: The verdict of the concrete filter.
+        """
+        verdict = self._evaluate(trial)
+        if verdict.accepted and self.record_key:
+            self.record_canonical_key(trial)
+        return verdict
+
+    @abstractmethod
+    def _evaluate(self, trial: Trial) -> Verdict:
         """Evaluate one trial.
 
         Args:
@@ -288,6 +466,28 @@ class AdsorptionConfigurationFilterABC(ABC):
             Verdict: The verdict with its measured value.
         """
         raise NotImplementedError
+
+    def record_canonical_key(self, trial: Trial) -> str:
+        """Compute the canonical key of a trial and store it in its metadata.
+
+        Args:
+            trial: The accepted trial.
+
+        Returns:
+            str: The canonical key that was stored.
+
+        Raises:
+            TypeError: If the trial metadata is not writable.
+        """
+        if not isinstance(trial.meta, MutableMapping):
+            raise TypeError(
+                "trial.meta must be mutable to record the canonical key, "
+                f"got {type(trial.meta)}."
+            )
+        key = trial.get_canonical_key(cutoff=self.key_cutoff)
+        trial.meta["canonical_key"] = key
+        trial.meta["canonical_key_cutoff"] = self.key_cutoff
+        return key
 
     def accepts(self, trial: Trial) -> bool:
         """Return whether the trial survives the filter.

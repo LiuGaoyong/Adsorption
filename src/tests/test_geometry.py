@@ -1,6 +1,11 @@
 # ruff: noqa D103 E501
 """Tests of the calculator-free geometric layer."""
 
+from __future__ import annotations
+
+
+import numpy as np
+from ase import Atoms
 import numpy as np
 import pytest
 from ase import Atoms
@@ -8,13 +13,14 @@ from ase.build import fcc111, molecule
 from ase.cluster import Octahedron
 from ase.data import covalent_radii as COV_R
 from ase.geometry import find_mic
-
+from collections.abc import Sequence
 from adsorption.geometry import (
     DELTA_NBR,
     DirectionRollSet,
     FibonacciGrid,
     LatLonGrid,
     SeededRandomGrid,
+    ShortestArcSet,
     build_site,
     default_scale,
     default_skin,
@@ -29,11 +35,8 @@ from adsorption.geometry import (
     unit_vector,
 )
 from adsorption.geometry._quat import quaternion_invert, quaternion_raw_multiply
-from adsorption.utils.conformers import (
-    generate_conformers,
-    near_congruent,
-    prune_by_energy,
-)
+from adsorption.utils.rdutils import generate_conformers
+from adsorption.generate.adsorbate import prune_by_energy, near_congruent
 
 
 @pytest.fixture(scope="module")
@@ -129,9 +132,7 @@ def test_distance_array_from_the_count() -> None:
 
 
 def test_unit_vector_normalises_a_batch() -> None:
-    vectors = np.array(
-        [[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, -4.0]]
-    )
+    vectors = np.array([[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, -4.0]])
     unit = unit_vector(vectors)
     assert unit.shape == vectors.shape
     assert np.allclose(np.linalg.norm(unit, axis=1), 1.0)
@@ -165,6 +166,29 @@ def test_shortest_arc_quaternion() -> None:
         assert np.allclose(back, u, atol=1e-10)
 
 
+def test_shortest_arc_set_matches_the_scalar_construction() -> None:
+    """The vectorised set equals scipy's per-direction shortest arc."""
+    from adsorption.geometry._quat import standardize_quaternion
+    from adsorption.geometry.rotations import _shortest_arc_quaternions
+
+    rng = np.random.default_rng(1)
+    axis = unit_vector(rng.normal(size=3))
+    arcs = ShortestArcSet(axis, 64)
+    for index, direction in enumerate(arcs.directions):
+        expected = standardize_quaternion(
+            shortest_arc_quaternion(axis, direction)
+        )
+        assert np.allclose(arcs.quaternion(index), expected, atol=1e-10)
+        assert np.allclose(arcs.image(index), direction)
+        placed = apply_quaternion(arcs.quaternion(index), axis[None, :])[0]
+        assert np.allclose(placed, direction, atol=1e-10)
+    # The antiparallel direction has no unique arc; it still maps the axis.
+    z = np.array([0.0, 0.0, 1.0])
+    degenerate = _shortest_arc_quaternions(z, np.array([-z, z]))
+    assert np.allclose(apply_quaternion(degenerate[0], z[None, :])[0], -z)
+    assert np.allclose(degenerate[1], [1.0, 0.0, 0.0, 0.0])
+
+
 def test_anchor_resolution() -> None:
     adsorbate = Atoms("H2O")
     com = resolve_anchor(adsorbate, "com")
@@ -182,25 +206,28 @@ def test_anchor_resolution() -> None:
     with pytest.raises(ValueError):
         resolve_anchor(adsorbate, 7)
     with pytest.raises(ValueError):
-        resolve_anchor(adsorbate, "binding_atom")
+        resolve_anchor(adsorbate, "binding_atom")  # type: ignore
     with pytest.raises(ValueError):
         resolve_anchor(adsorbate, [1.0, 2.0])
 
 
 def test_place_is_rigid_and_does_not_mutate() -> None:
-    reference = Atoms("CO")
-    anchor = resolve_anchor(reference, "com")
-    before = reference.positions.copy()
-    quaternion = shortest_arc_quaternion([0.0, 0.0, 1.0], [1.0, 0.0, 0.0])
+    adsorbate = Atoms("CO")
+    anchor = resolve_anchor(adsorbate, "com")
+    before = adsorbate.positions.copy()
+    quaternion = shortest_arc_quaternion(
+        np.array([0.0, 0.0, 1.0]),
+        np.array([1.0, 0.0, 0.0]),
+    )
     target = np.array([1.0, 2.0, 3.0])
     placed = place(
-        reference,
+        adsorbate,
         anchor=anchor,
         target=target,
         quaternion=quaternion,
     )
 
-    assert np.array_equal(reference.positions, before)
+    assert np.array_equal(adsorbate.positions, before)
     bond = (before[0] - before[1])[None, :]
     assert np.allclose(
         placed.positions[0] - placed.positions[1],
@@ -228,9 +255,13 @@ def test_first_neighbor_shell_matches_brute_force(slab: Atoms) -> None:
         + COV_R[slab.numbers[np.tile(indices, len(core))]]
         + DELTA_NBR
     )
-    expected = np.setdiff1d(np.unique(np.tile(indices, len(core))[distances < cutoff]), core)
+    expected = np.setdiff1d(
+        np.unique(np.tile(indices, len(core))[distances < cutoff]), core
+    )
     assert np.array_equal(shell, expected)
-    assert np.allclose(slab.get_distances(core[0], shell, mic=True).min(), 2.55, atol=0.1)
+    assert np.allclose(
+        slab.get_distances(core[0], shell, mic=True).min(), 2.55, atol=0.1
+    )
 
 
 def test_site_geometry_defaults(slab: Atoms, cluster: Atoms) -> None:
@@ -251,7 +282,9 @@ def test_site_geometry_defaults(slab: Atoms, cluster: Atoms) -> None:
     assert multi.skin == pytest.approx(default_skin(2))
     # a multi-core site keeps the core atoms in the filter set
     assert len(multi.filter_positions) == len(multi.neighbor_positions) + 2
-    assert np.allclose(multi.center, mean_mic(slab.positions[two], slab.cell.array, slab.pbc))
+    assert np.allclose(
+        multi.center, mean_mic(slab.positions[two], slab.cell.array, slab.pbc)
+    )
 
     cluster_index = cluster_top_index(cluster)
     cluster_site = build_site(cluster, [cluster_index])
@@ -264,11 +297,35 @@ def test_minimum_image_matches_ase(slab: Atoms) -> None:
     points_a = rng.uniform(-2, 6, size=(6, 3))
     points_b = rng.uniform(-2, 6, size=(4, 3))
     diff = points_b[None, :, :] - points_a[:, None, :]
-    expected = find_mic(diff.reshape(-1, 3), slab.cell, slab.pbc)[0]
+    expected = find_mic(
+        diff.reshape(-1, 3),
+        slab.cell,
+        slab.pbc,  # type: ignore
+    )[0]
     assert np.allclose(
         displacements_mic(diff, slab.cell.array, slab.pbc),
         expected.reshape(diff.shape),
     )
+
+
+def test_minimum_image_fast_path_matches_ase_for_wide_vectors() -> None:
+    """The orthorhombic wrap agrees with ASE beyond half the cell length."""
+    rng = np.random.default_rng(4)
+    cell = np.diag([7.0, 9.0, 30.0])
+    # Vectors far longer than the cell exercise the multi-image wrap.
+    diff = rng.uniform(-40.0, 40.0, size=(50, 3))
+    for pbc in (
+        np.array([True, True, False]),
+        np.array([True, False, True]),
+        np.array([True, True, True]),
+    ):
+        expected = find_mic(diff, cell, pbc)[0]  # type: ignore
+        assert np.allclose(displacements_mic(diff, cell, pbc), expected)
+    # Skewed cells take ASE's general path and must agree too.
+    skew = np.array([[7.0, 0.0, 0.0], [3.5, 6.1, 0.0], [0.0, 0.0, 30.0]])
+    pbc = np.array([True, True, False])
+    expected = find_mic(diff, skew, pbc)[0]  # type: ignore
+    assert np.allclose(displacements_mic(diff, skew, pbc), expected)
 
 
 def test_direction_roll_set() -> None:
@@ -313,9 +370,9 @@ def test_conformer_pruning_and_congruence() -> None:
     with pytest.raises(ValueError):
         near_congruent(water, methane)
 
-    references = [water, rotated, molecule("H2O")]
-    kept = prune_by_energy(references, [0.0, 0.05, 0.2], window=0.1)
+    adsorbates = [water, rotated, molecule("H2O")]
+    kept = prune_by_energy(adsorbates, [0.0, 0.05, 0.2], window=0.1)
     assert len(kept) == 2
     assert kept[0] is water and kept[1] is rotated
     with pytest.raises(ValueError):
-        prune_by_energy(references, [0.0], window=0.1)
+        prune_by_energy(adsorbates, [0.0], window=0.1)
