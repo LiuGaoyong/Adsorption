@@ -71,9 +71,15 @@ def canonical_key(atoms: Atoms, cutoff: float = 5.0) -> str:
     return hash_string(payload.astype("<i8").tobytes())
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Trial:
     """One generated configuration with its provenance.
+
+    Two trials are equal when they carry the same candidate index and budget
+    and the same structure (atomic numbers and positions); the hash only uses
+    the index, the budget and the size, so a trial can be a member of a set or
+    a dictionary key. ``ase.Atoms`` itself is neither hashable nor safely
+    comparable, which is why the dataclass does not derive ``__eq__``.
 
     Attributes:
         atoms: The trial structure, substrate atoms first.
@@ -87,6 +93,25 @@ class Trial:
     index: int
     n_total: int
     meta: Mapping[str, Any] = field(default_factory=dict)
+
+    def __eq__(self, other: object) -> bool:
+        """Compare the candidate index, the budget and the structure."""
+        if not isinstance(other, Trial):
+            return NotImplemented
+        if (
+            int(self.index) != int(other.index)
+            or int(self.n_total) != int(other.n_total)
+            or len(self.atoms) != len(other.atoms)
+        ):
+            return False
+        return bool(
+            np.array_equal(self.atoms.numbers, other.atoms.numbers)
+            and np.array_equal(self.atoms.positions, other.atoms.positions)
+        )
+
+    def __hash__(self) -> int:
+        """Hash the candidate index, the budget and the structure size."""
+        return hash((int(self.index), int(self.n_total), len(self.atoms)))
 
     def __post_init__(self) -> None:
         """Validate the structure and the index range."""

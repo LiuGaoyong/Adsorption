@@ -52,7 +52,8 @@ from adsorption.generate.sampling import (
     BoundAdsorbate,
     Sampling,
 )
-from adsorption.geometry.placement import Anchor, ResolvedAnchor, place
+from adsorption.geometry.placement import Anchor, ResolvedAnchor
+from adsorption.geometry.rotation import apply_quaternion
 from adsorption.geometry.rotations import RotationSet
 from adsorption.geometry.site import SiteGeometry
 from adsorption.geometry.sites import ExplicitSites, ResolvedSites, SiteSource
@@ -199,6 +200,39 @@ class AdsorptionConfigurationGenerator(
             )
         self._components: tuple[_Component, ...] = components
         self._offsets, self._total = _prefix_sums(self._components)
+        # Per-component build caches: a template structure (substrate plus
+        # the unplaced adsorbate, so every array of the substrate survives)
+        # and the body-frame coordinates rotated by orientation ``j``.
+        self._templates: dict[int, Atoms] = {}
+        self._rotated: dict[tuple[int, int], np.ndarray] = {}
+
+    def _template(self, position: int) -> Atoms:
+        """Return the cached substrate-plus-adsorbate template."""
+        template = self._templates.get(position)
+        if template is None:
+            template = self.substrate.copy()
+            template.extend(self._components[position].adsorbate.rigid.atoms)
+            self._templates[position] = template
+        return template
+
+    def _rotated_body(self, position: int, j: int) -> np.ndarray:
+        """Return the anchor-relative adsorbate coordinates at orientation j.
+
+        The rotation does not depend on the direction or the distance, so
+        the ``(n_atoms, 3)`` block is computed once per ``(component, j)``.
+        """
+        key = (position, int(j))
+        rotated = self._rotated.get(key)
+        if rotated is None:
+            bound: BoundAdsorbate = self._components[position].adsorbate
+            relative = (
+                np.asarray(bound.rigid.atoms.positions, dtype=float)
+                - bound.rigid.anchor.position
+            )
+            quaternion = bound.orientation.quaternion(j - 1)
+            rotated = apply_quaternion(quaternion, relative)
+            self._rotated[key] = rotated
+        return rotated
 
     @staticmethod
     def _resolve_inputs(
@@ -267,28 +301,31 @@ class AdsorptionConfigurationGenerator(
 
     def _build(
         self,
-        component: _Component,
+        position: int,
         i: int,
         j: int,
         k: int,
         index: int,
     ) -> Trial:
-        """Build one trial from a component and its three indices."""
+        """Build one trial from a component position and its three indices.
+
+        The placement is ``r = target + R_j (r0 - r_anchor)`` as in
+        :func:`adsorption.geometry.placement.place`; the rotated block is
+        taken from the per-orientation cache and only the translation is
+        evaluated per candidate.
+        """
+        component = self._components[position]
         bound: BoundAdsorbate = component.adsorbate
         direction = np.asarray(bound.directions[i - 1], dtype=float)
         distance = float(bound.distances[k - 1])
         target = np.asarray(component.site.center, dtype=float) + (
             distance * direction
         )
-        quaternion = bound.orientation.quaternion(j - 1)
-        placed = place(
-            bound.rigid.atoms,
-            anchor=bound.rigid.anchor,
-            target=target,
-            quaternion=quaternion,
+        structure = self._template(position).copy()
+        n_substrate = len(self.substrate)
+        structure.positions[n_substrate:] = target + self._rotated_body(
+            position, j
         )
-        structure = self.substrate.copy()
-        structure.extend(placed)
         meta: dict[str, Any] = {
             "kind": "adsorption",
             "site": int(component.site_index),
@@ -335,7 +372,7 @@ class AdsorptionConfigurationGenerator(
         component = self._components[position]
         local = index - self._offsets[position]
         i, j, k = _decode(local, component.n_rot, component.n_d)
-        return self._build(component, i, j, k, index)
+        return self._build(position, i, j, k, index)
 
     def iter_component_starts(self) -> Iterator[Trial]:
         """Yield the first trial of every component.
@@ -386,7 +423,7 @@ class AdsorptionConfigurationGenerator(
             local_last = min(component.n_candidates, last - offset)
             for local in range(local_first, local_last + 1):
                 i, j, k = _decode(local, component.n_rot, component.n_d)
-                yield self._build(component, i, j, k, offset + local)
+                yield self._build(position, i, j, k, offset + local)
             position += 1
             if position >= len(self._components):
                 break
@@ -397,17 +434,25 @@ class AdsorptionConfigurationGenerator(
 
         Returns:
             Mapping[str, Any]: Counts of sites, adsorbates, components and
-            candidates.
+            candidates, plus the realised ``n_oa`` / ``n_rot`` / ``n_d``
+            values (one entry per distinct value across the components).
         """
         return {
             "n_sites": len(self.resolved.specs),
             "n_adsorbates": len(self.rigids),
             "n_components": len(self._components),
             "n_candidates": int(self._total),
+            "n_oa_realised": sorted({c.n_oa for c in self._components}),
+            "n_rot_realised": sorted({c.n_rot for c in self._components}),
+            "n_d_realised": sorted({c.n_d for c in self._components}),
         }
 
     def signature(self) -> Mapping[str, Any]:
         """Return the parameters that identify this generator.
+
+        The ``sampling`` node records the requested protocol; the
+        ``components`` node records, per ``(conformer, site)`` pair, the grid
+        sizes that actually enter the candidate index.
 
         Returns:
             Mapping[str, Any]: A JSON-serialisable description.
@@ -426,6 +471,14 @@ class AdsorptionConfigurationGenerator(
                 "digest": rigid_digest(self.rigids),
             },
             "sampling": dict(self.sampling.signature()),
+            "components": [
+                {
+                    "conformer": int(component.conformer),
+                    "site": int(component.site_index),
+                    **dict(component.adsorbate.signature()),
+                }
+                for component in self._components
+            ],
             "factors": dict(self.factors()),
             "n_candidates": int(self._total),
         }

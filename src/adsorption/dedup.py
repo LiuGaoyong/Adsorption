@@ -10,11 +10,18 @@ relaxation tier, so a repeated structure costs at most one relaxation::
 The pipeline calls :meth:`TrialDeduplicator.evaluate` exactly like a filter's
 ``evaluate`` and stops at the first rejection, so the stage slots into the
 chain without touching the pipeline.
+
+The stage is stateful, so every joblib worker or Ray actor of the campaign
+runner only sees the trials of its own chunk. The runner therefore performs a
+second, global pass in the driver process: an accepted trial records its key
+in ``trial.meta["canonical_key"]``, and the driver rejects a key it has
+already written, whatever worker produced it. Used directly in a pipeline,
+the stage deduplicates every trial it evaluates.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from typing import Any
 
 import numpy as np
@@ -92,6 +99,11 @@ class TrialDeduplicator:
     def evaluate(self, trial: Trial) -> Verdict:
         """Accept a new structure and reject a repeated one.
 
+        The key of an accepted trial is stored in ``trial.meta`` under
+        ``"canonical_key"`` (and its cutoff under ``"canonical_key_cutoff"``)
+        when the metadata is writable, so a consumer that merges the output
+        of several workers can deduplicate globally without recomputing it.
+
         Args:
             trial: The trial to judge.
 
@@ -104,6 +116,9 @@ class TrialDeduplicator:
             self.n_duplicates += 1
             return Verdict(False, None, "duplicate", None)
         self._seen.add(key)
+        if isinstance(trial.meta, MutableMapping):
+            trial.meta["canonical_key"] = key
+            trial.meta["canonical_key_cutoff"] = self.cutoff
         return Verdict(True, None, "unique", None)
 
     def accepts(self, trial: Trial) -> bool:

@@ -197,6 +197,28 @@ def test_fixed_rotation_has_one_orientation(slab: Atoms) -> None:
     assert generator.n_candidates == 4
 
 
+def test_signature_reports_the_realised_orientation_count(slab: Atoms) -> None:
+    """A single atom realises one orientation whatever ``n_rot`` requests."""
+    generator = AdsorptionConfigurationGenerator(
+        slab, 0, Atoms("O"), n_oa=2, n_rot=50, n_d=1
+    )
+    signature = generator.signature()
+    assert signature["sampling"]["n_rot"] == 50
+    assert signature["sampling"]["n_rot_is_requested"] is True
+    assert signature["components"] == [
+        {
+            "conformer": 0,
+            "site": 0,
+            "n_oa": 2,
+            "n_rot": 1,
+            "n_d": 1,
+            "orientation": "fixed",
+        }
+    ]
+    assert signature["factors"]["n_rot_realised"] == [1]
+    assert signature["n_candidates"] == 2
+
+
 def test_orientation_kind_selects_the_rotation_set(slab: Atoms) -> None:
     """``orientation_kind`` builds the rotation set when none is given."""
     generator = AdsorptionConfigurationGenerator(

@@ -20,6 +20,7 @@ from adsorption.geometry import (
     FibonacciGrid,
     LatLonGrid,
     SeededRandomGrid,
+    ShortestArcSet,
     build_site,
     default_scale,
     default_skin,
@@ -165,6 +166,29 @@ def test_shortest_arc_quaternion() -> None:
         assert np.allclose(back, u, atol=1e-10)
 
 
+def test_shortest_arc_set_matches_the_scalar_construction() -> None:
+    """The vectorised set equals scipy's per-direction shortest arc."""
+    from adsorption.geometry._quat import standardize_quaternion
+    from adsorption.geometry.rotations import _shortest_arc_quaternions
+
+    rng = np.random.default_rng(1)
+    axis = unit_vector(rng.normal(size=3))
+    arcs = ShortestArcSet(axis, 64)
+    for index, direction in enumerate(arcs.directions):
+        expected = standardize_quaternion(
+            shortest_arc_quaternion(axis, direction)
+        )
+        assert np.allclose(arcs.quaternion(index), expected, atol=1e-10)
+        assert np.allclose(arcs.image(index), direction)
+        placed = apply_quaternion(arcs.quaternion(index), axis[None, :])[0]
+        assert np.allclose(placed, direction, atol=1e-10)
+    # The antiparallel direction has no unique arc; it still maps the axis.
+    z = np.array([0.0, 0.0, 1.0])
+    degenerate = _shortest_arc_quaternions(z, np.array([-z, z]))
+    assert np.allclose(apply_quaternion(degenerate[0], z[None, :])[0], -z)
+    assert np.allclose(degenerate[1], [1.0, 0.0, 0.0, 0.0])
+
+
 def test_anchor_resolution() -> None:
     adsorbate = Atoms("H2O")
     com = resolve_anchor(adsorbate, "com")
@@ -282,6 +306,26 @@ def test_minimum_image_matches_ase(slab: Atoms) -> None:
         displacements_mic(diff, slab.cell.array, slab.pbc),
         expected.reshape(diff.shape),
     )
+
+
+def test_minimum_image_fast_path_matches_ase_for_wide_vectors() -> None:
+    """The orthorhombic wrap agrees with ASE beyond half the cell length."""
+    rng = np.random.default_rng(4)
+    cell = np.diag([7.0, 9.0, 30.0])
+    # Vectors far longer than the cell exercise the multi-image wrap.
+    diff = rng.uniform(-40.0, 40.0, size=(50, 3))
+    for pbc in (
+        np.array([True, True, False]),
+        np.array([True, False, True]),
+        np.array([True, True, True]),
+    ):
+        expected = find_mic(diff, cell, pbc)[0]  # type: ignore
+        assert np.allclose(displacements_mic(diff, cell, pbc), expected)
+    # Skewed cells take ASE's general path and must agree too.
+    skew = np.array([[7.0, 0.0, 0.0], [3.5, 6.1, 0.0], [0.0, 0.0, 30.0]])
+    pbc = np.array([True, True, False])
+    expected = find_mic(diff, skew, pbc)[0]  # type: ignore
+    assert np.allclose(displacements_mic(diff, skew, pbc), expected)
 
 
 def test_direction_roll_set() -> None:

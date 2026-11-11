@@ -1,10 +1,10 @@
 """RDKit helpers: conversion, bond perception and rotamers.
 
-Every RDKit import is local to the function that needs it, so the package
-stays importable when RDKit is not installed. The module is the single place
-where the construction talks to RDKit: structure conversion, bond perception,
-ETKDG embedding, rotatable-bond detection, and the graph traversals needed by
-the ASE dihedral rotation.
+RDKit is a hard dependency of the package: this module imports it at import
+time and :mod:`adsorption.generate.adsorbate` imports this module. The module
+is the single place where the construction talks to RDKit: structure
+conversion, bond perception, ETKDG embedding, rotatable-bond detection, and
+the graph traversals needed by the ASE dihedral rotation.
 """
 
 from __future__ import annotations

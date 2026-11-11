@@ -41,6 +41,7 @@ from adsorption.base.pipeline import (
     Record,
     evaluate_trial,
 )
+from adsorption.dedup import TrialDeduplicator
 from adsorption.generate import (
     AdsorptionConfigurationGenerator,
     Sampling,
@@ -640,8 +641,18 @@ def _row_from_payload(
     return stored, data
 
 
-def _merge_structures(chunks: Sequence[Path], path: Path) -> None:
-    """Merge the per-chunk databases into the campaign database."""
+def _merge_structures(
+    chunks: Sequence[Path],
+    path: Path,
+    skip: set[int] | None = None,
+) -> None:
+    """Merge the per-chunk databases into the campaign database.
+
+    Args:
+        chunks: The chunk databases, in candidate-index order.
+        path: The merged database.
+        skip: Candidate indices to leave out (global duplicates).
+    """
     path.unlink(missing_ok=True)
     if not chunks:
         path.touch()
@@ -653,7 +664,69 @@ def _merge_structures(chunks: Sequence[Path], path: Path) -> None:
             with connect(str(chunk)) as source:
                 for row in source.select():
                     pairs = dict(row.key_value_pairs)
+                    if skip and int(pairs.get("index", -1)) in skip:
+                        continue
                     target.write(row.toatoms(), key_value_pairs=pairs)
+
+
+class _GlobalDedup:
+    """Driver-side deduplication across workers and actors.
+
+    A :class:`~adsorption.dedup.TrialDeduplicator` in the filter chain only
+    sees the trials of its own joblib chunk or Ray actor. This helper keeps
+    the global key set in the driver: it consumes the record payloads in
+    candidate-index order and turns an accepted trial whose
+    ``meta["canonical_key"]`` was already written into a ``"duplicate"``
+    rejection attributed to the deduplicator stage.
+
+    Attributes:
+        stage_name: Class name of the deduplicator stage in the chain.
+        n_duplicates: Number of accepted payloads rejected by this pass.
+    """
+
+    def __init__(self, stage_name: str) -> None:
+        """Store the stage name and an empty key set."""
+        self.stage_name = str(stage_name)
+        self.n_duplicates = 0
+        self._seen: set[str] = set()
+
+    @classmethod
+    def from_filters(
+        cls,
+        filters: Sequence[FilterStage],
+    ) -> _GlobalDedup | None:
+        """Return a global pass when the chain holds a deduplicator stage."""
+        for filt in filters:
+            if isinstance(filt, TrialDeduplicator):
+                return cls(type(filt).__name__)
+        return None
+
+    def apply(self, payload: dict[str, Any]) -> bool:
+        """Register one record payload and rewrite it when it is a duplicate.
+
+        Args:
+            payload: A JSONL record payload, mutated in place.
+
+        Returns:
+            bool: True when the payload was turned into a duplicate.
+        """
+        if payload.get("first_failed") is not None:
+            return False
+        key = payload.get("meta", {}).get("canonical_key")
+        if key is None:
+            return False
+        key = str(key)
+        if key not in self._seen:
+            self._seen.add(key)
+            return False
+        self.n_duplicates += 1
+        payload["first_failed"] = self.stage_name
+        for verdict in payload.get("verdicts", []):
+            if verdict.get("filter") == self.stage_name:
+                verdict["accepted"] = False
+                verdict["reason"] = "duplicate"
+                break
+        return True
 
 
 def _run_interval(
@@ -664,8 +737,25 @@ def _run_interval(
     records_path: Path,
     structures_path: Path,
     storage: _Storage,
+    keep_accepted: bool = False,
 ) -> dict[str, Any]:
-    """Evaluate one index interval into record and structure chunks."""
+    """Evaluate one index interval into record and structure chunks.
+
+    Args:
+        generator: Process A.
+        filters: Process-B tiers.
+        start: First one-based index (inclusive).
+        stop: Last one-based index (inclusive).
+        records_path: Chunk JSONL path.
+        structures_path: Chunk database path.
+        storage: Which records reach the sidecars.
+        keep_accepted: Write every accepted record to the chunk file even
+            when ``storage`` would drop it; the driver needs them for the
+            global deduplication pass and applies the policy afterwards.
+
+    Returns:
+        dict[str, Any]: The interval statistics.
+    """
     pipeline = AdsorptionConfigurationPipeline(generator, filters)
     total = 0
     accepted = 0
@@ -682,7 +772,7 @@ def _run_interval(
                     stream.write(_record_line(record, filters))
                 continue
             accepted += 1
-            if storage.wants(None):
+            if keep_accepted or storage.wants(None):
                 stream.write(_record_line(record, filters))
             atoms = _accepted_atoms(record)
             if atoms is not None:
@@ -962,6 +1052,7 @@ def _run_ray(
     total = 0
     accepted = 0
     failures: Counter[str] = Counter()
+    dedup = _GlobalDedup.from_filters(filters)
 
     def submit(actor: Any, trial: Trial) -> Any:
         return actor.evaluate.remote(trial)
@@ -982,6 +1073,11 @@ def _run_ray(
             def consume(result: _TrialVerdict) -> None:
                 nonlocal total, accepted
                 total += 1
+                if dedup is not None:
+                    # Results arrive here in candidate-index order, so the
+                    # global pass sees the same first occurrence as a
+                    # serial run would.
+                    dedup.apply(result.payload)
                 failed = result.payload["first_failed"]
                 if failed is not None:
                     failures[str(failed)] += 1
@@ -1032,6 +1128,7 @@ def _run_ray(
         "total": total,
         "accepted": accepted,
         "first_failed": dict(failures),
+        "n_duplicates_global": 0 if dedup is None else dedup.n_duplicates,
     }, n_actors
 
 
@@ -1088,6 +1185,8 @@ def _run_chunks(
     db_paths = [
         chunks_dir / f"chunk_{index:05d}.db" for index in range(len(ranges))
     ]
+    dedup = _GlobalDedup.from_filters(filters)
+    keep_accepted = dedup is not None and n_jobs != 1
     if n_jobs == 1:
         results = [
             _run_interval(
@@ -1104,19 +1203,64 @@ def _run_chunks(
             initargs=(threads_per_worker,),
         )(
             delayed(_run_interval)(
-                generator, filters, begin, end, path, db, storage
+                generator,
+                filters,
+                begin,
+                end,
+                path,
+                db,
+                storage,
+                keep_accepted,
             )
             for (begin, end), path, db in zip(ranges, paths, db_paths)
         )
 
     records_path.unlink(missing_ok=True)
-    if storage.records != "none":
+    duplicates: set[int] = set()
+    if keep_accepted:
+        assert dedup is not None
+        # The chunk files are read in candidate-index order, so the first
+        # occurrence of a key is the one that survives, as in a serial run.
+        stream = (
+            None
+            if storage.records == "none"
+            else _open_text(records_path, storage.compression)
+        )
+        try:
+            for path in paths:
+                if not path.exists():
+                    continue
+                with path.open("r", encoding="utf-8") as chunk:
+                    for line in chunk:
+                        payload = json.loads(line)
+                        if dedup.apply(payload):
+                            duplicates.add(int(payload["index"]))
+                        if stream is not None and storage.wants(
+                            payload["first_failed"]
+                        ):
+                            stream.write(
+                                json.dumps(payload, ensure_ascii=False)
+                                + "\n"
+                            )
+        finally:
+            if stream is not None:
+                stream.close()
+        if dedup.n_duplicates:
+            results.append(
+                {
+                    "total": 0,
+                    "accepted": -dedup.n_duplicates,
+                    "first_failed": {dedup.stage_name: dedup.n_duplicates},
+                    "n_duplicates_global": dedup.n_duplicates,
+                }
+            )
+    elif storage.records != "none":
         with _open_text(records_path, storage.compression) as stream:
             for path in paths:
                 if path.exists():
                     with path.open("r", encoding="utf-8") as chunk:
                         shutil.copyfileobj(chunk, stream)
-    _merge_structures(db_paths, accepted_path)
+    _merge_structures(db_paths, accepted_path, duplicates)
     for path in paths:
         path.unlink(missing_ok=True)
     for path in db_paths:
@@ -1288,6 +1432,9 @@ def run_config(
 
     total = sum(int(result["total"]) for result in results)
     accepted = sum(int(result["accepted"]) for result in results)
+    n_duplicates_global = sum(
+        int(result.get("n_duplicates_global", 0)) for result in results
+    )
     failures: Counter[str] = Counter()
     for result in results:
         failures.update(result["first_failed"])
@@ -1296,6 +1443,7 @@ def run_config(
         "accepted": accepted,
         "rejected": total - accepted,
         "first_failed": dict(failures),
+        "n_duplicates_global": n_duplicates_global,
         "accepted_db": str(accepted_path),
         "storage": {
             "records": storage.records,

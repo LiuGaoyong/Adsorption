@@ -33,7 +33,7 @@ Or with pixi:
 pixi install
 ```
 
-Requires Python 3.12–3.13, ASE, NumPy, SciPy, Hydra, and
+Requires Python 3.12–3.13, ASE, NumPy, SciPy, RDKit, Hydra, and
 [graphatoms](https://github.com/LiuGaoyong/graphatoms).
 
 ## Quick start
@@ -56,7 +56,7 @@ generator = AdsorptionConfigurationGenerator(
     d_min=2.0,
     d_max=3.0,
 )
-filt = GeometryFilter({29: 2.338, 8: 3.0})  # Cu and O sigma
+filt = GeometryFilter(sigma={29: 2.338, 8: 3.0})  # Cu and O sigma
 pipeline = AdsorptionConfigurationPipeline(generator, [filt])
 
 for record in pipeline.accepted():
@@ -99,50 +99,48 @@ CPU reservation and thread budget of each actor. Each actor owns a private
 copy of the filter chain and consumes the `Trial` objects yielded by the
 generator; `records.jsonl` stays in candidate-index order regardless of the
 engine.
-`records.jsonl` holds one JSON line per candidate, `accepted.xyz` holds the
-accepted structures as one extended-XYZ trajectory, and `summary.json` holds
-the campaign totals (including the resolved `engine` and `n_actors`). A run
+`records.jsonl` holds one JSON line per candidate (by default only the
+accepted ones, see `storage.records`), `accepted.db` is an ASE database with
+one row per accepted structure (by default only the adsorbate atoms plus the
+substrate size, see `storage.structures`), and `summary.json` holds the
+campaign totals (including the resolved `engine` and `n_actors`). A run
 refuses to start when the candidate count exceeds `budget.max_candidates`.
 
 ## The two processes
 
 ```text
-AdsConfGenABC                          AdsConfFilterABC
-└── AdsorptionConfigurationGenerator    ├── GeometryFilter   pairwise floor
-    ├── sites: ExplicitSites            ├── LJFilter         repulsive energy
-    │           TopLayerSites           ├── EnergyFilter     relaxation + E cut
-    │           GraphAtomsSites          └── NequIPFilter     MLP relaxation
-    │           GraphAtomsSites
-    └── adsorbates: SingleAdsorbate
-                    ExplicitEnsemble
+AdsorptionConfigurationGeneratorABC     AdsorptionConfigurationFilterABC
+└── AdsorptionConfigurationGenerator    ├── GeometryFilter              pairwise floor
+    ├── sites: ExplicitSites            ├── LennardJonesScreenFilter    single-point LJ ceiling
+    │           TopLayerSites           ├── LennardJonesEnergyFilter    relaxed LJ ceiling
+    │           GraphAtomsSites         ├── EnergyFilter / OptimizedEnergyFilter
+    └── adsorbates: SingleAdsorbate     │                               any ASE calculator
+                    ExplicitEnsemble    └── NequIPOptimizedEnergyFilter MLP relaxation
                     ETKDGEnsemble
-                    RotamerEnsemble
+                    RotamerEnsemble     TrialDeduplicator (a stage, not a filter)
 ```
 
-`AdsConfPipeline` applies the filters in order and stops at the first
-rejection. Every `Trial` carries its one-based index and budget; every
-`Verdict` carries the measured value and the reason.
+`AdsorptionConfigurationPipeline` applies the stages in order and stops at the
+first rejection. Every `Trial` carries its one-based index and budget; every
+`Verdict` carries the measured value and the reason. `TrialDeduplicator`
+rejects a structure whose bond-list hash was already accepted; in a parallel
+campaign the runner repeats that check globally in the driver process, so the
+result does not depend on the worker count.
 
 ## Package layout
 
 ```text
 src/adsorption/
-├── process/       # Trial, Verdict, the two ABCs, pipeline
-├── generate/      # AdsorptionConfigurationGenerator, Sampling, orientation
-├── filters/       # GeometryFilter, LJFilter, EnergyFilter, NequIPFilter
-├── geometry/      # site, grids, SuperFibonacciSO3, rotation, placement
-├── protocol/      # index, plan, sidecar, hashing
-├── evaluation/    # single-point and two-stage relaxation
-├── metrics/       # ranking, cascade, spherical, rotation metrics
-└── config/        # Hydra dataclasses, run.yaml and config groups
+├── base/          # Trial, Verdict, the two ABCs, pipeline, canonical_key
+├── generate/      # AdsorptionConfigurationGenerator, Sampling, adsorbate
+│                  # sources (Single/Explicit/ETKDG/Rotamer), orientation
+├── filters/       # GeometryFilter, Lennard-Jones tiers, EnergyFilter,
+│                  # OptimizedEnergyFilter, NequIPOptimizedEnergyFilter
+├── geometry/      # sites, grids, SuperFibonacciSO3, rotations, placement
+├── dedup.py       # TrialDeduplicator
+├── runner/        # Hydra entry point, run.yaml, joblib / Ray engines
+└── utils/         # RDKit helpers, four-view plotting
 ```
-
-## Deprecated
-
-The previous three-layer `AdsorptionABC` hierarchy, the `admissible_directions`
-filter, the `screen` and `runner` packages, and the pydantic protocol spec are
-frozen under [`deprecated/`](deprecated/README.md). They are not imported,
-tested, linted, or packaged.
 
 ## Development
 

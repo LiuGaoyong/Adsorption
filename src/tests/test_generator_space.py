@@ -20,6 +20,7 @@ from adsorption.geometry import (
     ExplicitSites,
     GraphAtomsSites,
     SiteSelection,
+    place,
 )
 
 
@@ -52,6 +53,44 @@ def test_generate_matches_trial(
     for left, right in zip(stream, direct):
         assert left.meta == right.meta
         assert np.allclose(left.atoms.positions, right.atoms.positions)
+
+
+def test_build_matches_the_placement_primitive() -> None:
+    """The cached build equals ``substrate + place(...)`` for every trial."""
+    substrate = fcc111("Cu", (2, 2, 2), vacuum=8.0, orthogonal=True)
+    substrate.set_tags(np.arange(len(substrate)))
+    generator = AdsorptionConfigurationGenerator(
+        substrate,
+        ExplicitSites([[0], [1]]),
+        molecule("CO"),
+        n_oa=3,
+        n_rot=2,
+        n_d=2,
+    )
+    for trial in generator:
+        bound = generator._components[trial.meta["site"]].adsorbate
+        target = np.asarray(trial.meta["site_center"]) + trial.meta[
+            "distance"
+        ] * bound.directions[trial.meta["i"] - 1]
+        placed = place(
+            bound.rigid.atoms,
+            anchor=bound.rigid.anchor,
+            target=target,
+            quaternion=bound.orientation.quaternion(trial.meta["j"] - 1),
+        )
+        expected = substrate.copy()
+        expected.extend(placed)
+        assert np.array_equal(trial.atoms.numbers, expected.numbers)
+        assert np.allclose(trial.atoms.positions, expected.positions)
+        assert np.allclose(trial.atoms.cell.array, expected.cell.array)
+        assert np.array_equal(trial.atoms.pbc, expected.pbc)
+        assert np.array_equal(trial.atoms.get_tags(), expected.get_tags())
+        # Trials never share the mutable position block.
+        trial.atoms.positions[-1] += 1.0
+        assert not np.allclose(
+            generator.trial(trial.index).atoms.positions,
+            trial.atoms.positions,
+        )
 
 
 def test_any_shard_is_a_contiguous_partition(

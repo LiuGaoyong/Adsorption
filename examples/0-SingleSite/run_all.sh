@@ -72,7 +72,7 @@ for site_dir in "$HERE"/*/; do
             cd "$ads_dir"
             "$RUNNER" --config-path "$ads_dir" --config-name run $OVERRIDES
         ); then
-            echo "FAILED: $(basename "$system_dir") / $(basename "$ads_dir")" >&2
+            echo "FAILED: $(basename "$site_dir") / $(basename "$ads_dir")" >&2
             if [[ "$CONTINUE_ON_ERROR" != "1" ]]; then
                 exit 1
             fi

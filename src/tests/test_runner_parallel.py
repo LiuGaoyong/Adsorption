@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -173,6 +174,66 @@ def test_ray_matches_serial(tmp_path: Path) -> None:
     assert _db_rows(tmp_path / "serial" / "accepted.db") == _db_rows(
         tmp_path / "ray" / "accepted.db"
     )
+
+
+def _dedup_config() -> dict[str, Any]:
+    """A single O atom sampled on SO(3): every orientation is the same
+    structure, so each ``(direction, distance)`` pair has ``n_rot - 1``
+    duplicates that straddle chunk and actor boundaries."""
+    cfg = _config({"chunk_factor": 4})
+    cfg["adsorbate"] = {
+        "_target_": "ase.Atoms",
+        "symbols": "O",
+        "conformers": "none",
+    }
+    cfg["sites"] = [[4]]
+    cfg["protocol"] = {
+        "n_oa": 8,
+        "n_rot": 4,
+        "n_d": 2,
+        "d_min": 2.0,
+        "d_max": 3.0,
+        "orientation_kind": "so3",
+    }
+    cfg["filters"] = [
+        {"_target_": "adsorption.dedup.TrialDeduplicator", "cutoff": 4.0}
+    ]
+    return cfg
+
+
+def _assert_global_dedup(tmp_path: Path, serial, parallel, name: str) -> None:
+    assert serial.total == parallel.total == 64
+    assert serial.accepted == parallel.accepted == 16
+    assert parallel.first_failed["TrialDeduplicator"] == 48
+    assert (tmp_path / "serial" / "records.jsonl").read_bytes() == (
+        tmp_path / name / "records.jsonl"
+    ).read_bytes()
+    assert _db_rows(tmp_path / "serial" / "accepted.db") == _db_rows(
+        tmp_path / name / "accepted.db"
+    )
+    summary = json.loads((tmp_path / name / "summary.json").read_text())
+    assert summary["n_duplicates_global"] > 0
+
+
+def test_joblib_deduplicates_across_chunks(tmp_path: Path) -> None:
+    cfg = _dedup_config()
+    serial = run_config(cfg, output=tmp_path / "serial", n_jobs=1)
+    parallel = run_config(
+        cfg, output=tmp_path / "joblib", n_jobs=4, engine="joblib"
+    )
+    _assert_global_dedup(tmp_path, serial, parallel, "joblib")
+
+
+@pytest.mark.filterwarnings("ignore")
+def test_ray_deduplicates_across_actors(tmp_path: Path) -> None:
+    if not _ray_available():
+        pytest.skip("ray is not installed")
+    cfg = _dedup_config()
+    serial = run_config(cfg, output=tmp_path / "serial", n_jobs=1)
+    parallel = run_config(
+        cfg, output=tmp_path / "ray", n_jobs=2, engine="ray"
+    )
+    _assert_global_dedup(tmp_path, serial, parallel, "ray")
 
 
 def test_storage_policy_accepted_only_and_adsorbate(tmp_path: Path) -> None:

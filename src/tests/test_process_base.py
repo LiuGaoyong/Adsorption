@@ -54,6 +54,24 @@ def test_trial_derives_the_adsorbate_count() -> None:
     assert trial.natoms_adsorbate == 1
 
 
+def test_trial_is_hashable_and_comparable() -> None:
+    first = Trial(Atoms("H2O"), index=1, n_total=2, meta={"n_substrate": 2})
+    same = Trial(Atoms("H2O"), index=1, n_total=2, meta={"n_substrate": 2})
+    other = Trial(Atoms("H2O"), index=2, n_total=2, meta={"n_substrate": 2})
+    moved = Atoms("H2O")
+    moved.positions[0] += 0.1
+    assert first == same
+    assert hash(first) == hash(same)
+    assert first != other
+    assert first != Trial(moved, index=1, n_total=2, meta={"n_substrate": 2})
+    assert first != "H2O"
+    assert len({first, same, other}) == 2
+    generator = CountingGenerator(3)
+    assert generator[1] in generator
+    assert generator.index(generator[2]) == 2
+    assert generator.count(generator[0]) == 1
+
+
 def test_verdict_defaults_and_validation() -> None:
     ok = Verdict(True)
     assert ok.accepted is True

@@ -107,6 +107,24 @@ class BoundAdsorbate:
         """Return the number of realised distances."""
         return int(len(self.distances))
 
+    def signature(self) -> Mapping[str, Any]:
+        """Return the realised grid sizes of this binding.
+
+        Unlike :meth:`Sampling.signature`, which records the *requested*
+        protocol, these are the sizes that actually enter the candidate index
+        (a single atom realises ``n_rot = 1`` whatever was requested).
+
+        Returns:
+            Mapping[str, Any]: ``n_oa``, ``n_rot``, ``n_d`` and the rotation
+            set name.
+        """
+        return {
+            "n_oa": self.n_oa,
+            "n_rot": self.n_rot,
+            "n_d": self.n_d,
+            "orientation": getattr(self.orientation, "name", ""),
+        }
+
 
 @dataclass(frozen=True)
 class Sampling:
@@ -225,7 +243,11 @@ class Sampling:
         return replace(self, n_oa=int(n_oa))
 
     def signature(self) -> Mapping[str, Any]:
-        """Return a JSON-serialisable description of the protocol."""
+        """Return a JSON-serialisable description of the requested protocol.
+
+        ``n_rot`` is the requested orientation count; the realised count
+        depends on the adsorbate (see :meth:`BoundAdsorbate.signature`).
+        """
         return {
             "n_oa": int(self.n_oa),
             "n_rot": (
@@ -233,6 +255,7 @@ class Sampling:
                 if self.orientation is None
                 else int(self.orientation.count())
             ),
+            "n_rot_is_requested": self.orientation is None,
             "n_d": (
                 int(self.n_d)
                 if self.distances is None

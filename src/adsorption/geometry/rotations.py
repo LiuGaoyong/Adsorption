@@ -34,6 +34,42 @@ __all__ = [
 ]
 
 
+_ANTIPARALLEL_TOL = 1e-8
+"""``1 + u.v`` below which the closed form is ill-conditioned."""
+
+
+def _shortest_arc_quaternions(
+    axis: np.ndarray,
+    directions: np.ndarray,
+) -> np.ndarray:
+    """Return the shortest-arc quaternions mapping ``axis`` onto each row.
+
+    The closed form ``q = normalize(1 + u.v, u x v)`` is evaluated for every
+    direction at once. A direction antiparallel to the axis has no shortest
+    arc (every half-turn about a perpendicular axis works); those rows fall
+    back to :func:`shortest_arc_quaternion`, i.e. scipy's convention.
+
+    Args:
+        axis: Unit body-frame axis, shape ``(3,)``.
+        directions: Unit target directions, shape ``(n, 3)``.
+
+    Returns:
+        np.ndarray: Standardised unit quaternions, shape ``(n, 4)``.
+    """
+    u = np.asarray(axis, dtype=float)
+    v = np.asarray(directions, dtype=float)
+    w = 1.0 + v @ u
+    xyz = np.cross(np.broadcast_to(u, v.shape), v)
+    quaternions = np.column_stack((w, xyz))
+    norms = np.linalg.norm(quaternions, axis=1)
+    degenerate = w < _ANTIPARALLEL_TOL
+    norms[degenerate] = 1.0
+    quaternions = quaternions / norms[:, None]
+    for row in np.flatnonzero(degenerate):
+        quaternions[row] = shortest_arc_quaternion(u, v[row])
+    return standardize_quaternion(quaternions)
+
+
 class RotationSet(ABC):
     """A deterministic, indexed set of rotations about an anchor."""
 
@@ -103,9 +139,8 @@ class ShortestArcSet(RotationSet):
         self.axis = unit_vector(np.asarray(axis, dtype=float))
         active_grid: DirectionGrid = FibonacciGrid() if grid is None else grid
         self.directions = np.asarray(active_grid.points(n), dtype=float)
-        self._quaternions = tuple(
-            shortest_arc_quaternion(self.axis, direction)
-            for direction in self.directions
+        self._quaternions = _shortest_arc_quaternions(
+            self.axis, self.directions
         )
 
     def count(self) -> int:
@@ -114,7 +149,7 @@ class ShortestArcSet(RotationSet):
 
     def quaternion(self, index: int) -> np.ndarray:
         """Return the shortest-arc rotation onto direction ``index``."""
-        return np.asarray(self._quaternions[int(index)], dtype=float)
+        return np.array(self._quaternions[int(index)], dtype=float)
 
     def image(self, index: int) -> np.ndarray:
         """Return the placed reference axis at ``index``."""
