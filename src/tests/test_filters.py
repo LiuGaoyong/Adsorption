@@ -97,7 +97,8 @@ def test_none_ceiling_uses_isolated_fragment_energies() -> None:
         reject_on_unconverged=False,
     )
     filt.prepare(trial)
-    assert 0 in filt._cutoffs
+    assert 0 in filt._adsorbate_cache
+    assert filt._ceiling(trial) == pytest.approx(cutoff)
     verdict = filt.evaluate(trial)
     assert filt.e_cut is None
     assert filt.signature()["e_cut"] is None
@@ -373,7 +374,7 @@ def test_prepare_applies_the_binding_cut_to_the_cached_ceiling() -> None:
     filt = EnergyFilter(e_cut=None, calculator=EMT(), e_bind_cut=-0.25)
     filt.prepare(trial)
     reference = filt._reference_cutoff(trial)
-    assert filt._cutoffs[0] == pytest.approx(reference - 0.25)
+    assert filt._ceiling(trial) == pytest.approx(reference - 0.25)
 
 
 def test_record_key_writes_the_key_of_an_accepted_trial() -> None:

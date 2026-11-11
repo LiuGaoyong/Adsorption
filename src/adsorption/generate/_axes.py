@@ -42,15 +42,20 @@ class _SiteAxisMixin:
         components: list[_Component] = []
         cached: BoundAdsorbate | None = None
         for index, spec in enumerate(self.resolved.specs):
+            site = spec.geometry
             if spec.sampling is not None:
-                bound = spec.sampling.bind(rigid)
+                bound = spec.sampling.bind(rigid, site)
             elif rigid.sampling is not None:
-                bound = rigid.sampling.bind(rigid)
+                bound = rigid.sampling.bind(rigid, site)
             elif cached is not None:
                 bound = cached
             else:
-                bound = self.sampling.bind(rigid)
-                cached = bound
+                bound = self.sampling.bind(rigid, site)
+                # A site-independent protocol binds identically on every
+                # site; a contact-based lower bound or a hemisphere cut does
+                # not, so those are bound per site.
+                if not self.sampling.site_dependent:
+                    cached = bound
             components.append(
                 _Component(
                     site=spec.geometry,

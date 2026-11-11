@@ -83,8 +83,10 @@ filter chain and the budget. Swappable objects are `_target_` nodes
 instantiated with `hydra.utils.instantiate`.
 
 The runner builds one `AdsorptionConfigurationGenerator` from three inputs:
-a site source (`sites: auto` selects every top-layer atom; a flat list is one
-core set; a list of lists declares several sites; a mapping can select the
+a site source (`sites: auto` selects the symmetry-unique exposed sites — one
+top, bridge and hollow core per local environment on a slab, the unique
+GraphAtoms sites on a cluster; `sites: top_layer` keeps every top-layer atom;
+a flat list is one core set; a list of lists declares several sites; a mapping can select the
 GraphAtoms enumeration), an adsorbate source (the rotatable-bond detection
 selects an ETKDG ensemble, otherwise the single adsorbate), and the sampling
 protocol. Candidate intervals are evaluated in parallel with `joblib` (default
@@ -111,21 +113,37 @@ refuses to start when the candidate count exceeds `budget.max_candidates`.
 ```text
 AdsorptionConfigurationGeneratorABC     AdsorptionConfigurationFilterABC
 └── AdsorptionConfigurationGenerator    ├── GeometryFilter              pairwise floor
-    ├── sites: ExplicitSites            ├── LennardJonesScreenFilter    single-point LJ ceiling
-    │           TopLayerSites           ├── LennardJonesEnergyFilter    relaxed LJ ceiling
-    │           GraphAtomsSites         ├── EnergyFilter / OptimizedEnergyFilter
-    └── adsorbates: SingleAdsorbate     │                               any ASE calculator
-                    ExplicitEnsemble    └── NequIPOptimizedEnergyFilter MLP relaxation
-                    ETKDGEnsemble
-                    RotamerEnsemble     TrialDeduplicator (a stage, not a filter)
+    ├── sites: AutoSites                ├── LennardJonesScreenFilter    single-point LJ ceiling
+    │           ExplicitSites           ├── LennardJonesEnergyFilter    relaxed LJ ceiling
+    │           TopLayerSites           ├── EnergyFilter / OptimizedEnergyFilter
+    │           GraphAtomsSites         │                               any ASE calculator
+    └── adsorbates: SingleAdsorbate     └── NequIPOptimizedEnergyFilter MLP relaxation
+                    ExplicitEnsemble
+                    ETKDGEnsemble       TrialDeduplicator  (stages, not filters:
+                    RotamerEnsemble     BasinDeduplicator   placed / relaxed structure)
 ```
 
 `AdsorptionConfigurationPipeline` applies the stages in order and stops at the
 first rejection. Every `Trial` carries its one-based index and budget; every
 `Verdict` carries the measured value and the reason. `TrialDeduplicator`
-rejects a structure whose bond-list hash was already accepted; in a parallel
-campaign the runner repeats that check globally in the driver process, so the
-result does not depend on the worker count.
+rejects a placed structure whose bond-list hash was already accepted (the
+hash is value-sorted, so it is invariant to the atom order and collapses
+symmetry-equivalent placements); `BasinDeduplicator`, placed after a
+relaxation tier, rejects a trial whose relaxed structure and energy repeat an
+earlier basin. In a parallel campaign the runner repeats both checks globally
+in the driver process, so the result does not depend on the worker count.
+
+The sampling protocol has two site-dependent defaults. The lower bound of the
+anchor-distance array is the hard-sphere contact distance of the site and
+adsorbate (`d_min: null`), derived from the same KIM Lennard-Jones radii as
+`GeometryFilter`, so no candidate starts inside the core; a number restores an
+absolute `d_min`. With `hemisphere: true` only the approach directions on the
+outward side of each site are enumerated. A relaxation tier stores the relaxed
+structure of a survivor in `trial.meta["relaxed"]`; the runner persists that
+structure (and `relaxed_energy`) in `accepted.db`, and a later tier can start
+from it with `start_from: previous`. The isolated-adsorbate reference of
+`e_cut: null` is the rigid conformer when the intramolecular bonds are fixed
+and the gas-phase relaxed conformer otherwise (`adsorbate_reference`).
 
 ## Package layout
 

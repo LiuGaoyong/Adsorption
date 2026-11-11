@@ -19,7 +19,7 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from ase import Atoms
@@ -66,7 +66,7 @@ class RigidAdsorbate:
         provenance: Optional JSON-serialisable provenance (SMILES, dihedral
             angles, source, ...).
         sampling: Optional sampling override for this adsorbate. It must
-            provide a ``bind(rigid)`` method.
+            provide a ``bind(rigid, site)`` method.
     """
 
     atoms: Atoms
@@ -92,7 +92,7 @@ class RigidAdsorbate:
         if self.sampling is not None and not callable(
             getattr(self.sampling, "bind", None)
         ):
-            raise TypeError("sampling must provide a bind(rigid) method.")
+            raise TypeError("sampling must provide a bind(rigid, site) method.")
         object.__setattr__(
             self,
             "label",
@@ -421,6 +421,67 @@ def _dihedral_grid(spec: Any) -> tuple[float, ...]:
     return values
 
 
+def _stratified_combinations(
+    sizes: Sequence[int],
+    count: int,
+) -> list[tuple[int, ...]]:
+    """Return ``count`` distinct grid-index combinations spread over the grid.
+
+    A lexicographic prefix of the Cartesian product exhausts the leading
+    rotor last and never moves the trailing rotors away from their first
+    angles, so a truncated rotamer set would be biased towards one end of the
+    first torsion. The combinations are instead read off an unscrambled
+    Halton sequence in ``[0, 1)^R`` (one coordinate per rotor, mapped to the
+    rotor's angle index), which is deterministic and spreads the selected
+    rotamers over every torsion at once. The all-first-angle combination is
+    kept in front so the reference rotamer is always a member; the remaining
+    lexicographic combinations fill the set should the sequence repeat
+    itself.
+
+    Args:
+        sizes: Number of angles of every rotor.
+        count: Number of combinations to return, at most the product of the
+            sizes.
+
+    Returns:
+        list[tuple[int, ...]]: The selected index combinations, in selection
+        order.
+    """
+    from scipy.stats import qmc  # noqa: PLC0415
+
+    sizes = [int(size) for size in sizes]
+    total = math.prod(sizes)
+    count = min(int(count), total)
+    if count <= 0:
+        return []
+    chosen: list[tuple[int, ...]] = [tuple(0 for _ in sizes)]
+    seen = {chosen[0]}
+    sampler = qmc.Halton(d=len(sizes), scramble=False)
+    draws = 0
+    while len(chosen) < count and draws < 16 * count + 16:
+        block = sampler.random(n=count)
+        draws += count
+        indices = np.minimum(
+            np.floor(block * np.asarray(sizes, dtype=float)).astype(int),
+            np.asarray(sizes, dtype=int) - 1,
+        )
+        for row in indices:
+            combination = tuple(int(value) for value in row)
+            if combination not in seen:
+                seen.add(combination)
+                chosen.append(combination)
+                if len(chosen) >= count:
+                    break
+    if len(chosen) < count:
+        for combination in itertools.product(*(range(size) for size in sizes)):
+            if combination not in seen:
+                seen.add(combination)
+                chosen.append(combination)
+                if len(chosen) >= count:
+                    break
+    return chosen
+
+
 def _grids(
     dihedrals: int | float | Sequence[Any],
     n_rotors: int,
@@ -530,9 +591,13 @@ class RotamerEnsemble(AdsorbateSource):
       ``[[60, 180], [180], [60, 180, 300]]``.
 
     A count ``n`` takes ``n`` points in ``[0, 360)`` and excludes the last
-    one, so ``6`` expands to ``[0, 60, 120, 180, 240, 300]``. The Cartesian
-    product is enumerated in lexicographic order; ASE's ``set_dihedral``
-    applies each combination to a copy of the reference structure.
+    one, so ``6`` expands to ``[0, 60, 120, 180, 240, 300]``. When the
+    Cartesian product fits under ``max_rotamers`` it is enumerated in
+    lexicographic order; otherwise a stratified (Halton) subset of
+    ``OVERSAMPLE * max_rotamers`` combinations is built, pruned and
+    deduplicated, and the first ``max_rotamers`` survivors are kept, so a
+    truncated set still spans every torsion. ASE's ``set_dihedral`` applies
+    each combination to a copy of the reference structure.
 
     Attributes:
         source: A SMILES string, an ASE ``Atoms`` or an RDKit ``Mol``.
@@ -556,6 +621,9 @@ class RotamerEnsemble(AdsorbateSource):
     anchor: Anchor | ResolvedAnchor = "com"
     label_prefix: str = "rotamer"
     deduplicate: bool = True
+
+    OVERSAMPLE: ClassVar[int] = 4
+    """Stratified candidates built per retained rotamer before pruning."""
 
     def __post_init__(self) -> None:
         """Normalize and validate the declaration."""
@@ -603,17 +671,30 @@ class RotamerEnsemble(AdsorbateSource):
                 ),
             )
         grids = _grids(self.dihedrals, len(rotors))
-        total = math.prod(len(grid) for grid in grids)
-        truncated = total > int(self.max_rotamers)
-        combinations = itertools.islice(
-            itertools.product(*grids),
-            int(self.max_rotamers),
-        )
+        sizes = [len(grid) for grid in grids]
+        total = math.prod(sizes)
+        cap = int(self.max_rotamers)
+        truncated = total > cap
+        if truncated:
+            # Oversample the stratified selection so that pruning and
+            # deduplication act before the cap, then truncate to the cap.
+            selection = "halton"
+            pruning = float(self.prune_rmsd) > 0.0 or bool(self.deduplicate)
+            n_select = min(total, cap * (self.OVERSAMPLE if pruning else 1))
+            index_combinations = _stratified_combinations(sizes, n_select)
+        else:
+            selection = "all"
+            index_combinations = list(
+                itertools.product(*(range(size) for size in sizes))
+            )
         records: list[tuple[tuple[float, ...], Atoms]] = []
-        for combination in combinations:
+        for indices in index_combinations:
+            combination = tuple(
+                float(grid[position]) for grid, position in zip(grids, indices)
+            )
             work = atoms.copy()
             _apply_dihedrals(work, molecule, rotors, combination)
-            records.append((tuple(combination), work))
+            records.append((combination, work))
         if float(self.prune_rmsd) > 0.0:
             kept: list[tuple[tuple[float, ...], Atoms]] = []
             for record in records:
@@ -627,7 +708,18 @@ class RotamerEnsemble(AdsorbateSource):
                 ):
                     kept.append(record)
             records = kept
-        rigids = tuple(
+        if self.deduplicate:
+            seen: set[str] = set()
+            unique: list[tuple[tuple[float, ...], Atoms]] = []
+            for record in records:
+                key = canonical_key(record[1])
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(record)
+            records = unique
+        records = records[:cap]
+        return tuple(
             RigidAdsorbate(
                 structure,
                 _resolve(self.anchor, structure),
@@ -637,11 +729,13 @@ class RotamerEnsemble(AdsorbateSource):
                     "dihedrals": combination,
                     "n_rotors": len(rotors),
                     "truncated": truncated,
+                    "selection": selection,
+                    "n_grid": int(total),
+                    "n_selected": len(index_combinations),
                 },
             )
             for index, (combination, structure) in enumerate(records)
         )
-        return deduplicate_rigids(rigids) if self.deduplicate else rigids
 
     def signature(self) -> Mapping[str, Any]:
         """Return a JSON-serialisable description of the source."""

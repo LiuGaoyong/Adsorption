@@ -2,10 +2,11 @@
 
 The engine builds process A from a substrate, a site source, an adsorbate
 source and a sampling protocol, and process B from the declared filter chain.
-The site source is adaptive: ``auto`` selects the top layer, a core list is
-explicit, and a mapping can select the GraphAtoms enumeration. The adsorbate
-source is adaptive too: rotatable bonds select an ETKDG ensemble, otherwise
-the single adsorbate is used. Candidate intervals are evaluated in parallel
+The site source is adaptive: ``auto`` selects the unique exposed sites, a
+core list is explicit, and a mapping can select the GraphAtoms enumeration.
+The adsorbate source is adaptive too: rotatable bonds select an ETKDG
+ensemble, otherwise the single adsorbate is used. Candidate intervals are
+evaluated in parallel
 with :mod:`joblib`, or with :mod:`ray` actors behind a
 :class:`ray.util.ActorPool` when Ray is installed. Ray is optional: the
 parallel engine defaults to Ray when it can be imported and to joblib
@@ -41,7 +42,8 @@ from adsorption.base.pipeline import (
     Record,
     evaluate_trial,
 )
-from adsorption.dedup import TrialDeduplicator
+from adsorption.dedup import BasinDeduplicator, TrialDeduplicator
+from adsorption.filters.relaxation import RELAXED_META_KEY
 from adsorption.generate import (
     AdsorptionConfigurationGenerator,
     Sampling,
@@ -53,6 +55,7 @@ from adsorption.generate.adsorbate import (
     SingleAdsorbate,
 )
 from adsorption.geometry import (
+    AutoSites,
     ExplicitSites,
     GraphAtomsSites,
     SiteSelection,
@@ -372,13 +375,20 @@ def _build_site_source(
     """
     scale = protocol.get("scale")
     skin = protocol.get("skin")
-    if raw is None or (
-        isinstance(raw, str) and raw.strip().lower() in {"auto", "top_layer"}
-    ):
+    if raw is None or (isinstance(raw, str) and raw.strip().lower() == "auto"):
+        return AutoSites(scale=scale, skin=skin)
+    if isinstance(raw, str) and raw.strip().lower() == "top_layer":
         return TopLayerSites(scale=scale, skin=skin)
     if isinstance(raw, Mapping):
         kind = str(raw.get("kind", "explicit")).strip().lower()
-        if kind in {"auto", "top_layer"}:
+        if kind == "auto":
+            return AutoSites(
+                max_ncore=int(raw.get("max_ncore", 3)),
+                tolerance=float(raw.get("tolerance", 0.5)),
+                scale=scale,
+                skin=skin,
+            )
+        if kind == "top_layer":
             return TopLayerSites(
                 tolerance=float(raw.get("tolerance", 0.5)),
                 scale=scale,
@@ -431,14 +441,22 @@ def _build_sampling(protocol: Mapping[str, Any]) -> Sampling:
     grid = (
         None if grid_node is None else _instantiate(grid_node, "protocol.grid")
     )
+    d_min_node = protocol.get("d_min")
+    if isinstance(d_min_node, str) and d_min_node.strip().lower() in {
+        "contact",
+        "auto",
+    }:
+        d_min_node = None
     return Sampling(
         n_oa=int(protocol.get("n_oa", 200)),
         n_rot=int(protocol.get("n_rot", 200)),
         n_d=int(protocol.get("n_d", 12)),
-        d_min=float(protocol.get("d_min", 0.8)),
+        d_min=None if d_min_node is None else float(d_min_node),
         d_max=float(protocol.get("d_max", 3.0)),
         d_min_radius_scale=float(protocol.get("d_min_radius_scale", 0.0)),
         d_max_radius_scale=float(protocol.get("d_max_radius_scale", 0.0)),
+        d_contact_scale=float(protocol.get("d_contact_scale", 1.0)),
+        hemisphere=bool(protocol.get("hemisphere", False)),
         orientation_kind=protocol.get("orientation_kind", "auto"),
         grid=grid,
     )
@@ -541,9 +559,14 @@ def _record_payload(
     filters: Sequence[FilterStage],
 ) -> dict[str, Any]:
     """Return the JSONL payload of one pipeline record."""
+    meta = {
+        key: value
+        for key, value in record.trial.meta.items()
+        if key != RELAXED_META_KEY
+    }
     return {
         "index": int(record.trial.index),
-        "meta": _jsonable(dict(record.trial.meta)),
+        "meta": _jsonable(meta),
         "first_failed": record.first_failed,
         "verdicts": [
             {
@@ -573,13 +596,20 @@ def _accepted_atoms(record: Record) -> Atoms | None:
     atoms = record.trial.atoms.copy()
     atoms.calc = None
     meta = record.trial.meta
+    relaxed = meta.get(RELAXED_META_KEY)
+    if isinstance(relaxed, Mapping):
+        # The last relaxation tier left its relaxed structure; persist that
+        # rather than the placed starting point.
+        positions = np.asarray(relaxed.get("positions"), dtype=float)
+        if positions.shape == atoms.positions.shape:
+            atoms.set_positions(positions)
     atoms.info = _provenance(meta, record.trial.index)
     return atoms
 
 
 def _provenance(meta: Mapping[str, Any], index: int) -> dict[str, Any]:
     """Return the row data that identifies one accepted structure."""
-    return {
+    data = {
         "index": int(index),
         "site": int(meta.get("site", 0)),
         "conformer": int(meta.get("conformer", 0)),
@@ -588,6 +618,10 @@ def _provenance(meta: Mapping[str, Any], index: int) -> dict[str, Any]:
         "k": int(meta.get("k", 0)),
         "distance": float(meta.get("distance", 0.0)),
     }
+    energy = meta.get("relaxed_energy")
+    if energy is not None:
+        data["relaxed_energy"] = float(energy)
+    return data
 
 
 def _row_payload(
@@ -672,34 +706,64 @@ def _merge_structures(
 class _GlobalDedup:
     """Driver-side deduplication across workers and actors.
 
-    A :class:`~adsorption.dedup.TrialDeduplicator` in the filter chain only
-    sees the trials of its own joblib chunk or Ray actor. This helper keeps
-    the global key set in the driver: it consumes the record payloads in
-    candidate-index order and turns an accepted trial whose
-    ``meta["canonical_key"]`` was already written into a ``"duplicate"``
-    rejection attributed to the deduplicator stage.
+    A :class:`~adsorption.dedup.TrialDeduplicator` or
+    :class:`~adsorption.dedup.BasinDeduplicator` in the filter chain only sees
+    the trials of its own joblib chunk or Ray actor. This helper repeats the
+    test in the driver: it consumes the record payloads in candidate-index
+    order and turns an accepted trial whose key (``meta["canonical_key"]`` or
+    ``meta["basin_key"]``) was already written into a ``"duplicate"``
+    rejection attributed to the first deduplicating stage that matches. The
+    basin stage also applies its energy tolerance to ``meta["relaxed_energy"]``.
 
     Attributes:
-        stage_name: Class name of the deduplicator stage in the chain.
+        stages: The deduplicating stages of the chain, in chain order.
         n_duplicates: Number of accepted payloads rejected by this pass.
     """
 
-    def __init__(self, stage_name: str) -> None:
-        """Store the stage name and an empty key set."""
-        self.stage_name = str(stage_name)
+    def __init__(self, stages: Sequence[Any]) -> None:
+        """Store the stages and an empty key table per stage."""
+        self.stages = tuple(stages)
         self.n_duplicates = 0
-        self._seen: set[str] = set()
+        self.n_by_stage: Counter[str] = Counter()
+        self._seen: list[dict[str, list[float]]] = [{} for _ in self.stages]
+
+    @property
+    def stage_name(self) -> str:
+        """Return the class name of the first deduplicating stage."""
+        return type(self.stages[0]).__name__
 
     @classmethod
     def from_filters(
         cls,
         filters: Sequence[FilterStage],
     ) -> _GlobalDedup | None:
-        """Return a global pass when the chain holds a deduplicator stage."""
-        for filt in filters:
-            if isinstance(filt, TrialDeduplicator):
-                return cls(type(filt).__name__)
-        return None
+        """Return a global pass when the chain holds a deduplicating stage."""
+        stages = [
+            filt
+            for filt in filters
+            if isinstance(filt, (TrialDeduplicator, BasinDeduplicator))
+        ]
+        return cls(stages) if stages else None
+
+    def _repeats(
+        self,
+        position: int,
+        key: str,
+        energy: float | None,
+    ) -> bool:
+        """Register ``(key, energy)`` for one stage and report a repeat."""
+        stage = self.stages[position]
+        energies = self._seen[position].setdefault(key, [])
+        if not isinstance(stage, BasinDeduplicator) or energy is None:
+            if energies:
+                return True
+            energies.append(float("nan"))
+            return False
+        for seen in energies:
+            if math.isnan(seen) or abs(seen - energy) <= stage.e_tol:
+                return True
+        energies.append(float(energy))
+        return False
 
     def apply(self, payload: dict[str, Any]) -> bool:
         """Register one record payload and rewrite it when it is a duplicate.
@@ -712,21 +776,26 @@ class _GlobalDedup:
         """
         if payload.get("first_failed") is not None:
             return False
-        key = payload.get("meta", {}).get("canonical_key")
-        if key is None:
-            return False
-        key = str(key)
-        if key not in self._seen:
-            self._seen.add(key)
-            return False
-        self.n_duplicates += 1
-        payload["first_failed"] = self.stage_name
-        for verdict in payload.get("verdicts", []):
-            if verdict.get("filter") == self.stage_name:
-                verdict["accepted"] = False
-                verdict["reason"] = "duplicate"
-                break
-        return True
+        meta = payload.get("meta", {})
+        energy = meta.get("relaxed_energy")
+        energy = None if energy is None else float(energy)
+        for position, stage in enumerate(self.stages):
+            key = meta.get(stage.meta_key)
+            if key is None:
+                continue
+            if not self._repeats(position, str(key), energy):
+                continue
+            self.n_duplicates += 1
+            name = type(stage).__name__
+            self.n_by_stage[name] += 1
+            payload["first_failed"] = name
+            for verdict in payload.get("verdicts", []):
+                if verdict.get("filter") == name:
+                    verdict["accepted"] = False
+                    verdict["reason"] = "duplicate"
+                    break
+            return True
+        return False
 
 
 def _run_interval(
@@ -761,9 +830,10 @@ def _run_interval(
     accepted = 0
     failures: Counter[str] = Counter()
     structures_path.unlink(missing_ok=True)
-    with open(records_path, "w", encoding="utf-8") as stream, connect(
-        str(structures_path)
-    ) as database:
+    with (
+        open(records_path, "w", encoding="utf-8") as stream,
+        connect(str(structures_path)) as database,
+    ):
         for record in pipeline.run(start, stop):
             total += 1
             if record.first_failed is not None:
@@ -865,9 +935,7 @@ class _FilterActor:
                 leaves the process defaults untouched.
         """
         _init_worker(int(threads))
-        self._filters: tuple[FilterStage, ...] = tuple(
-            filters
-        )
+        self._filters: tuple[FilterStage, ...] = tuple(filters)
 
     def evaluate(self, trial: Trial) -> _TrialVerdict:
         """Evaluate one trial through the filter chain.
@@ -1066,9 +1134,10 @@ def _run_ray(
         buffer: dict[int, _TrialVerdict] = {}
         next_index = int(first)
         accepted_path.unlink(missing_ok=True)
-        with connect(str(accepted_path)) as database, _open_text(
-            records_path, storage.compression
-        ) as stream:
+        with (
+            connect(str(accepted_path)) as database,
+            _open_text(records_path, storage.compression) as stream,
+        ):
 
             def consume(result: _TrialVerdict) -> None:
                 nonlocal total, accepted
@@ -1189,9 +1258,7 @@ def _run_chunks(
     keep_accepted = dedup is not None and n_jobs != 1
     if n_jobs == 1:
         results = [
-            _run_interval(
-                generator, filters, begin, end, path, db, storage
-            )
+            _run_interval(generator, filters, begin, end, path, db, storage)
             for (begin, end), path, db in zip(ranges, paths, db_paths)
         ]
     else:
@@ -1239,8 +1306,7 @@ def _run_chunks(
                             payload["first_failed"]
                         ):
                             stream.write(
-                                json.dumps(payload, ensure_ascii=False)
-                                + "\n"
+                                json.dumps(payload, ensure_ascii=False) + "\n"
                             )
         finally:
             if stream is not None:
@@ -1250,7 +1316,7 @@ def _run_chunks(
                 {
                     "total": 0,
                     "accepted": -dedup.n_duplicates,
-                    "first_failed": {dedup.stage_name: dedup.n_duplicates},
+                    "first_failed": dict(dedup.n_by_stage),
                     "n_duplicates_global": dedup.n_duplicates,
                 }
             )

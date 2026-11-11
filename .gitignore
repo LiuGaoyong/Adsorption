@@ -216,3 +216,6 @@ runs/
 
 # Generated example configurations (rendered by examples/build_cases.py)
 examples/**/run.yaml
+
+# Heavy-compute campaigns (slurm); kept out of git on purpose
+campaigns/

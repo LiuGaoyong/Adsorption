@@ -42,10 +42,12 @@ from adsorption.generate.adsorbate import (
 )
 from adsorption.generate.orientation import OrientationShape
 from adsorption.generate.sampling import (
+    DEFAULT_D_CONTACT_SCALE,
     DEFAULT_D_MAX,
     DEFAULT_D_MAX_RADIUS_SCALE,
     DEFAULT_D_MIN,
     DEFAULT_D_MIN_RADIUS_SCALE,
+    DEFAULT_HEMISPHERE,
     DEFAULT_N_D,
     DEFAULT_N_OA,
     DEFAULT_N_ROT,
@@ -94,10 +96,12 @@ class AdsorptionConfigurationGenerator(
         n_oa: int = DEFAULT_N_OA,
         n_rot: int = DEFAULT_N_ROT,
         n_d: int = DEFAULT_N_D,
-        d_min: float = DEFAULT_D_MIN,
+        d_min: float | None = DEFAULT_D_MIN,
         d_max: float = DEFAULT_D_MAX,
         d_min_radius_scale: float = DEFAULT_D_MIN_RADIUS_SCALE,
         d_max_radius_scale: float = DEFAULT_D_MAX_RADIUS_SCALE,
+        d_contact_scale: float = DEFAULT_D_CONTACT_SCALE,
+        hemisphere: bool = DEFAULT_HEMISPHERE,
         distances: np.ndarray | Sequence[float] | None = None,
         anchor: Anchor | ResolvedAnchor = "com",
         orientation: RotationSet | None = None,
@@ -118,12 +122,18 @@ class AdsorptionConfigurationGenerator(
             n_oa: Number of approach directions.
             n_rot: Number of molecular orientations.
             n_d: Number of anchor distances.
-            d_min: Lower bound of the anchor-distance array, in Angstrom.
+            d_min: Lower bound of the anchor-distance array in Angstrom, or
+                ``None`` for the hard-sphere contact distance of each site
+                and adsorbate.
             d_max: Upper bound of the anchor-distance array, in Angstrom.
             d_min_radius_scale: Coefficient of the adsorbate radius added to
-                ``d_min``.
+                the lower bound.
             d_max_radius_scale: Coefficient of the adsorbate radius added to
                 ``d_max``.
+            d_contact_scale: Coefficient of the pairwise Lennard-Jones floor
+                that defines the contact distance.
+            hemisphere: Whether to keep only the approach directions on the
+                outward side of each site.
             distances: Explicit anchor-distance array; overrides ``n_d``,
                 ``d_min``, ``d_max`` and both radius coefficients.
             anchor: The anchor declaration used when ``adsorbate`` is a bare
@@ -170,6 +180,8 @@ class AdsorptionConfigurationGenerator(
                 d_max=d_max,
                 d_min_radius_scale=d_min_radius_scale,
                 d_max_radius_scale=d_max_radius_scale,
+                d_contact_scale=d_contact_scale,
+                hemisphere=hemisphere,
                 distances=distances,
                 orientation=orientation,
                 orientation_kind=orientation_kind,
@@ -336,6 +348,7 @@ class AdsorptionConfigurationGenerator(
             "conformer": int(component.conformer),
             "conformer_label": bound.rigid.label,
             "i": int(i),
+            "i_grid": int(bound.direction_indices[i - 1]),
             "j": int(j),
             "k": int(k),
             "distance": distance,

@@ -36,8 +36,16 @@ protocol:
   n_oa: 8
   n_rot: 8
   n_d: 6
-  d_min: 0.8
+  # null (or "contact"): the lower bound is the hard-sphere contact distance
+  # of each site and adsorbate, derived from the KIM Lennard-Jones sigma
+  # table that GeometryFilter uses (d_contact_scale matches its `scale`).
+  # A number is an absolute lower bound in Angstrom.
+  d_min: null
   d_max: 3.0
+  d_contact_scale: 1.0
+  # true: keep only the approach directions on the outward side of each site
+  # (about half of n_oa); false: the full sphere, as in the manuscript.
+  hemisphere: false
   # Optional size-dependent bounds:
   # d_min_eff = d_min + d_min_radius_scale * R
   # d_max_eff = d_max + d_max_radius_scale * R

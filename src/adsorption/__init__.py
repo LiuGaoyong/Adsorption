@@ -19,7 +19,7 @@ from adsorption.base.pipeline import (
     AdsorptionConfigurationPipeline,
     Record,
 )
-from adsorption.dedup import TrialDeduplicator
+from adsorption.dedup import BasinDeduplicator, TrialDeduplicator
 from adsorption.filters import (
     EnergyFilter,
     GeometryFilter,
@@ -34,6 +34,7 @@ from adsorption.generate import (
     Sampling,
 )
 from adsorption.geometry import (
+    AutoSites,
     ExplicitSites,
     GraphAtomsSites,
     ResolvedSites,
@@ -49,6 +50,8 @@ __all__ = [
     "AdsorptionConfigurationGenerator",
     "AdsorptionConfigurationGeneratorABC",
     "AdsorptionConfigurationPipeline",
+    "AutoSites",
+    "BasinDeduplicator",
     "BoundAdsorbate",
     "ETKDGEnsemble",
     "EnergyFilter",

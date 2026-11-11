@@ -69,9 +69,10 @@ def test_build_matches_the_placement_primitive() -> None:
     )
     for trial in generator:
         bound = generator._components[trial.meta["site"]].adsorbate
-        target = np.asarray(trial.meta["site_center"]) + trial.meta[
-            "distance"
-        ] * bound.directions[trial.meta["i"] - 1]
+        target = (
+            np.asarray(trial.meta["site_center"])
+            + trial.meta["distance"] * bound.directions[trial.meta["i"] - 1]
+        )
         placed = place(
             bound.rigid.atoms,
             anchor=bound.rigid.anchor,
@@ -184,8 +185,31 @@ def test_uniform_dihedral_counts_are_grids() -> None:
     ).resolve()
     assert len(rigids) == 9
     assert all(rigid.provenance["truncated"] for rigid in rigids)
+    assert all(rigid.provenance["selection"] == "halton" for rigid in rigids)
     assert rigids[0].provenance["dihedrals"] == (0.0, 0.0, 0.0)
-    assert rigids[1].provenance["dihedrals"] == (0.0, 0.0, 60.0)
+    # The truncated set spans every rotor instead of exhausting the last one.
+    angles = [rigid.provenance["dihedrals"] for rigid in rigids]
+    for rotor in range(3):
+        assert len({combo[rotor] for combo in angles}) > 1
+
+
+def test_truncation_is_not_biased_towards_the_first_rotor() -> None:
+    """Every rotor of a truncated set visits every grid angle."""
+    pytest.importorskip("rdkit")
+    rigids = RotamerEnsemble(
+        "CCCCCC", dihedrals=6, max_rotamers=64, deduplicate=False
+    ).resolve()
+    assert len(rigids) == 64
+    angles = [rigid.provenance["dihedrals"] for rigid in rigids]
+    for rotor in range(3):
+        assert {combo[rotor] for combo in angles} == {
+            0.0,
+            60.0,
+            120.0,
+            180.0,
+            240.0,
+            300.0,
+        }
 
 
 def test_ase_dihedrals_match_the_requested_sequence() -> None:
@@ -233,9 +257,7 @@ def test_conformer_deduplication_drops_mirror_rotamers() -> None:
 
 def test_conformer_deduplication_keeps_distinct_rotamers() -> None:
     """A linear chain keeps every rotamer at the cap of the grid."""
-    rigids = RotamerEnsemble(
-        "CCCCCC", dihedrals=10, max_rotamers=64
-    ).resolve()
+    rigids = RotamerEnsemble("CCCCCC", dihedrals=10, max_rotamers=64).resolve()
     assert len(rigids) == 64
 
 

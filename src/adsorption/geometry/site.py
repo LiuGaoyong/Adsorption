@@ -23,6 +23,7 @@ from adsorption.geometry.constants import (
     default_scale,
     default_skin,
 )
+from adsorption.geometry.mic import displacements_mic
 from adsorption.geometry.shell import first_neighbor_shell, mean_mic
 
 __all__ = ["SiteGeometry", "build_site"]
@@ -124,6 +125,39 @@ class SiteGeometry:
                 np.asarray(self.neighbor_positions, dtype=float),
             )
         )
+
+    @property
+    def normal(self) -> np.ndarray:
+        """Return the outward unit normal of the site.
+
+        The normal points from the centroid of the local atom cloud (core set
+        plus first-neighbour shell, in minimum-image representation) towards
+        the site centre. On a terrace the shell lies around and below the
+        centre, so the vector points out of the surface; at a cluster vertex
+        it points away from the cluster. It only restricts the approach
+        directions when the hemisphere option of the sampling protocol is
+        enabled.
+
+        Raises:
+            ValueError: If the local environment is centrosymmetric about the
+                site centre, so that no outward direction exists.
+        """
+        center = np.asarray(self.center, dtype=float)
+        cloud = np.vstack(
+            (
+                np.asarray(self.core_positions, dtype=float),
+                np.asarray(self.neighbor_positions, dtype=float),
+            )
+        )
+        offsets = displacements_mic(cloud - center, self.cell, self.pbc)
+        vector = -offsets.mean(axis=0)
+        norm = float(np.linalg.norm(vector))
+        if norm < 1e-6:
+            raise ValueError(
+                "The site has no outward normal: its core and shell are "
+                "centrosymmetric about the centre."
+            )
+        return vector / norm
 
 
 def build_site(

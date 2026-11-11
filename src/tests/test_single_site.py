@@ -213,8 +213,15 @@ def test_signature_reports_the_realised_orientation_count(slab: Atoms) -> None:
             "n_rot": 1,
             "n_d": 1,
             "orientation": "fixed",
+            "d_min": pytest.approx(signature["components"][0]["d_min"]),
+            "d_max": pytest.approx(signature["components"][0]["d_max"]),
         }
     ]
+    # With n_d=1 the array collapses onto the contact distance of the site.
+    assert (
+        signature["components"][0]["d_min"]
+        == signature["components"][0]["d_max"]
+    )
     assert signature["factors"]["n_rot_realised"] == [1]
     assert signature["n_candidates"] == 2
 

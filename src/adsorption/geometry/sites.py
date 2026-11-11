@@ -8,6 +8,10 @@ which sites exist. Three sources cover the construction:
 * :class:`TopLayerSites` -- every atom of the highest layer is a top site.
 * :class:`GraphAtomsSites` -- ``graphatoms`` enumerates 1-, 2- and 3-core
   sites from the substrate bond graph, optionally symmetry-reduced.
+* :class:`AutoSites` -- the ``sites: auto`` policy of the campaign runner:
+  the symmetry-unique top-surface sites of a periodic slab (top, bridge and
+  hollow cores, one representative per local environment), or the unique
+  GraphAtoms sites of a cluster.
 
 A site spec may carry its own sampling object so that a campaign can use a
 site-specific number of approach directions (the protocol value ``N_OA``).
@@ -25,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from ase import Atoms
 
+from adsorption.geometry.mic import displacements_mic, is_periodic
 from adsorption.geometry.site import SiteGeometry, build_site
 
 if TYPE_CHECKING:
@@ -32,6 +37,7 @@ if TYPE_CHECKING:
     from graphatoms.system.system import System
 
 __all__ = [
+    "AutoSites",
     "ExplicitSites",
     "GraphAtomsSites",
     "ResolvedSites",
@@ -49,7 +55,7 @@ class SiteSpec:
     Attributes:
         geometry: The site geometry.
         sampling: Optional per-site sampling object. It must provide a
-            ``bind(rigid)`` method; the generator uses it instead of the
+            ``bind(rigid, site)`` method; the generator uses it instead of the
             global sampling.
     """
 
@@ -65,7 +71,7 @@ class SiteSpec:
         if self.sampling is not None and not callable(
             getattr(self.sampling, "bind", None)
         ):
-            raise TypeError("sampling must provide a bind(rigid) method.")
+            raise TypeError("sampling must provide a bind(rigid, site) method.")
 
 
 @dataclass(frozen=True)
@@ -460,3 +466,116 @@ class GraphAtomsSites(SiteSource):
             "skin": self.skin,
         }
         return ResolvedSites(specs, policy)
+
+
+def _environment_key(site: SiteGeometry, substrate: Atoms) -> str:
+    """Return a key of the local environment of one site.
+
+    The key is the value-sorted bond-list hash of the core atoms together
+    with their first-neighbour shell, taken in minimum-image representation
+    about the site centre. Core atoms are tagged by an offset on their atomic
+    number so that a core and a shell atom of the same element are not
+    confused: two sites share the key when they are the same local
+    arrangement (a translation-equivalent top site, or two fcc hollows of a
+    terrace), while an fcc and an hcp hollow differ through the shell atom
+    below the centre.
+    """
+    from adsorption.base import canonical_key  # noqa: PLC0415
+
+    core = np.asarray(site.core_indices, dtype=int)
+    shell = np.asarray(site.neighbor_indices, dtype=int)
+    indices = np.concatenate((core, shell))
+    offsets = displacements_mic(
+        np.asarray(substrate.positions[indices], dtype=float)
+        - np.asarray(site.center, dtype=float),
+        site.cell,
+        site.pbc,
+    )
+    numbers = np.asarray(substrate.numbers[indices], dtype=int).copy()
+    numbers[: len(core)] += 200
+    local = Atoms(numbers=numbers, positions=offsets)
+    return canonical_key(local, cutoff=6.0, resolution=0.05)
+
+
+@dataclass(frozen=True)
+class AutoSites(SiteSource):
+    """The default site policy: unique sites of the exposed surface.
+
+    For a periodic substrate every outer 1-, 2- and 3-core site of the bond
+    graph is enumerated, restricted to cores whose atoms all belong to the
+    top layer (within ``tolerance`` of the highest atom), and reduced to one
+    representative per local environment, so a perfect terrace yields one
+    top, one bridge and the two hollow sites instead of one site per lattice
+    atom. For a non-periodic structure the symmetry-unique GraphAtoms sites
+    are used, since a cluster exposes every facet.
+
+    Attributes:
+        max_ncore: Largest core size to enumerate.
+        tolerance: Height tolerance of the top layer, in Angstrom.
+        scale: Direction-sphere scale factor, or ``None`` for the default.
+        skin: Steric margin in Angstrom, or ``None`` for the default.
+        sampling: Optional sampling override applied to every site.
+    """
+
+    max_ncore: int = 3
+    tolerance: float = 0.5
+    scale: float | None = None
+    skin: float | None = None
+    sampling: Sampling | None = None
+
+    def resolve(self, substrate: Atoms) -> ResolvedSites:
+        """Resolve the unique exposed sites of the substrate.
+
+        Args:
+            substrate: The substrate structure.
+
+        Returns:
+            ResolvedSites: The ordered site set.
+
+        Raises:
+            ValueError: If no site survives the top-layer restriction.
+        """
+        cell = np.asarray(substrate.cell.array, dtype=float)
+        pbc = np.asarray(substrate.pbc, dtype=bool)
+        if not is_periodic(cell, pbc):
+            resolved = GraphAtomsSites(
+                max_ncore=int(self.max_ncore),
+                unique=True,
+                scale=self.scale,
+                skin=self.skin,
+                sampling=self.sampling,
+            ).resolve(substrate)
+            policy = dict(resolved.policy)
+            policy.update({"kind": "auto", "periodic": False})
+            return ResolvedSites(resolved.specs, policy, resolved.digest)
+        every = GraphAtomsSites(
+            max_ncore=int(self.max_ncore),
+            unique=False,
+            scale=self.scale,
+            skin=self.skin,
+            sampling=self.sampling,
+        ).resolve(substrate)
+        heights = np.asarray(substrate.positions[:, 2], dtype=float)
+        top = heights >= heights.max() - float(self.tolerance)
+        seen: set[str] = set()
+        specs: list[SiteSpec] = []
+        for spec in every.specs:
+            if not np.all(top[np.asarray(spec.geometry.core_indices)]):
+                continue
+            key = _environment_key(spec.geometry, substrate)
+            if key in seen:
+                continue
+            seen.add(key)
+            specs.append(spec)
+        if len(specs) == 0:
+            raise ValueError("AutoSites found no top-layer site.")
+        policy = {
+            "kind": "auto",
+            "periodic": True,
+            "n": len(specs),
+            "max_ncore": int(self.max_ncore),
+            "tolerance": float(self.tolerance),
+            "scale": self.scale,
+            "skin": self.skin,
+        }
+        return ResolvedSites(tuple(specs), policy)

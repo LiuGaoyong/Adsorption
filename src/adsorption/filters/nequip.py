@@ -316,4 +316,9 @@ class NequIPOptimizedEnergyFilter(OptimizedEnergyFilter):
             "fix_substrate": self.fix_substrate,
             "fix_adsorbate_bonds": self.fix_adsorbate_bonds,
             "reject_on_unconverged": self.reject_on_unconverged,
+            "e_bind_cut": self.e_bind_cut,
+            "adsorbate_reference": self.adsorbate_reference,
+            "e_adsorbate": self.e_adsorbate,
+            "start_from": self.start_from,
+            "record_relaxed": self.record_relaxed,
         }

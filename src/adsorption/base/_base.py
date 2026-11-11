@@ -37,37 +37,55 @@ __all__ = [
 ]
 
 
-def canonical_key(atoms: Atoms, cutoff: float = 5.0) -> str:
+def canonical_key(
+    atoms: Atoms,
+    cutoff: float = 5.0,
+    *,
+    resolution: float = 0.01,
+) -> str:
     """Return the bond-list hash of one structure.
 
-    The bond list comes from :func:`arrayff.neighbors.neighbor_list` and is
-    sorted by ``(i, j)``. Every bond contributes three little-endian ``int64``
-    values — the atomic numbers ``Z_i``, ``Z_j`` and the interatomic distance in
-    units of 0.01 Angstrom — so the payload is the raw ``(nbonds, 3)`` integer
-    block, and the key is its blake2b-128 digest
-    (:func:`graphatoms.utils.bytestool.hash_string`).
+    The bond list comes from :func:`arrayff.neighbors.neighbor_list`. Every
+    bond contributes three little-endian ``int64`` values — the atomic
+    numbers ``Z_i``, ``Z_j`` and the interatomic distance in units of
+    ``resolution`` Angstrom — and the rows are sorted by those values, so the
+    payload is the sorted ``(nbonds, 3)`` integer block and the key is its
+    blake2b-128 digest (:func:`graphatoms.utils.bytestool.hash_string`).
 
-    The key is invariant to rigid rotation, translation and reflection, so two
-    structures that differ only by such an isometry share it. It is not
-    invariant to a reordering of the atoms: within one campaign the atom order
-    is fixed by the generator.
+    The key is invariant to rigid rotation, translation and reflection, and,
+    because the rows are ordered by value rather than by atom index, to any
+    reordering of the atoms. Two placements that are the same structure up to
+    a permutation of equivalent atoms (the six-fold rotation of a benzene
+    ring, the twelve equivalent orientations of methane, a translation of a
+    top site to an equivalent lattice atom) therefore share it.
 
     Args:
         atoms: The structure to key.
         cutoff: Neighbor cutoff in Angstrom. It must stay below half the
             smallest cell edge of a periodic structure, otherwise a periodic
             image of a pair enters the bond list as a second bond.
+        resolution: Distance bin width in Angstrom. ``0.01`` identifies
+            placements of one rigid enumeration; a coarser value such as
+            ``0.1`` groups relaxed structures that converged to one basin
+            with slightly different residual coordinates.
 
     Returns:
         str: The 32-character hash of the bond list.
+
+    Raises:
+        ValueError: If ``resolution`` is not a positive finite number.
     """
+    if not np.isfinite(resolution) or resolution <= 0.0:
+        raise ValueError(f"resolution must be positive, got {resolution}.")
     i, j, distance = neighbor_list("ijd", atoms, cutoff=cutoff)
-    order = np.lexsort((j, i))
-    i = np.asarray(i)[order]
-    j = np.asarray(j)[order]
-    int_d = np.rint(np.asarray(distance)[order] * 100.0).astype(np.int64)
     numbers = np.asarray(atoms.numbers, dtype=np.int64)
-    payload = np.column_stack([numbers[i], numbers[j], int_d])
+    z_i = numbers[np.asarray(i, dtype=int)]
+    z_j = numbers[np.asarray(j, dtype=int)]
+    int_d = np.rint(np.asarray(distance, dtype=float) / resolution).astype(
+        np.int64
+    )
+    order = np.lexsort((int_d, z_j, z_i))
+    payload = np.column_stack([z_i[order], z_j[order], int_d[order]])
     return hash_string(payload.astype("<i8").tobytes())
 
 
@@ -172,7 +190,12 @@ class Trial:
         """
         return len(self.atoms) - self.natoms_substrate
 
-    def get_canonical_key(self, cutoff: float = 5.0) -> str:
+    def get_canonical_key(
+        self,
+        cutoff: float = 5.0,
+        *,
+        resolution: float = 0.01,
+    ) -> str:
         """Return the bond-list hash of the trial.
 
         It is :func:`canonical_key` applied to the trial structure; see there
@@ -181,11 +204,12 @@ class Trial:
 
         Args:
             cutoff: Neighbor cutoff in Angstrom.
+            resolution: Distance bin width in Angstrom.
 
         Returns:
             str: The 32-character hash of the bond list.
         """
-        return canonical_key(self.atoms, cutoff=cutoff)
+        return canonical_key(self.atoms, cutoff=cutoff, resolution=resolution)
 
 
 @dataclass(frozen=True)
