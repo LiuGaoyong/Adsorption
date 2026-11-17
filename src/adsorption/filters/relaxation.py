@@ -166,8 +166,8 @@ class EnergyFilter(AdsorptionConfigurationFilterABC):
         self.reject_on_unconverged = bool(reject_on_unconverged)
         self.calculator = calculator
         self._isolated_cache: dict[str, float] = {}
-        self._adsorbate_cache: dict[int, float] = {}
-        self._shared_reference: float | None = None
+        self._adsorbate_cache: dict[tuple[int, bytes, float], float] = {}
+        self._shared_reference: dict[bytes, float] = {}
 
     # -- isolated fragments -------------------------------------------------
 
@@ -252,25 +252,59 @@ class EnergyFilter(AdsorptionConfigurationFilterABC):
         """Return the isolated adsorbate energy under the reference policy."""
         if self.e_adsorbate is not None:
             return self.e_adsorbate
-        conformer = int(trial.meta.get("conformer", 0))
-        value = self._adsorbate_cache.get(conformer)
+        n_substrate = trial.natoms_substrate
+        species, key = self._adsorbate_key(
+            trial.atoms.numbers[n_substrate:],
+            trial.atoms.positions[n_substrate:],
+            int(trial.meta.get("conformer", 0)),
+        )
+        value = self._adsorbate_cache.get(key)
         if value is None:
             _, adsorbate = self._fragments(trial)
             if self.adsorbate_reference == "conformer":
                 value = self._isolated_energy(adsorbate)
             else:
                 value = self._relax_isolated(adsorbate)
-            self._adsorbate_cache[conformer] = value
+            self._adsorbate_cache[key] = value
             if self.adsorbate_reference == "shared":
-                self._shared_reference = (
-                    value
-                    if self._shared_reference is None
-                    else min(self._shared_reference, value)
+                shared = self._shared_reference.get(species)
+                self._shared_reference[species] = (
+                    value if shared is None else min(shared, value)
                 )
         if self.adsorbate_reference == "shared":
-            assert self._shared_reference is not None
-            return self._shared_reference
+            return self._shared_reference[species]
         return value
+
+    @staticmethod
+    def _adsorbate_key(
+        numbers: np.ndarray,
+        positions: np.ndarray,
+        conformer: int,
+    ) -> tuple[bytes, tuple[int, bytes, float]]:
+        """Return the species key and the cache key of a placed adsorbate.
+
+        The conformer index alone does not identify a structure: a filter
+        that is reused for another adsorbate (or another ensemble) would
+        return the reference energy of the first one. The key therefore also
+        carries the atomic numbers and the radius of gyration, which is
+        invariant under the rigid motion of a placement and costs one pass
+        over the adsorbate atoms.
+
+        Args:
+            numbers: Atomic numbers of the adsorbate.
+            positions: Positions of the placed adsorbate.
+            conformer: Conformer index of the trial.
+
+        Returns:
+            tuple[bytes, tuple[int, bytes, float]]: The species key, shared
+            by every conformer of one adsorbate, and the cache key of this
+            conformer.
+        """
+        species = np.asarray(numbers, dtype=np.int64).tobytes()
+        offsets = np.asarray(positions, dtype=float)
+        offsets = offsets - offsets.mean(axis=0)
+        gyration = round(float(np.einsum("ij,ij->", offsets, offsets)), 4)
+        return species, (int(conformer), species, gyration)
 
     def _reference_cutoff(self, trial: Trial) -> float:
         """Return the isolated substrate plus adsorbate energy."""

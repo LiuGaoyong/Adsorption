@@ -94,7 +94,7 @@ def test_none_ceiling_uses_isolated_fragment_energies() -> None:
         reject_on_unconverged=False,
     )
     filt.prepare(trial)
-    assert 0 in filt._adsorbate_cache
+    assert len(filt._adsorbate_cache) == 1
     assert filt._ceiling(trial) == pytest.approx(cutoff)
     verdict = filt.evaluate(trial)
     assert filt.e_cut is None
@@ -104,6 +104,32 @@ def test_none_ceiling_uses_isolated_fragment_energies() -> None:
         assert verdict.value > cutoff
     else:
         assert verdict.value <= cutoff
+
+
+def test_adsorbate_reference_follows_the_structure() -> None:
+    """A reused filter must not return the reference of another adsorbate."""
+    slab = fcc111("Cu", (2, 2, 2), vacuum=8.0, orthogonal=True)
+
+    def trial_of(name: str, turn: float = 0.0) -> Trial:
+        adsorbate = molecule(name)
+        adsorbate.rotate(turn, "x")
+        adsorbate.positions += slab.positions.max(axis=0) + 3.0
+        atoms = slab.copy()
+        atoms.extend(adsorbate)
+        return Trial(atoms, index=1, n_total=1, meta={"n_substrate": len(slab)})
+
+    def fresh(trial: Trial) -> float:
+        return EnergyFilter(None, EMT())._adsorbate_energy(trial)
+
+    reused = EnergyFilter(None, EMT())
+    first = reused._adsorbate_energy(trial_of("CO"))
+    second = reused._adsorbate_energy(trial_of("H2O"))
+    assert first == pytest.approx(fresh(trial_of("CO")))
+    assert second == pytest.approx(fresh(trial_of("H2O")))
+    assert first != pytest.approx(second)
+    # A rigid motion of the same conformer reuses its cache entry.
+    assert reused._adsorbate_energy(trial_of("CO", 37.0)) == first
+    assert len(reused._adsorbate_cache) == 2
 
 
 def test_evaluate_accepts_below_the_ceiling() -> None:

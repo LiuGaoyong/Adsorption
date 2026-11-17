@@ -201,7 +201,24 @@ def _dedup_config() -> dict[str, Any]:
     return cfg
 
 
-def _assert_global_dedup(tmp_path: Path, serial, parallel, name: str) -> None:
+def _assert_global_dedup(
+    tmp_path: Path,
+    serial,
+    parallel,
+    name: str,
+    *,
+    crosses_workers: bool = True,
+) -> None:
+    """Compare a parallel deduplicated run with the serial one.
+
+    ``crosses_workers`` states that duplicates are known to straddle the
+    workers, so the driver pass must have rejected some. That holds for
+    joblib, whose chunks are fixed index intervals. A Ray pool hands every
+    trial to whichever actor is free, so the split depends on timing: with
+    two equally fast actors the trials alternate, every duplicate group
+    (stride ``n_d = 2``) stays inside one actor and the driver pass has
+    nothing left to reject. The outputs are the same either way.
+    """
     assert serial.total == parallel.total == 64
     assert serial.accepted == parallel.accepted == 16
     assert parallel.first_failed["TrialDeduplicator"] == 48
@@ -212,7 +229,10 @@ def _assert_global_dedup(tmp_path: Path, serial, parallel, name: str) -> None:
         tmp_path / name / "accepted.db"
     )
     summary = json.loads((tmp_path / name / "summary.json").read_text())
-    assert summary["n_duplicates_global"] > 0
+    if crosses_workers:
+        assert summary["n_duplicates_global"] > 0
+    else:
+        assert 0 <= summary["n_duplicates_global"] <= 48
 
 
 def test_joblib_deduplicates_across_chunks(tmp_path: Path) -> None:
@@ -233,7 +253,116 @@ def test_ray_deduplicates_across_actors(tmp_path: Path) -> None:
     parallel = run_config(
         cfg, output=tmp_path / "ray", n_jobs=2, engine="ray"
     )
-    _assert_global_dedup(tmp_path, serial, parallel, "ray")
+    _assert_global_dedup(
+        tmp_path, serial, parallel, "ray", crosses_workers=False
+    )
+
+
+@pytest.mark.parametrize("split", ["alternate", "pairs"])
+def test_driver_pass_deduplicates_any_actor_split(split: str) -> None:
+    """The driver pass gives the serial result however actors share trials.
+
+    This is the deterministic counterpart of the Ray test: two filter actors
+    receive the trials in a fixed pattern. ``alternate`` keeps every
+    duplicate group inside one actor (nothing is left for the driver);
+    ``pairs`` splits every group over both actors (the driver must reject).
+    """
+    cfg = _dedup_config()
+    generator, _ = _run._build_generator(cfg)
+    actors = [
+        _FilterActor(_run._build_filters(cfg)),
+        _FilterActor(_run._build_filters(cfg)),
+    ]
+    dedup = _run._GlobalDedup.from_filters(_run._build_filters(cfg))
+    assert dedup is not None
+    accepted = 0
+    for trial in generator.generate():
+        position = int(trial.index) - 1
+        owner = position % 2 if split == "alternate" else (position // 2) % 2
+        payload = actors[owner].evaluate(trial).payload
+        dedup.apply(payload)
+        accepted += payload["first_failed"] is None
+    assert accepted == 16
+    if split == "alternate":
+        assert dedup.n_duplicates == 0
+    else:
+        assert dedup.n_duplicates > 0
+
+
+def test_relaxed_substrate_is_stored_whole(tmp_path: Path) -> None:
+    """The adsorbate-only policy must not drop a relaxed substrate."""
+    from ase.io import read
+
+    cfg = _config()
+    cfg["sites"] = [[4]]
+    cfg["protocol"] = {"n_oa": 4, "n_rot": 1, "n_d": 2, "d_max": 3.0}
+    cfg["filters"] = [
+        {
+            "_target_": "adsorption.filters.LennardJonesEnergyFilter",
+            "e_cut": 1.0e6,
+            "max_steps": 5,
+            "fmax": 0.05,
+            "fix_substrate": False,
+            "fix_adsorbate_bonds": False,
+            "reject_on_unconverged": False,
+        }
+    ]
+    frames = {}
+    for mode in ("full", "adsorbate"):
+        cfg["storage"] = {"structures": mode, "xyz": True}
+        summary = run_config(cfg, output=tmp_path / mode, n_jobs=1)
+        assert summary.accepted > 0
+        frames[mode] = read(str(tmp_path / mode / "accepted.xyz"), index=":")
+    generator, _ = _run._build_generator(cfg)
+    n_substrate = len(generator.substrate)
+    moved = False
+    for whole, stored in zip(frames["full"], frames["adsorbate"]):
+        assert np.allclose(whole.positions, stored.positions, atol=1e-6)
+        shift = whole.positions[:n_substrate] - generator.substrate.positions
+        moved = moved or bool(np.abs(shift).max() > 1e-3)
+    assert moved
+
+
+def test_build_cases_renders_from_the_manifest_alone(tmp_path: Path) -> None:
+    """A fresh clone has no case directory; the manifest must be enough."""
+    import importlib.util
+
+    import yaml
+
+    script = Path(__file__).resolve().parents[2] / "examples" / "build_cases.py"
+    if not script.exists():
+        pytest.skip("the examples are not part of this checkout")
+    spec = importlib.util.spec_from_file_location("build_cases", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    manifest = {
+        "layout": "multi",
+        "adsorbates": {"CO": "[C-]#[O+]", "H2O": "O"},
+        "systems": {
+            "A": {"substrate": "structures/a.xyz", "sites": "auto"},
+            "B": {
+                "substrate": "structures/b.xyz",
+                "sites": "auto",
+                "adsorbates": ["CO"],
+            },
+        },
+    }
+    (tmp_path / "manifest.yaml").write_text(yaml.safe_dump(manifest))
+    (tmp_path / "template.yaml").write_text(yaml.safe_dump({"start": 1}))
+    arguments = [
+        str(tmp_path / "manifest.yaml"),
+        str(tmp_path / "template.yaml"),
+    ]
+    assert module.main([*arguments, "--check"]) == 1
+    assert not (tmp_path / "A").exists()
+    assert module.main(arguments) == 0
+    rendered = sorted(
+        str(path.relative_to(tmp_path)) for path in tmp_path.rglob("run.yaml")
+    )
+    assert rendered == ["A/CO/run.yaml", "A/H2O/run.yaml", "B/CO/run.yaml"]
+    assert module.main([*arguments, "--check"]) == 0
 
 
 def test_storage_policy_accepted_only_and_adsorbate(tmp_path: Path) -> None:

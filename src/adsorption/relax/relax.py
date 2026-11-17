@@ -522,9 +522,10 @@ def reference_energies(
     """Relax the clean substrate and the isolated adsorbate conformers.
 
     The substrate is relaxed with the same constraints as the adsorption
-    structures. Every distinct conformer (``info["conformer"]``) is relaxed
-    alone in the cell of the structure, without constraints; the adsorption
-    energy of a flexible molecule is referenced to the lowest of them.
+    structures. Every distinct conformer (``info["conformer"]``) of every
+    adsorbate (by chemical formula) is relaxed alone in the cell of the
+    structure, without constraints; the adsorption energy of a flexible
+    molecule is referenced to the lowest of its conformers.
 
     Args:
         frames: The placed structures.
@@ -533,13 +534,20 @@ def reference_energies(
 
     Returns:
         dict[str, Any]: ``substrate`` (energy by substrate digest),
-        ``adsorbate`` (energy by conformer) and ``adsorbate_min``.
+        ``adsorbate`` (energy by conformer; by ``formula:conformer`` when
+        the frames hold several adsorbates), ``adsorbate_min_by_formula``
+        (the lowest conformer energy of every adsorbate) and
+        ``adsorbate_min`` (that energy when the frames hold one adsorbate,
+        otherwise ``None``).
     """
     calculator = build_calculator(
         settings.calculator, settings.calculator_options
     )
     substrates: dict[str, float] = {}
-    adsorbates: dict[str, float] = {}
+    # The conformer index restarts with every placement campaign, so it only
+    # identifies a molecule together with its composition: frames of several
+    # adsorbates must not share the reference of the first one.
+    conformers: dict[tuple[str, str], float] = {}
     for atoms in frames:
         size = _n_substrate(atoms, n_substrate)
         substrate = atoms[:size]
@@ -552,17 +560,28 @@ def reference_energies(
             substrates[key] = _minimize(substrate, calculator, settings)[
                 "energy"
             ]
-        conformer = str(atoms.info.get("conformer", 0))
-        if conformer not in adsorbates:
-            molecule = atoms[size:]
+        molecule = atoms[size:]
+        key = (
+            molecule.get_chemical_formula(),
+            str(atoms.info.get("conformer", 0)),
+        )
+        if key not in conformers:
             molecule.constraints = []
-            adsorbates[conformer] = _minimize(molecule, calculator, settings)[
+            conformers[key] = _minimize(molecule, calculator, settings)[
                 "energy"
             ]
+    lowest: dict[str, float] = {}
+    for (formula, _), energy in conformers.items():
+        lowest[formula] = min(energy, lowest.get(formula, energy))
+    single = len(lowest) == 1
     return {
         "substrate": substrates,
-        "adsorbate": adsorbates,
-        "adsorbate_min": min(adsorbates.values()),
+        "adsorbate": {
+            (conformer if single else f"{formula}:{conformer}"): energy
+            for (formula, conformer), energy in conformers.items()
+        },
+        "adsorbate_min": min(lowest.values()) if single else None,
+        "adsorbate_min_by_formula": lowest,
     }
 
 

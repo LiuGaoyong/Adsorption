@@ -50,6 +50,29 @@ def test_fixed_layers_follow_the_height() -> None:
     assert len(none) == 0
 
 
+def test_references_separate_adsorbates_with_one_conformer_index() -> None:
+    """Frames of two adsorbates must not share a gas-phase reference."""
+    from adsorption.relax.relax import reference_energies
+
+    settings = RelaxSettings(calculator="emt", fmax=0.1, max_steps=20)
+    carbon_monoxide, n_substrate = slab_with_co()
+    nitric_oxide = carbon_monoxide.copy()
+    nitric_oxide.numbers[n_substrate] = 7
+    nitric_oxide.info = dict(carbon_monoxide.info)
+
+    one = reference_energies([carbon_monoxide], settings)
+    assert list(one["adsorbate"]) == ["0"]
+    assert one["adsorbate_min"] == one["adsorbate"]["0"]
+    assert one["adsorbate_min_by_formula"] == {"CO": one["adsorbate"]["0"]}
+
+    both = reference_energies([carbon_monoxide, nitric_oxide], settings)
+    assert sorted(both["adsorbate"]) == ["CO:0", "NO:0"]
+    assert both["adsorbate"]["CO:0"] == pytest.approx(one["adsorbate"]["0"])
+    assert both["adsorbate"]["NO:0"] != pytest.approx(both["adsorbate"]["CO:0"])
+    assert both["adsorbate_min"] is None
+    assert sorted(both["adsorbate_min_by_formula"]) == ["CO", "NO"]
+
+
 def test_run_relax_writes_resumes_and_feeds_recall(tmp_path) -> None:
     """The extxyz hand-over runs end to end and resumes."""
     frames = []

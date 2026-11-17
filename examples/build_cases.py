@@ -44,25 +44,32 @@ def iter_cases(
     family: Path,
     manifest: dict[str, Any],
 ) -> Iterator[tuple[Path, dict[str, Any], str]]:
-    """Yield ``(case_dir, site_spec, adsorbate_name)`` for every case."""
+    """Yield ``(case_dir, site_spec, adsorbate_name)`` for every case.
+
+    The cases come from the manifest alone, never from the directories that
+    happen to exist: the rendered ``run.yaml`` files are ignored by git, so
+    a fresh clone has no case directory at all. Every site (``single``
+    layout) or system (``multi`` layout) is paired with every adsorbate of
+    the manifest, unless its entry lists its own ``adsorbates`` subset.
+
+    Raises:
+        KeyError: If an entry names an adsorbate the manifest does not
+            declare.
+    """
     adsorbates = manifest["adsorbates"]
     layout = manifest.get("layout", "single")
-    if layout == "single":
-        specs = manifest["sites"]
-        for site_dir in sorted(p for p in family.iterdir() if p.is_dir()):
-            if site_dir.name not in specs:
-                continue
-            for ads_dir in sorted(p for p in site_dir.iterdir() if p.is_dir()):
-                if ads_dir.name in adsorbates:
-                    yield ads_dir, specs[site_dir.name], ads_dir.name
-        return
-    specs = manifest["systems"]
-    for system_dir in sorted(p for p in family.iterdir() if p.is_dir()):
-        if system_dir.name not in specs:
-            continue
-        for ads_dir in sorted(p for p in system_dir.iterdir() if p.is_dir()):
-            if ads_dir.name in adsorbates:
-                yield ads_dir, specs[system_dir.name], ads_dir.name
+    specs = manifest["sites"] if layout == "single" else manifest["systems"]
+    for name in sorted(specs):
+        spec = specs[name]
+        selected = spec.get("adsorbates")
+        names = sorted(adsorbates) if selected is None else sorted(selected)
+        for adsorbate in names:
+            if adsorbate not in adsorbates:
+                raise KeyError(
+                    f"{name}: adsorbate {adsorbate!r} is not declared in "
+                    "the manifest."
+                )
+            yield family / name / adsorbate, spec, adsorbate
 
 
 def render(
@@ -137,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         changed.append(path)
         if args.check:
             continue
+        case_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(
             HEADER + yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
             encoding="utf-8",

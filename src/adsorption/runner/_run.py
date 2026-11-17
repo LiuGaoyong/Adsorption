@@ -140,7 +140,9 @@ class _Storage:
             database, ``"adsorbate"`` (the default) stores only the adsorbate
             atoms and keeps the substrate size in the row data, which is what
             makes the database small: the substrate is identical for every
-            row of a campaign.
+            row of a campaign. A structure whose substrate was moved by a
+            relaxation tier (``fix_substrate=False``) is always stored
+            whole, since its substrate is no longer the shared one.
         xyz: Also write the accepted structures as ``accepted.xyz``, one
             complete extended-XYZ frame per structure. The file is
             self-contained (it does not need the database or the
@@ -605,14 +607,40 @@ def _accepted_atoms(record: Record) -> Atoms | None:
     atoms.calc = None
     meta = record.trial.meta
     relaxed = meta.get(RELAXED_META_KEY)
+    moved = False
     if isinstance(relaxed, Mapping):
         # The last relaxation tier left its relaxed structure; persist that
         # rather than the placed starting point.
         positions = np.asarray(relaxed.get("positions"), dtype=float)
         if positions.shape == atoms.positions.shape:
+            n_substrate = int(record.trial.natoms_substrate)
+            shift = positions[:n_substrate] - atoms.positions[:n_substrate]
+            moved = bool(np.abs(shift).max() > _SUBSTRATE_TOLERANCE)
             atoms.set_positions(positions)
     atoms.info = _provenance(meta, record.trial.index)
+    if moved:
+        atoms.info[_SUBSTRATE_MOVED] = True
     return atoms
+
+
+_SUBSTRATE_MOVED = "substrate_moved"
+"""``info`` flag of an accepted structure whose substrate was relaxed."""
+
+_SUBSTRATE_TOLERANCE = 1e-8
+"""Substrate displacement, in Angstrom, above which it counts as moved."""
+
+
+def _adsorbate_only(atoms: Atoms, storage: _Storage) -> bool:
+    """Return whether only the adsorbate atoms of a structure are stored.
+
+    The ``"adsorbate"`` policy relies on the substrate being identical for
+    every row. A relaxation tier that frees the substrate breaks that, so
+    such a structure is stored whole whatever the policy says; dropping its
+    substrate would pair the relaxed adsorbate with the unrelaxed surface.
+    """
+    return storage.structures == "adsorbate" and not atoms.info.get(
+        _SUBSTRATE_MOVED, False
+    )
 
 
 def _provenance(meta: Mapping[str, Any], index: int) -> dict[str, Any]:
@@ -649,7 +677,7 @@ def _row_payload(
         when the policy says so) and the row data.
     """
     data = _provenance(trial.meta, trial.index)
-    if storage.structures != "adsorbate":
+    if not _adsorbate_only(atoms, storage):
         stored = atoms.copy()
         stored.info = {}
         return stored, data
@@ -670,7 +698,7 @@ def _row_from_payload(
     """Return the database row of one accepted actor result."""
     meta = payload.get("meta", {})
     data = _provenance(meta, int(payload["index"]))
-    if storage.structures != "adsorbate":
+    if not _adsorbate_only(atoms, storage):
         stored = atoms.copy()
         stored.info = {}
         return stored, data
@@ -965,6 +993,9 @@ def _init_worker(threads: int) -> None:
 
 _PARALLEL_ENGINES = ("auto", "joblib", "ray")
 
+_REORDER_FACTOR = 8
+"""Reorder-buffer capacity of the Ray engine, in in-flight windows."""
+
 
 @dataclass(frozen=True)
 class _TrialVerdict:
@@ -1135,10 +1166,11 @@ def _run_ray(
 
     The generator runs in the driver process and yields
     :class:`~adsorption.base.Trial` objects; every trial is submitted to one
-    actor of a :class:`ray.util.ActorPool`. A bounded in-flight window keeps
-    memory flat; results are drained as they finish and reordered by candidate
-    index before writing, so the sidecars stay in candidate-index order
-    without making a slow trial stall the other actors.
+    actor of a :class:`ray.util.ActorPool`. A bounded in-flight window and a
+    bounded reorder buffer keep memory flat; results are drained as they
+    finish and reordered by candidate index before writing, so the sidecars
+    stay in candidate-index order. A slow trial does not stall the other
+    actors until the reorder buffer is full.
 
     Args:
         generator: Process A, iterated in this process.
@@ -1183,6 +1215,11 @@ def _run_ray(
     filters_ref = ray.put(tuple(filters))
     actors: list[Any] = []
     window = max(1, int(n_actors) * max(1, int(chunk_factor)))
+    # Finished results wait in the reorder buffer for the candidates before
+    # them. One slow trial would let it grow without limit, so no new trial
+    # is submitted while it is full; the missing candidate is then in flight
+    # and the loop simply waits for it.
+    buffer_limit = _REORDER_FACTOR * window
     trials = generator.generate(first, last)
     pending = 0
     exhausted = False
@@ -1237,7 +1274,11 @@ def _run_ray(
                     database.write(stored, key_value_pairs=data)
 
             while True:
-                while not exhausted and pending < window:
+                while (
+                    not exhausted
+                    and pending < window
+                    and len(buffer) < buffer_limit
+                ):
                     try:
                         trial = next(trials)
                     except StopIteration:

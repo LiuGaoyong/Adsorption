@@ -84,8 +84,9 @@ START=1 STOP=8 N_JOBS=2 CONTINUE_ON_ERROR=1 ./run_all.sh
 ```
 
 
-To add a case, create the site folder, add it to `manifest.yaml`, and add the
-adsorbate SMILES to the manifest. `structures/cluster.xyz` and
+To add a case, add the site and the adsorbate SMILES to `manifest.yaml`; the
+case folders are created by `build_cases.py`. A site entry may list its own
+`adsorbates` subset. `structures/cluster.xyz` and
 `structures/slab.xyz` are the two substrates.
 
 ## Site images

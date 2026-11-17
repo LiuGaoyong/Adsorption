@@ -68,6 +68,8 @@ storage:
   records: accepted
   compression: none        # none | gzip
   # adsorbate: accepted.db stores only the adsorbate atoms; full: everything.
+  # A structure whose substrate was relaxed (fix_substrate: false) is always
+  # stored whole.
   structures: adsorbate
   # true: also write accepted.xyz, one complete extended-XYZ frame per
   # accepted structure (substrate first). It is the input of
