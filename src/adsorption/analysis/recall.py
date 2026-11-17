@@ -5,12 +5,14 @@ care which engine produced them. A structure needs ``n_substrate``, a
 ``label``, a ``converged`` flag and an energy (``mlp_energy``) in its ``info``,
 which is what ``adsorption-relax run`` writes.
 
-A *run* is the set of relaxed structures of one placement campaign (one
-direction set at one budget); its name has the form ``arm/label``, e.g.
-``fibonacci/n200``. The analysis pools the valid structures of all runs of
-one system, groups them into minima (:mod:`adsorption.analysis.basins`) and
-takes the minima within an energy window of the lowest one as the reference
-set. For every run it then reports
+A *run* is the set of relaxed structures of one placement campaign. Its
+name has the form ``arm/rung@seed``, e.g. ``deterministic/g01000`` or
+``random/g01000@3``: the arm is the placement strategy, the rung the budget
+and the seed the replicate of a stochastic arm (omit it otherwise). The
+analysis pools the valid structures of all runs of one system, groups them
+into minima (:mod:`adsorption.analysis.basins`) and takes the minima within
+an energy window of the lowest one as the reference set. For every run it
+then reports
 
 * the budget (number of relaxations, usable or not),
 * the recall: the share of the reference minima the run reached,
@@ -22,18 +24,8 @@ estimators of the unseen-species problem quantify this: the Good-Turing
 sample coverage and the Chao1 lower bound on the number of minima.
 
 A published configuration is described by geometric criteria, not by
-coordinates, because most papers print none::
-
-References:
-      - name: site-I
-        e_ads: -2.38                 # eV, as published (informative)
-        label: dissociated           # optional
-        contacts:                    # every entry must hold
-          - {adsorbate: O, substrate: Ca, r_max: 2.6, n_min: 2}
-          - {adsorbate: H, substrate: O, r_max: 1.1, n_min: 1, n_max: 1}
-
-A ``contacts`` entry counts the adsorbate-substrate atom pairs of the two
-elements that are closer than ``r_max`` (periodic images included).
+coordinates, because most papers print none; see
+:mod:`adsorption.analysis.criteria` for the format.
 """
 
 from __future__ import annotations
@@ -48,16 +40,16 @@ from typing import Any
 
 import numpy as np
 from ase import Atoms
-from ase.data import atomic_numbers
 from ase.io import read
-from ase.neighborlist import neighbor_list
 
 from adsorption.analysis.basins import cluster_minima, fingerprint
+from adsorption.analysis.criteria import matches_reference
 
 __all__ = [
     "ENERGY_KEY",
     "analyse_runs",
     "load_run",
+    "split_run_name",
     "matches_reference",
     "write_report",
 ]
@@ -95,65 +87,81 @@ def load_run(paths: Sequence[str | Path] | str | Path) -> list[Atoms]:
     return frames
 
 
-def _number(symbol: Any) -> int:
-    """Return the atomic number of a symbol or number."""
-    if isinstance(symbol, (int, np.integer)):
-        return int(symbol)
-    return int(atomic_numbers[str(symbol)])
-
-
-def matches_reference(
-    atoms: Atoms,
-    n_substrate: int,
-    reference: Mapping[str, Any],
-    label: str | None = None,
-) -> bool:
-    """Return whether a structure satisfies the criteria of a reference.
+def split_run_name(name: str) -> tuple[str, str, str]:
+    """Split ``arm/tag@seed`` into its three parts.
 
     Args:
-        atoms: The relaxed structure, substrate atoms first.
-        n_substrate: Number of substrate atoms.
-        reference: The criteria: optional ``label`` and ``contacts``.
-        label: The label of the structure; read from ``atoms.info`` when
-            ``None``.
+        name: The run name. ``tag`` and ``seed`` are optional.
 
     Returns:
-        bool: True when every criterion holds.
-
-    Raises:
-        ValueError: If the reference states no criterion.
+        tuple[str, str, str]: The arm, the tag (budget rung) and the seed;
+        missing parts are empty strings.
     """
-    contacts = list(reference.get("contacts") or [])
-    wanted = reference.get("label")
-    if not contacts and wanted is None:
-        raise ValueError(
-            f"Reference {reference.get('name')!r} has no criterion."
+    head, _, seed = str(name).partition("@")
+    arm, _, tag = head.partition("/")
+    return arm, tag, seed
+
+
+def _median_or_none(values: Sequence[float | None]) -> float | None:
+    """Return the median, counting ``None`` as never reached."""
+    numbers = [math.inf if value is None else float(value) for value in values]
+    middle = float(np.median(numbers))
+    return middle if math.isfinite(middle) else None
+
+
+def _summarise_arms(
+    rows: Sequence[Mapping[str, Any]],
+    recall_target: float,
+) -> dict[str, Any]:
+    """Summarise the runs of every arm over rungs and seeds.
+
+    For every arm the result holds, per rung, the number of runs and the
+    median, minimum and maximum of the recall over the seeds, and the
+    first-passage budget: for each seed the smallest number of relaxations
+    of a run that reaches ``recall_target``, then the median over the seeds
+    (``None`` when half of the seeds or more never reach it).
+    """
+    arms: dict[str, Any] = {}
+    for row in rows:
+        arm = arms.setdefault(
+            row["arm"], {"n_runs": 0, "rungs": {}, "seeds": {}}
         )
-    if wanted is not None:
-        found = atoms.info.get("label") if label is None else label
-        if str(found) != str(wanted):
-            return False
-    if not contacts:
-        return True
-    n_substrate = int(n_substrate)
-    numbers = np.asarray(atoms.numbers, dtype=int)
-    reach = max(float(entry["r_max"]) for entry in contacts)
-    first, second, distance = neighbor_list("ijd", atoms, reach)
-    cross = (first >= n_substrate) & (second < n_substrate)
-    first, second, distance = first[cross], second[cross], distance[cross]
-    for entry in contacts:
-        mask = (
-            (numbers[first] == _number(entry["adsorbate"]))
-            & (numbers[second] == _number(entry["substrate"]))
-            & (distance <= float(entry["r_max"]))
-        )
-        count = int(mask.sum())
-        if count < int(entry.get("n_min", 1)):
-            return False
-        upper = entry.get("n_max")
-        if upper is not None and count > int(upper):
-            return False
-    return True
+        arm["n_runs"] += 1
+        arm["rungs"].setdefault(row["tag"], []).append(row)
+        arm["seeds"].setdefault(row["seed"], []).append(row)
+    summary: dict[str, Any] = {}
+    for name, arm in arms.items():
+        rungs = {}
+        for tag, members in arm["rungs"].items():
+            recalls = [float(member["recall"]) for member in members]
+            rungs[tag] = {
+                "n_runs": len(members),
+                "n_relaxed_median": float(
+                    np.median([member["n_relaxed"] for member in members])
+                ),
+                "recall_median": float(np.median(recalls)),
+                "recall_min": float(min(recalls)),
+                "recall_max": float(max(recalls)),
+                "success_rate": float(
+                    np.mean([bool(member["success"]) for member in members])
+                ),
+            }
+        by_seed: dict[str, int | None] = {}
+        for seed, members in arm["seeds"].items():
+            reached = [
+                int(member["n_relaxed"])
+                for member in members
+                if member["recall"] >= recall_target
+            ]
+            by_seed[seed] = min(reached) if reached else None
+        summary[name] = {
+            "n_runs": arm["n_runs"],
+            "n_seeds": len(by_seed),
+            "rungs": rungs,
+            "first_passage_by_seed": by_seed,
+            "first_passage_budget": _median_or_none(list(by_seed.values())),
+        }
+    return summary
 
 
 def _coverage(counts: Sequence[int]) -> dict[str, Any]:
@@ -192,7 +200,7 @@ def analyse_runs(
     """Analyse the relaxation runs of one system.
 
     Args:
-        runs: Relaxed structures by run name (``arm/label``).
+        runs: Relaxed structures by run name (``arm/rung@seed``).
         window: Energy window of the reference minima above the lowest, eV.
         tau_f: Fingerprint tolerance in Angstrom.
         tau_e: Energy tolerance in eV.
@@ -206,8 +214,8 @@ def analyse_runs(
 
     Returns:
         dict[str, Any]: ``reference`` (the pooled minima and the coverage
-        estimates), ``runs`` (one row per run), ``arms`` (the smallest
-        budget of every arm that reaches ``recall_target``) and
+        estimates), ``runs`` (one row per run), ``arms`` (per arm: the recall
+        over the seeds at every rung and the first-passage budget) and
         ``literature`` (per published configuration, the runs that
         recovered it).
 
@@ -275,14 +283,16 @@ def analyse_runs(
         mine = owners == name
         found = {int(value) for value in minimum[mine]} & reference_ids
         best = float(energies[mine].min()) if mine.any() else None
-        arm, _, tag = name.partition("/")
+        arm, tag, seed = split_run_name(name)
         row: dict[str, Any] = {
             "run": name,
             "arm": arm,
             "tag": tag,
+            "seed": seed,
             "n_relaxed": budgets[name],
             "n_usable": int(mine.sum()),
             "n_minima_found": len(found),
+            "minimum_ids": sorted(found),
             "recall": len(found) / len(reference_ids),
             "e_lowest": best,
             "success": bool(
@@ -294,16 +304,7 @@ def analyse_runs(
             row[f"lit:{key}"] = bool((mask & mine).any())
         rows.append(row)
 
-    arms: dict[str, Any] = {}
-    for row in rows:
-        entry = arms.setdefault(
-            row["arm"], {"n_runs": 0, "first_passage_budget": None}
-        )
-        entry["n_runs"] += 1
-        if row["recall"] >= float(recall_target):
-            current = entry["first_passage_budget"]
-            if current is None or row["n_relaxed"] < current:
-                entry["first_passage_budget"] = row["n_relaxed"]
+    arms = _summarise_arms(rows, float(recall_target))
 
     literature: dict[str, Any] = {}
     for entry in references:
@@ -378,7 +379,9 @@ def write_report(report: Mapping[str, Any], out: str | Path) -> Path:
     )
     rows = [
         {
-            key: (json.dumps(value) if isinstance(value, dict) else value)
+            key: (
+                json.dumps(value) if isinstance(value, (dict, list)) else value
+            )
             for key, value in row.items()
         }
         for row in report["runs"]

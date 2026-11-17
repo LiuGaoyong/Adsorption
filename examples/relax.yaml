@@ -16,6 +16,14 @@ optimizer: LBFGS
 # below are fixed. null leaves the whole substrate free (use it for clusters).
 free_layers: null
 fix_substrate: false
+# Optional pre-relaxation: move every frame to its nearest minimum of the
+# universal Lennard-Jones model (substrate fixed, adsorbate rigid) and start
+# the potential from there. Off by default, so the potential starts from the
+# placement as written. The command-line switch is --lj-prerelax.
+lj_prerelax: false
+lj_fmax: 0.05
+lj_max_steps: 100
+lj_optimizer: BFGS   # LBFGS overshoots on this stiff model and ejects molecules
 # Parallelism. n_jobs is the number of Ray actors or joblib workers.
 # engine: auto (serial for one job, else ray if installed, else joblib),
 # serial, joblib or ray. With ray every actor loads the potential once and

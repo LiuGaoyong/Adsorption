@@ -6,8 +6,8 @@ Two subcommands::
         --model-path model.nequip.pth --free-layers 2 \
         --engine ray --n-jobs 16 --cpus-per-actor 4
 
-    adsorption-relax recall --run fibonacci/n200=relaxed/fib200 \
-        --run random/n200-s1=relaxed/rnd200-s1 \
+    adsorption-relax recall --run deterministic/g01000=relaxed/det \
+        --run random/g01000@1=relaxed/rnd-s1 \
         --references reference.yaml --out analysis/
 
 ``run`` also reads its options from a YAML file (``--config``); an option
@@ -19,6 +19,7 @@ given on the command line wins. The file mirrors the options::
     fmax: 0.05
     max_steps: 300
     free_layers: 2
+    lj_prerelax: false       # true: Lennard-Jones rigid-body step first
     n_jobs: 16               # actors (ray) or workers (joblib)
     engine: ray              # auto | serial | joblib | ray
     cpus_per_actor: 4        # CPUs and Torch threads of every Ray actor
@@ -89,6 +90,10 @@ def _run(args: argparse.Namespace) -> int:
         fix_substrate=fix_substrate,
         layer_tolerance=float(_pick(args, config, "layer_tolerance", 0.5)),
         thresholds=labels,
+        lj_prerelax=bool(args.lj_prerelax or config.get("lj_prerelax", False)),
+        lj_fmax=float(_pick(args, config, "lj_fmax", 0.05)),
+        lj_max_steps=int(_pick(args, config, "lj_max_steps", 100)),
+        lj_optimizer=str(_pick(args, config, "lj_optimizer", "BFGS")),
     )
     inputs = list(args.inputs) or list(config.get("inputs") or [])
     if not inputs:
@@ -120,6 +125,8 @@ def _run(args: argparse.Namespace) -> int:
         )
     else:
         print(f"engine={summary['engine']} n_jobs={summary['n_jobs']}")
+    if settings.lj_prerelax:
+        print("lj_prerelax=on (substrate fixed, rigid adsorbate)")
     print(f"labels: {json.dumps(summary['labels'], sort_keys=True)}")
     print(f"structures: {summary['structures']}")
     print(f"records: {summary['records']}")
@@ -163,6 +170,17 @@ def _recall(args: argparse.Namespace) -> int:
         print(
             f"{row['run']}: n={row['n_relaxed']} usable={row['n_usable']} "
             f"recall={row['recall']:.3f} success={row['success']}"
+        )
+    for arm, entry in report["arms"].items():
+        for tag, rung in entry["rungs"].items():
+            print(
+                f"arm {arm} {tag}: runs={rung['n_runs']} "
+                f"recall median={rung['recall_median']:.3f} "
+                f"[{rung['recall_min']:.3f}, {rung['recall_max']:.3f}]"
+            )
+        print(
+            f"arm {arm}: first-passage budget="
+            f"{entry['first_passage_budget']} over {entry['n_seeds']} seed(s)"
         )
     for name, entry in report["literature"].items():
         print(f"literature {name}: found={entry['found']}")
@@ -209,6 +227,30 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--start", type=int, help="first frame, zero-based")
     run.add_argument("--stop", type=int, help="last frame, exclusive")
     run.add_argument(
+        "--lj-prerelax",
+        dest="lj_prerelax",
+        action="store_true",
+        help="first relax each frame with Lennard-Jones (fixed substrate, "
+        "rigid adsorbate), then start the potential from that minimum",
+    )
+    run.add_argument(
+        "--lj-fmax",
+        dest="lj_fmax",
+        type=float,
+        help="force criterion of the Lennard-Jones step (default: 0.05)",
+    )
+    run.add_argument(
+        "--lj-max-steps",
+        dest="lj_max_steps",
+        type=int,
+        help="step limit of the Lennard-Jones step (default: 100)",
+    )
+    run.add_argument(
+        "--lj-optimizer",
+        dest="lj_optimizer",
+        help="ase.optimize class of the Lennard-Jones step (default: BFGS)",
+    )
+    run.add_argument(
         "--n-jobs",
         dest="n_jobs",
         type=int,
@@ -251,7 +293,9 @@ def _parser() -> argparse.ArgumentParser:
 
     recall = commands.add_parser("recall", help="basin recall of relaxed runs")
     recall.add_argument(
-        "--run", action="append", help="NAME=PATH[,PATH...]; NAME is arm/label"
+        "--run",
+        action="append",
+        help="NAME=PATH[,PATH...]; NAME is arm/rung@seed",
     )
     recall.add_argument("--config", help="YAML file with runs and parameters")
     recall.add_argument(

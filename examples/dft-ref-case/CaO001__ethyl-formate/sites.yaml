@@ -1,0 +1,5 @@
+# Site cores: indices into substrate.xyz. Written by build_refs.py.
+top-Ca: [148]
+top-O: [139]
+short-bridge: [139, 148]
+long-bridge: [140, 148]

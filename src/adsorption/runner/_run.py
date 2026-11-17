@@ -47,6 +47,7 @@ from adsorption.dedup import BasinDeduplicator, TrialDeduplicator
 from adsorption.filters.relaxation import RELAXED_META_KEY
 from adsorption.generate import (
     AdsorptionConfigurationGenerator,
+    RandomConfigurationGenerator,
     Sampling,
 )
 from adsorption.generate.adsorbate import (
@@ -488,12 +489,26 @@ def _build_generator(
     protocol = cfg.get("protocol", {})
     source, n_rotatable = _build_adsorbate_source(node, settings, protocol)
     site_source = _build_site_source(cfg.get("sites", "auto"), protocol)
-    generator = AdsorptionConfigurationGenerator(
-        substrate,
-        site_source,
-        source,
-        sampling=_build_sampling(protocol),
-    )
+    kind = str(protocol.get("kind", "product")).strip().lower()
+    if kind == "product":
+        generator = AdsorptionConfigurationGenerator(
+            substrate,
+            site_source,
+            source,
+            sampling=_build_sampling(protocol),
+        )
+    elif kind == "random":
+        generator = RandomConfigurationGenerator(
+            substrate,
+            site_source,
+            source,
+            sampling=_build_sampling(protocol),
+            seed=int(protocol.get("seed", 0)),
+        )
+    else:
+        raise ValueError(
+            f"Unknown protocol.kind: {kind!r}; expected 'product' or 'random'."
+        )
     info = {
         "n_sites": len(generator.resolved.specs),
         "n_conformers": len(generator.rigids),
@@ -654,6 +669,9 @@ def _provenance(meta: Mapping[str, Any], index: int) -> dict[str, Any]:
         "k": int(meta.get("k", 0)),
         "distance": float(meta.get("distance", 0.0)),
     }
+    if "draw" in meta:
+        # Independent random placement: the draw replaces the grid indices.
+        data["draw"] = int(meta["draw"])
     energy = meta.get("relaxed_energy")
     if energy is not None:
         data["relaxed_energy"] = float(energy)
@@ -737,6 +755,18 @@ def _merge_structures(
                     if skip and int(pairs.get("index", -1)) in skip:
                         continue
                     target.write(row.toatoms(), key_value_pairs=pairs)
+
+
+def _placement_info(generator: Any) -> dict[str, Any]:
+    """Return the campaign-level entries of every extended-XYZ frame.
+
+    ``sampling`` is ``"product"`` (with the name of the direction ``grid``)
+    or ``"random"`` (with the ``seed``).
+    """
+    if isinstance(generator, RandomConfigurationGenerator):
+        return {"sampling": "random", "seed": int(generator.seed)}
+    grid = str(generator.sampling.signature().get("grid", ""))
+    return {"sampling": "product", "grid": grid}
 
 
 def _write_xyz(
@@ -1613,7 +1643,7 @@ def run_config(
             accepted_path,
             xyz_path,
             generator.substrate,
-            {"grid": str(generator.sampling.signature().get("grid", ""))},
+            _placement_info(generator),
         )
 
     total = sum(int(result["total"]) for result in results)

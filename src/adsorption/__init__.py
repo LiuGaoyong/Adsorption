@@ -30,6 +30,7 @@ from adsorption.filters import (
 from adsorption.generate import (
     AdsorptionConfigurationGenerator,
     BoundAdsorbate,
+    RandomConfigurationGenerator,
     Sampling,
 )
 from adsorption.geometry import (
@@ -62,6 +63,7 @@ __all__ = [
     "LennardJonesEnergyFilter",
     "LennardJonesScreenFilter",
     "OptimizedEnergyFilter",
+    "RandomConfigurationGenerator",
     "Record",
     "ResolvedSites",
     "RigidAdsorbate",

@@ -17,6 +17,11 @@ Every frame is written, converged or not, so that the cost of a strategy
 includes its unusable relaxations. A run can be split with ``start``/``stop``
 and resumed: frames already present in ``relax.jsonl`` are skipped.
 
+With ``lj_prerelax`` every frame is first moved to its nearest minimum of the
+universal Lennard-Jones model (substrate fixed, adsorbate rigid) and the
+potential starts from there. The option exists to measure what such a
+pre-relaxation does; it is off by default.
+
 Frames are relaxed in this process, by joblib workers, or by Ray actors
 behind a ``ray.util.ActorPool``. Every actor loads the potential once and
 reserves ``cpus_per_actor`` CPUs, which is also its Torch thread budget.
@@ -46,6 +51,7 @@ from adsorption.analysis.recall import ENERGY_KEY
 __all__ = [
     "RelaxSettings",
     "fixed_substrate_indices",
+    "lj_prerelax",
     "read_frames",
     "relax_structure",
     "run_relax",
@@ -80,6 +86,18 @@ class RelaxSettings:
         layer_tolerance: Atoms whose heights differ by at most this many
             Angstrom belong to one layer.
         thresholds: Thresholds of the structure labels.
+        lj_prerelax: Whether to relax every frame with the universal
+            Lennard-Jones model first and start the potential from that
+            Lennard-Jones minimum. During this step the substrate is fixed
+            and the adsorbate moves as a rigid body. Off by default: the
+            potential then starts from the placement as it was written.
+        lj_fmax: Force criterion of the Lennard-Jones step, in eV/Angstrom.
+        lj_max_steps: Step limit of the Lennard-Jones step.
+        lj_optimizer: Optimizer of the Lennard-Jones step. The default is
+            BFGS: on this stiff pairwise model LBFGS overshoots the narrow
+            well, bounces off the repulsive wall and leaves most molecules
+            several Angstrom above the surface, at a higher energy than
+            they started with.
     """
 
     calculator: str = "nequip"
@@ -91,6 +109,10 @@ class RelaxSettings:
     fix_substrate: bool = False
     layer_tolerance: float = 0.5
     thresholds: LabelThresholds = field(default_factory=LabelThresholds)
+    lj_prerelax: bool = False
+    lj_fmax: float = 0.05
+    lj_max_steps: int = 100
+    lj_optimizer: str = "BFGS"
 
     def __post_init__(self) -> None:
         """Validate the numeric settings."""
@@ -106,6 +128,12 @@ class RelaxSettings:
             )
         if not np.isfinite(self.layer_tolerance) or self.layer_tolerance <= 0.0:
             raise ValueError("layer_tolerance must be positive.")
+        if not np.isfinite(self.lj_fmax) or self.lj_fmax <= 0.0:
+            raise ValueError(f"lj_fmax must be positive, got {self.lj_fmax}.")
+        if int(self.lj_max_steps) < 0:
+            raise ValueError(
+                f"lj_max_steps must not be negative: {self.lj_max_steps}."
+            )
 
     def signature(self) -> dict[str, Any]:
         """Return a JSON-serialisable description of the settings."""
@@ -120,6 +148,10 @@ class RelaxSettings:
             "fix_substrate": bool(self.fix_substrate),
             "layer_tolerance": float(self.layer_tolerance),
             "thresholds": asdict(self.thresholds),
+            "lj_prerelax": bool(self.lj_prerelax),
+            "lj_fmax": float(self.lj_fmax),
+            "lj_max_steps": int(self.lj_max_steps),
+            "lj_optimizer": str(self.lj_optimizer),
         }
 
 
@@ -197,6 +229,74 @@ def _minimize(
     }
 
 
+_LJ_CALCULATOR: Any = None
+
+
+def _lj_calculator() -> Any:
+    """Return the process-local universal Lennard-Jones calculator."""
+    global _LJ_CALCULATOR  # noqa: PLW0603 - one calculator per process
+    if _LJ_CALCULATOR is None:
+        from arrayff.potentials.pairwise.calculator import (  # noqa: PLC0415
+            LJCalculator,
+        )
+
+        _LJ_CALCULATOR = LJCalculator()
+    return _LJ_CALCULATOR
+
+
+def lj_prerelax(
+    atoms: Atoms,
+    n_substrate: int,
+    settings: RelaxSettings,
+) -> dict[str, Any]:
+    """Move the adsorbate to its nearest Lennard-Jones minimum, in place.
+
+    The substrate is fixed and the adsorbate moves as a rigid body (a single
+    atom moves freely), so the step changes where the molecule sits and how
+    it is turned, never its shape. The model is the universal Lennard-Jones
+    model of OpenKIM; it knows no chemistry, which is why the step is an
+    option and not the default.
+
+    Args:
+        atoms: The placed structure, substrate atoms first. Its positions
+            are replaced by the Lennard-Jones minimum.
+        n_substrate: Number of substrate atoms.
+        settings: The relaxation settings (``lj_fmax``, ``lj_max_steps``).
+
+    Returns:
+        dict[str, Any]: ``lj_energy``, ``lj_steps``, ``lj_converged``,
+        ``lj_seconds`` and ``lj_shift``, the largest displacement of an
+        adsorbate atom in Angstrom.
+    """
+    from adsorption.filters.rigid import FixRigidBody  # noqa: PLC0415
+
+    n_substrate = int(n_substrate)
+    work = atoms.copy()
+    work.info = {}
+    constraints: list[Any] = [FixAtoms(indices=np.arange(n_substrate))]
+    if len(work) - n_substrate > 1:
+        body = np.arange(n_substrate, len(work))
+        constraints.append(FixRigidBody(body, work.positions[n_substrate:]))
+    work.constraints = constraints
+    work.calc = _lj_calculator()
+    started = time.perf_counter()
+    optimizer = _optimizer_class(settings.lj_optimizer)(work, logfile=None)
+    optimizer.run(
+        fmax=float(settings.lj_fmax), steps=int(settings.lj_max_steps)
+    )
+    energy = float(work.get_potential_energy())
+    force = _max_force(work)
+    shift = work.positions[n_substrate:] - atoms.positions[n_substrate:]
+    atoms.positions = work.positions
+    return {
+        "lj_energy": energy,
+        "lj_steps": int(optimizer.nsteps),
+        "lj_converged": bool(force <= float(settings.lj_fmax)),
+        "lj_seconds": time.perf_counter() - started,
+        "lj_shift": float(np.linalg.norm(shift, axis=1).max()),
+    }
+
+
 def relax_structure(
     atoms: Atoms,
     n_substrate: int,
@@ -214,13 +314,18 @@ def relax_structure(
     Returns:
         tuple[Atoms, dict[str, Any]]: The relaxed structure (no calculator
         attached) and its record: energies, steps, final force, convergence,
-        seconds and the label quantities.
+        seconds and the label quantities, preceded by the ``lj_*`` entries
+        of :func:`lj_prerelax` when that step is enabled. The label always
+        compares the relaxed structure with the placement as given.
     """
     work = atoms.copy()
     work.info = {}
+    prerelax = (
+        lj_prerelax(work, n_substrate, settings) if settings.lj_prerelax else {}
+    )
     fixed = fixed_substrate_indices(work, n_substrate, settings)
     work.constraints = [FixAtoms(indices=fixed)] if len(fixed) else []
-    record = _minimize(work, calculator, settings)
+    record = {**prerelax, **_minimize(work, calculator, settings)}
     record["n_fixed"] = int(len(fixed))
     record.update(
         label_structure(atoms, work, int(n_substrate), settings.thresholds)

@@ -1,0 +1,9 @@
+# Site cores: indices into substrate.xyz. Written by build_refs.py.
+step-top: [1]
+step-bridge: [0, 1]
+terrace-top: [5]
+step-foot-top: [8]
+hollow-112: [0, 1, 5]
+hollow-122: [0, 4, 5]
+hollow-223: [4, 5, 8]
+hollow-233: [4, 8, 11]

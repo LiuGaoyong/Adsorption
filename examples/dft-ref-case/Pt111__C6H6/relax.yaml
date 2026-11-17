@@ -1,0 +1,14 @@
+# Options of `adsorption-relax run` for this case. free_layers is
+# the number of height levels of substrate.xyz, counted from the
+# top, that the paper leaves free. Written by build_refs.py.
+calculator:
+  name: nequip
+  options:
+    model_path: ''
+    device: cpu
+fmax: 0.05
+max_steps: 300
+optimizer: LBFGS
+free_layers: 2
+lj_prerelax: false
+reference: true

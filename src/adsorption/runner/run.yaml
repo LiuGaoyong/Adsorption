@@ -33,6 +33,15 @@ adsorbate:
 sites: auto
 
 protocol:
+  # product: the Cartesian product of a direction grid, a rotation set and a
+  #          distance array (deterministic).
+  # random:  every candidate is drawn on its own: a uniform random direction,
+  #          a Haar-random orientation and a uniform random distance between
+  #          the ends of the distance array. The grid sizes below then only
+  #          set the number of candidates per site and conformer, which is
+  #          the same as for `product`; `seed` selects the random streams.
+  kind: product
+  seed: 0
   n_oa: 8
   n_rot: 8
   n_d: 6

@@ -1,6 +1,7 @@
 # Adsorption
 
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption)
+[![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/adsorption.svg)](https://anaconda.org/conda-forge/adsorption)
 [![PyPI version](https://img.shields.io/pypi/v/adsorption)](https://pypi.org/project/adsorption/)
 [![PyPI Downloads](https://static.pepy.tech/badge/adsorption)](https://pepy.tech/projects/adsorption)
 
@@ -37,7 +38,7 @@ pixi install
 ```
 
 Requires Python 3.12–3.13, ASE, NumPy, SciPy, RDKit, Hydra, and
-[graphatoms](https://github.com/LiuGaoyong/graphatoms).
+[adsorption](https://github.com/LiuGaoyong/adsorption).
 
 ## Quick start
 
@@ -70,6 +71,15 @@ For a molecule, build the rotation set with
 `build_orientation("auto", adsorbate, n=200)`: linear molecules use `S^2`,
 planar and three-dimensional molecules use `SO(3)`.
 
+`RandomConfigurationGenerator` is the random counterpart with the same
+arguments plus `seed`: every candidate draws its own uniform direction on the
+outward hemisphere, its own Haar-random orientation and its own uniform
+distance in the interval the product discretises. It generates exactly as
+many candidates on every site and conformer as the product, and a candidate
+is a function of the seed and its index, so a campaign is reproducible and
+can be split over index ranges. In `run.yaml` it is selected with
+`protocol.kind: random` and `protocol.seed`.
+
 ## Campaign runner
 
 ```bash
@@ -88,9 +98,9 @@ instantiated with `hydra.utils.instantiate`.
 The runner builds one `AdsorptionConfigurationGenerator` from three inputs:
 a site source (`sites: auto` selects the symmetry-unique exposed sites — one
 top, bridge and hollow core per local environment on a slab, the unique
-GraphAtoms sites on a cluster; `sites: top_layer` keeps every top-layer atom;
+adsorption sites on a cluster; `sites: top_layer` keeps every top-layer atom;
 a flat list is one core set; a list of lists declares several sites; a mapping can select the
-GraphAtoms enumeration), an adsorbate source (the rotatable-bond detection
+adsorption enumeration), an adsorbate source (the rotatable-bond detection
 selects an ETKDG ensemble, otherwise the single adsorbate), and the sampling
 protocol. Candidate intervals are evaluated in parallel with `joblib` (default
 backend `loky`) or, when the optional `ray` package is installed, by Ray
@@ -120,7 +130,7 @@ adsorption-run storage.xyz=true outputs=./runs/demo      # placement + LJ
 adsorption-relax run runs/demo/accepted.xyz --out runs/demo/relaxed \
     --calculator nequip --model-path model.nequip.pth --free-layers 2 \
     --engine ray --n-jobs 16 --cpus-per-actor 4
-adsorption-relax recall --run fibonacci/n200=runs/demo/relaxed --out runs/demo/analysis
+adsorption-relax recall --run deterministic/g01000=runs/demo/relaxed --out runs/demo/analysis
 ```
 
 `accepted.xyz` is self-contained: every frame holds the substrate atoms first
@@ -131,6 +141,10 @@ returns an ASE calculator), writes `relaxed.xyz` and `relax.jsonl`, and
 labels each result `intact`, `dissociated`, `desorbed` or `reconstructed`;
 convergence is recorded separately. Every frame is kept, usable or not. A run
 is split with `--start/--stop` and resumes from `relax.jsonl`.
+`--lj-prerelax` (off by default) first moves every frame to its nearest
+minimum of the universal Lennard-Jones model, with the substrate fixed and
+the adsorbate rigid, and starts the potential from there; the record then
+also holds `lj_energy`, `lj_steps`, `lj_converged` and `lj_shift`.
 Frames are relaxed in the calling process, by joblib workers, or by Ray
 actors behind a `ray.util.ActorPool` (`--engine ray`): `--n-jobs` is the
 actor count and `--cpus-per-actor` the CPUs each actor reserves, which is
@@ -149,7 +163,7 @@ AdsorptionConfigurationGeneratorABC     AdsorptionConfigurationFilterABC
     ├── sites: AutoSites                ├── LennardJonesScreenFilter    single-point LJ ceiling
     │           ExplicitSites           ├── LennardJonesEnergyFilter    relaxed LJ ceiling
     │           TopLayerSites           └── EnergyFilter / OptimizedEnergyFilter
-    │           GraphAtomsSites                                         bases of the LJ tiers
+    │           adsorptionSites                                         bases of the LJ tiers
     └── adsorbates: SingleAdsorbate
                     ExplicitEnsemble
                     ETKDGEnsemble       TrialDeduplicator  (stages, not filters:
@@ -211,6 +225,13 @@ The 96 single-site examples live in `examples/0-SingleSite/<site>/<adsorbate>/`;
 the six-system multi-site gallery is in `examples/1-MultiSite/`, and the
 flexible-adsorbate gallery (n-hexane and 1,5-hexadiene) is in
 `examples/2-FlexibleAdsorbate/`. Each folder has its own `run_all.sh`.
+
+`examples/dft-ref-case/` rebuilds seven published DFT adsorption studies
+(formic acid and ethyl formate on CaO(001), benzene on Pt, Pd and Cu(111),
+1-hexene on Pd(111), CO on Cu(211)) and places the adsorbate with the
+deterministic product and with the random generator at equal generated
+budgets; see its `README.md`. The placements are generated locally; the
+relaxations are left to `relax.sbatch` in each case folder.
 
 ## Citation and license
 
