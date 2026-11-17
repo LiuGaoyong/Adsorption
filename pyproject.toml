@@ -38,13 +38,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Optional parallel backend: the runner uses Ray when it is installed.
 ray = ["ray[default]>=2.50"]
 nequip = ["nequip>=0.17.0"]
+docs = ["python-docx>=1.1"]
 
 [project.scripts]
 adsorption-run = "adsorption.runner:run"
 adsorption-light = "adsorption.analysis.light:main"
+adsorption-relax = "adsorption.relax.cli:main"
 
 [dependency-groups]
 dev = [

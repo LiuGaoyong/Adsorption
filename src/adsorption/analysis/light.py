@@ -1,11 +1,10 @@
-"""Tier-0 geometric measurements of the placement layer.
+"""Geometric measurements of the placement layer.
 
 Every function here runs process A only: the direction grids, the rotation
 sets, the deterministic generator and the pairwise distance floor. No energy
-calculator is imported, so the module runs on a CPU node without NequIP or
-DFT and produces no energy.
+calculator is imported and no energy is produced.
 
-Five measurements cover the geometric evidence chain of the protocol:
+Five measurements:
 
 ``grids``       covering radius and height uniformity of the direction sets
 ``budget``      the share of the fixed budget that survives the floor
@@ -23,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -49,10 +49,12 @@ __all__ = [
     "direction_grid_report",
     "height_uniformity",
     "index_report",
+    "largest_neighbor_angle",
     "load_config",
     "main",
     "run_suite",
     "so3_covering_radius",
+    "so3_largest_neighbor_angle",
     "so3_quaternions",
     "throughput_report",
 ]
@@ -66,23 +68,29 @@ DEFAULT_RESOLUTIONS: tuple[float, ...] = (0.001, 0.01, 0.1)
 DEFAULT_CUTOFFS: tuple[float, ...] = (4.0, 5.0, 6.0)
 """Neighbour cutoffs, in Angstrom, of the placement hash."""
 
+DEFAULT_N_PROBES = 100_000
+"""Probe points of the covering-radius estimates."""
+
 _ROW_BLOCK = 2048
 """Rows per block of the pairwise cosine loop (bounds peak memory)."""
 
+_SMALL_PRIMES = 2 * 3 * 5 * 7 * 11 * 13
+"""Product of the primes a sampling step must not share with a grid size."""
 
-def covering_radius(points: np.ndarray) -> float:
-    """Return the covering radius of a unit-vector set, in degrees.
 
-    The covering radius is the largest nearest-neighbour angle: the angular
-    distance that covers the worst-served point of the sphere. It is the
-    quantity the manuscript compares across direction sets, and it is not the
-    same as a uniformity histogram.
+def largest_neighbor_angle(points: np.ndarray) -> float:
+    """Return the largest nearest-neighbour angle of a point set, in degrees.
+
+    For every point the angle to its nearest neighbour is taken; the result
+    is the largest of them. This measures how isolated the loneliest sample
+    is. It is not the covering radius: a random set can have a moderate
+    value here and still leave a large empty cap.
 
     Args:
         points: Unit vectors of shape ``(n, 3)``.
 
     Returns:
-        float: The covering radius in degrees.
+        float: The largest nearest-neighbour angle in degrees.
 
     Raises:
         ValueError: If fewer than two points are given.
@@ -90,7 +98,7 @@ def covering_radius(points: np.ndarray) -> float:
     array = np.asarray(points, dtype=float)
     if array.ndim != 2 or array.shape[0] < 2:
         raise ValueError(
-            "covering_radius needs at least two points, got "
+            "largest_neighbor_angle needs at least two points, got "
             f"{array.shape}."
         )
     worst = 2.0
@@ -100,10 +108,45 @@ def covering_radius(points: np.ndarray) -> float:
         cosine = array[rows] @ array.T
         local = np.arange(rows.size)
         cosine[local, rows] = -2.0
-        # Per row the nearest neighbour is the largest cosine; the covering
-        # radius is the angle of the *worst* row, i.e. the smallest of those
-        # per-row maxima.
+        # Per row the nearest neighbour is the largest cosine; the result is
+        # the angle of the worst row, i.e. the smallest of those maxima.
         nearest = cosine.max(axis=1)
+        worst = min(worst, float(nearest.min()))
+    return float(np.degrees(np.arccos(np.clip(worst, -1.0, 1.0))))
+
+
+def covering_radius(
+    points: np.ndarray,
+    *,
+    n_probes: int = DEFAULT_N_PROBES,
+) -> float:
+    """Return the covering radius of a unit-vector set, in degrees.
+
+    The covering radius is the largest angle between any direction of the
+    sphere and its nearest sample, i.e. the radius of the largest empty cap.
+    It is estimated on a dense spherical Fibonacci probe set, so the value
+    is a lower bound that is short of the true radius by at most about the
+    probe spacing (``sqrt(4 pi / n_probes)``, 0.6 degrees for the default).
+
+    Args:
+        points: Unit vectors of shape ``(n, 3)``.
+        n_probes: Number of probe directions.
+
+    Returns:
+        float: The covering radius in degrees.
+
+    Raises:
+        ValueError: If the set is empty or ``n_probes`` is not positive.
+    """
+    array = np.asarray(points, dtype=float)
+    if array.ndim != 2 or array.shape[0] < 1:
+        raise ValueError(f"covering_radius needs points, got {array.shape}.")
+    if int(n_probes) < 1:
+        raise ValueError(f"n_probes must be positive, got {n_probes}.")
+    probes = np.asarray(FibonacciGrid().points(int(n_probes)), dtype=float)
+    worst = 1.0
+    for start in range(0, len(probes), _ROW_BLOCK):
+        nearest = (probes[start : start + _ROW_BLOCK] @ array.T).max(axis=1)
         worst = min(worst, float(nearest.min()))
     return float(np.degrees(np.arccos(np.clip(worst, -1.0, 1.0))))
 
@@ -152,29 +195,52 @@ def so3_quaternions(n: int) -> np.ndarray:
     )
 
 
-def so3_covering_radius(quaternions: np.ndarray) -> float:
-    """Return the covering radius of a rotation set, in degrees.
+def _so3_probes(n: int) -> np.ndarray:
+    """Return ``n`` Super-Fibonacci quaternions, vectorised."""
+    index = np.arange(int(n), dtype=float) + 0.5
+    inner = np.sqrt(index / n)
+    outer = np.sqrt(1.0 - index / n)
+    alpha = 2.0 * np.pi * index / np.sqrt(2.0)
+    beta = 2.0 * np.pi * index / 1.533751168755204288118041
+    return np.column_stack(
+        (
+            outer * np.sin(beta),
+            outer * np.cos(beta),
+            inner * np.sin(alpha),
+            inner * np.cos(alpha),
+        )
+    )
+
+
+def _check_quaternions(quaternions: np.ndarray, least: int) -> np.ndarray:
+    """Return the quaternion array after a shape check."""
+    array = np.asarray(quaternions, dtype=float)
+    if array.ndim != 2 or array.shape[1] != 4 or array.shape[0] < least:
+        raise ValueError(
+            f"Expected quaternions of shape (n, 4) with n >= {least}, got "
+            f"{array.shape}."
+        )
+    return array
+
+
+def so3_largest_neighbor_angle(quaternions: np.ndarray) -> float:
+    """Return the largest nearest-neighbour rotation angle, in degrees.
 
     Two unit quaternions ``p`` and ``q`` describe rotations whose relative
-    angle is ``2 arccos|p.q|``, so the covering radius of ``SO(3)`` uses the
-    same nearest-neighbour construction as :func:`covering_radius` with the
-    half-angle doubled.
+    angle is ``2 arccos|p.q|``. For every rotation the angle to its nearest
+    neighbour is taken; the result is the largest of them. Like
+    :func:`largest_neighbor_angle`, this is not the covering radius.
 
     Args:
         quaternions: Unit quaternions of shape ``(n, 4)``.
 
     Returns:
-        float: The covering radius in degrees.
+        float: The largest nearest-neighbour angle in degrees.
 
     Raises:
         ValueError: If fewer than two quaternions are given.
     """
-    array = np.asarray(quaternions, dtype=float)
-    if array.ndim != 2 or array.shape[1] != 4 or array.shape[0] < 2:
-        raise ValueError(
-            "so3_covering_radius needs quaternions of shape (n, 4) with "
-            f"n >= 2, got {array.shape}."
-        )
+    array = _check_quaternions(quaternions, 2)
     worst = 1.0
     total = int(array.shape[0])
     for start in range(0, total, _ROW_BLOCK):
@@ -184,9 +250,39 @@ def so3_covering_radius(quaternions: np.ndarray) -> float:
         product[local, rows] = -1.0
         nearest = product.max(axis=1)
         worst = min(worst, float(nearest.min()))
-    return float(
-        np.degrees(2.0 * np.arccos(np.clip(worst, -1.0, 1.0)))
-    )
+    return float(np.degrees(2.0 * np.arccos(np.clip(worst, -1.0, 1.0))))
+
+
+def so3_covering_radius(
+    quaternions: np.ndarray,
+    *,
+    n_probes: int = DEFAULT_N_PROBES,
+) -> float:
+    """Return the covering radius of a rotation set, in degrees.
+
+    The covering radius is the largest rotation angle between any rotation
+    and its nearest sample. It is estimated on a dense Super-Fibonacci probe
+    set, so the value is a lower bound of the true radius.
+
+    Args:
+        quaternions: Unit quaternions of shape ``(n, 4)``.
+        n_probes: Number of probe rotations.
+
+    Returns:
+        float: The covering radius in degrees.
+
+    Raises:
+        ValueError: If the set is empty or ``n_probes`` is not positive.
+    """
+    array = _check_quaternions(quaternions, 1)
+    if int(n_probes) < 1:
+        raise ValueError(f"n_probes must be positive, got {n_probes}.")
+    probes = _so3_probes(int(n_probes))
+    worst = 1.0
+    for start in range(0, len(probes), _ROW_BLOCK):
+        block = np.abs(probes[start : start + _ROW_BLOCK] @ array.T)
+        worst = min(worst, float(block.max(axis=1).min()))
+    return float(np.degrees(2.0 * np.arccos(np.clip(worst, -1.0, 1.0))))
 
 
 def _direction_grids() -> tuple[DirectionGrid, ...]:
@@ -218,6 +314,9 @@ def direction_grid_report(
                     "requested": size,
                     "size": int(points.shape[0]),
                     "covering_radius_deg": covering_radius(points),
+                    "largest_neighbor_angle_deg": (
+                        largest_neighbor_angle(points)
+                    ),
                     "height_uniformity": height_uniformity(points),
                 }
             )
@@ -227,6 +326,9 @@ def direction_grid_report(
                 "grid": "superfibonacci",
                 "size": int(quaternions.shape[0]),
                 "covering_radius_deg": so3_covering_radius(quaternions),
+                "largest_neighbor_angle_deg": (
+                    so3_largest_neighbor_angle(quaternions)
+                ),
             }
         )
     return {"direction": direction, "orientation": orientation}
@@ -242,7 +344,18 @@ def load_config(path: str | Path) -> dict[str, Any]:
         dict[str, Any]: The configuration tree.
     """
     text = Path(path).read_text(encoding="utf-8")
-    return yaml.safe_load(text) or {}
+    config = yaml.safe_load(text) or {}
+    # A relative substrate file is relative to the directory of run.yaml (the
+    # campaign runner is started from that directory), so that a rendered
+    # configuration is portable between machines.
+    substrate = config.get("substrate")
+    if isinstance(substrate, dict) and "filename" in substrate:
+        filename = Path(str(substrate["filename"])).expanduser()
+        if not filename.is_absolute():
+            substrate["filename"] = str(
+                (Path(path).resolve().parent / filename).resolve()
+            )
+    return config
 
 
 def _generator(config: Mapping[str, Any]) -> Any:
@@ -285,7 +398,15 @@ def _step(
         return int(stride)
     if int(samples) < 1:
         raise ValueError(f"samples must be positive, got {samples}.")
-    return max(1, int(n_candidates) // int(samples))
+    step = max(1, int(n_candidates) // int(samples))
+    # The candidate index is a mixed-radix number in (direction, orientation,
+    # distance). A step that shares a factor with a radix aliases with it: a
+    # multiple of the number of distances, for instance, samples one distance
+    # only. The step is therefore lowered to the next value without a prime
+    # factor up to 13, which is coprime to every grid size made of them.
+    while step > 1 and math.gcd(step, _SMALL_PRIMES) != 1:
+        step -= 1
+    return step
 
 
 def _sample_indices(
@@ -407,9 +528,7 @@ def budget_report(
         "stride": int(step),
         "outward_fraction": outward / examined if examined else 0.0,
         "floor_rejection_fraction": rejected / examined if examined else 0.0,
-        "low_distance_share": (
-            low_end / rejected if rejected else 0.0
-        ),
+        "low_distance_share": (low_end / rejected if rejected else 0.0),
         "reasons": reasons,
         "accepted_slack": _summary(accepted_slack),
         "rejected_slack": _summary(rejected_slack),
@@ -534,9 +653,7 @@ def index_report(
     middle = max(1, span // 2)
     whole = [_triple(generator, index) for index in range(1, span + 1)]
     left = [_triple(generator, index) for index in range(1, middle + 1)]
-    right = [
-        _triple(generator, index) for index in range(middle + 1, span + 1)
-    ]
+    right = [_triple(generator, index) for index in range(middle + 1, span + 1)]
     return {
         "n_candidates": total,
         "n_examined": len(indices),
@@ -576,9 +693,7 @@ def throughput_report(
         "n_examined": len(indices),
         "accepted": accepted,
         "seconds": seconds,
-        "trials_per_second": (
-            len(indices) / seconds if seconds > 0.0 else 0.0
-        ),
+        "trials_per_second": (len(indices) / seconds if seconds > 0.0 else 0.0),
     }
 
 
@@ -726,9 +841,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(arguments)
     if args.command == "all":
         manifest = load_config(args.manifest)
-        report: Mapping[str, Any] = run_suite(
-            manifest, args.root, args.out
-        )
+        report: Mapping[str, Any] = run_suite(manifest, args.root, args.out)
         print(json.dumps(report, indent=1, sort_keys=True))
         return 0
     if args.command == "grids":

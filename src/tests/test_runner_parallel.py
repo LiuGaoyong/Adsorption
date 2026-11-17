@@ -27,7 +27,7 @@ from adsorption.runner._run import (
 )
 
 
-from _helpers import CountingGenerator
+from adsorption._helpers import CountingGenerator
 
 class _Even(AdsorptionConfigurationFilterABC):
     """Accept even candidate indices."""
@@ -239,7 +239,7 @@ def test_ray_deduplicates_across_actors(tmp_path: Path) -> None:
 def test_storage_policy_accepted_only_and_adsorbate(tmp_path: Path) -> None:
     """The record and structure policies shrink both sidecars."""
     cfg = _config()
-    cfg["filters"] = [{"_target_": "_helpers.EvenFilter"}]
+    cfg["filters"] = [{"_target_": "adsorption._helpers.EvenFilter"}]
     cfg["storage"] = {
         "records": "accepted",
         "compression": "gzip",

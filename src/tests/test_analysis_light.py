@@ -1,9 +1,9 @@
 # ruff: noqa D103 E501
-"""Tests of the Tier-0 geometric measurements.
+"""Tests of the geometric measurements of the placement layer.
 
 The cases are deliberately tiny (a 2x2x2 slab, three directions, two
 distances) so the whole module is milliseconds and never touches an energy
-engine. The paper-scale numbers come from `campaigns/slurm/light.sbatch`.
+engine.
 """
 
 import numpy as np
@@ -38,7 +38,7 @@ def campaign() -> dict:
     }
 
 
-def test_covering_radius_of_a_tetrahedron() -> None:
+def _tetrahedron() -> np.ndarray:
     points = np.array(
         [
             [1.0, 1.0, 1.0],
@@ -47,10 +47,29 @@ def test_covering_radius_of_a_tetrahedron() -> None:
             [-1.0, -1.0, 1.0],
         ]
     )
-    points /= np.linalg.norm(points, axis=1)[:, None]
-    assert light.covering_radius(points) == pytest.approx(
+    return points / np.linalg.norm(points, axis=1)[:, None]
+
+
+def test_largest_neighbor_angle_of_a_tetrahedron() -> None:
+    assert light.largest_neighbor_angle(_tetrahedron()) == pytest.approx(
         np.degrees(np.arccos(-1.0 / 3.0)), rel=1e-9
     )
+
+
+def test_covering_radius_of_a_tetrahedron() -> None:
+    # The worst-served direction is opposite a vertex: arccos(1/3).
+    exact = np.degrees(np.arccos(1.0 / 3.0))
+    estimate = light.covering_radius(_tetrahedron())
+    assert exact - 1.0 < estimate <= exact + 1e-9
+
+
+def test_covering_radius_differs_from_the_neighbor_angle() -> None:
+    # A random set has clusters and holes: its covering radius is far above
+    # that of the Fibonacci lattice of the same size.
+    fibonacci = FibonacciGrid().points(200)
+    random = light.SeededRandomGrid(seed=1).points(200)
+    assert light.covering_radius(fibonacci) < 12.0
+    assert light.covering_radius(random) > 1.5 * light.covering_radius(fibonacci)
 
 
 def test_covering_radius_shrinks_with_the_lattice_size() -> None:
@@ -66,9 +85,17 @@ def test_height_uniformity_separates_fibonacci_from_latitude() -> None:
     assert light.height_uniformity(latitude) > light.height_uniformity(fibonacci)
 
 
-def test_so3_covering_radius_of_identical_rotations() -> None:
+def test_so3_angles_of_identical_rotations() -> None:
     quaternions = np.tile(np.array([1.0, 0.0, 0.0, 0.0]), (4, 1))
-    assert light.so3_covering_radius(quaternions) == pytest.approx(0.0)
+    assert light.so3_largest_neighbor_angle(quaternions) == pytest.approx(0.0)
+    # One rotation leaves the half turns uncovered.
+    assert light.so3_covering_radius(quaternions, n_probes=5000) > 170.0
+
+
+def test_so3_covering_radius_shrinks_with_the_set_size() -> None:
+    small = light.so3_covering_radius(light.so3_quaternions(50), n_probes=20000)
+    large = light.so3_covering_radius(light.so3_quaternions(400), n_probes=20000)
+    assert large < small
 
 
 def test_so3_quaternions_are_unit_quaternions() -> None:

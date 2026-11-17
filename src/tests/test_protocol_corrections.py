@@ -351,3 +351,113 @@ def test_pipeline_runs_relaxation_then_basin_deduplication() -> None:
     ]
     assert records[0].first_failed is None
     assert records[1].first_failed == "BasinDeduplicator"
+
+
+# -- rigid-body constraint ---------------------------------------------------
+
+
+def test_rigid_body_projection_keeps_net_force_and_torque() -> None:
+    from adsorption.filters.rigid import FixRigidBody
+
+    rng = np.random.default_rng(0)
+    benzene = molecule("C6H6")
+    constraint = FixRigidBody(np.arange(len(benzene)), benzene.positions)
+    forces = rng.normal(size=(len(benzene), 3))
+    arm = benzene.positions - benzene.positions.mean(axis=0)
+    net, torque = forces.sum(axis=0), np.cross(arm, forces).sum(axis=0)
+    projected = forces.copy()
+    constraint.adjust_forces(benzene, projected)
+    assert np.allclose(projected.sum(axis=0), net)
+    assert np.allclose(np.cross(arm, projected).sum(axis=0), torque)
+    again = projected.copy()
+    constraint.adjust_forces(benzene, again)
+    assert np.allclose(again, projected)
+    # Internal (pairwise, central) forces vanish entirely.
+    internal = np.zeros_like(forces)
+    internal[0] = benzene.positions[1] - benzene.positions[0]
+    internal[1] = -internal[0]
+    constraint.adjust_forces(benzene, internal)
+    assert np.allclose(internal, 0.0, atol=1e-12)
+    assert constraint.get_removed_dof(benzene) == 3 * 12 - 6
+    assert (
+        FixRigidBody([0, 1], molecule("CO").positions).get_removed_dof(
+            molecule("CO")
+        )
+        == 1
+    )
+
+
+def test_rigid_body_positions_keep_the_shape() -> None:
+    from adsorption.filters.rigid import FixRigidBody
+
+    rng = np.random.default_rng(1)
+    water = molecule("H2O")
+    constraint = FixRigidBody(np.arange(3), water.positions)
+    proposed = water.positions + rng.normal(scale=0.3, size=(3, 3))
+    constraint.adjust_positions(water, proposed)
+    reference = water.get_all_distances()
+    distances = np.linalg.norm(proposed[:, None] - proposed[None], axis=-1)
+    assert np.allclose(distances, reference, atol=1e-10)
+
+
+@pytest.mark.parametrize("name", ["CO", "H2O", "C6H6"])
+def test_lennard_jones_relaxation_keeps_the_adsorbate_rigid(name: str) -> None:
+    """The pairwise tier moves the molecule without deforming it."""
+    import contextlib
+    import io
+
+    from adsorption import LennardJonesEnergyFilter
+
+    slab = fcc111("Cu", (4, 4, 3), vacuum=10.0, orthogonal=True, periodic=True)
+    top = int(np.argmax(slab.positions[:, 2]))
+    adsorbate = molecule(name)
+    generator = AdsorptionConfigurationGenerator(
+        slab,
+        [[top]],
+        adsorbate,
+        n_oa=12,
+        n_rot=6,
+        n_d=2,
+        hemisphere=True,
+        d_min=3.0,
+        d_max=3.6,
+    )
+    filt = LennardJonesEnergyFilter(
+        e_cut=None, fmax=0.05, max_steps=30, reject_on_unconverged=False
+    )
+    reference = adsorbate.get_all_distances()
+    n = len(adsorbate)
+    checked = 0
+    for index in range(1, generator.n_candidates + 1, 13):
+        trial = generator.trial(index)
+        with contextlib.redirect_stdout(io.StringIO()):
+            filt.evaluate(trial)  # must not raise
+        relaxed = trial.meta.get(RELAXED_META_KEY)
+        if relaxed is None:
+            continue
+        positions = relaxed["positions"][-n:]
+        distances = np.linalg.norm(
+            positions[:, None] - positions[None], axis=-1
+        )
+        assert np.allclose(distances, reference, atol=1e-6)
+        assert np.allclose(relaxed["positions"][:-n], slab.positions)
+        checked += 1
+    assert checked > 0
+
+
+def test_free_tier_references_the_relaxed_substrate() -> None:
+    """A tier that relaxes the substrate is referenced to it relaxed alone."""
+    trial = _emt_trial(height=2.0)
+    frozen = OptimizedEnergyFilter(e_cut=None, calculator=EMT(), max_steps=40)
+    free = OptimizedEnergyFilter(
+        e_cut=None,
+        calculator=EMT(),
+        max_steps=40,
+        fix_substrate=False,
+        fix_adsorbate_bonds=False,
+    )
+    as_built = frozen._substrate_energy(trial)
+    relaxed = free._substrate_energy(trial)
+    assert relaxed < as_built
+    substrate, _ = free._fragments(trial)
+    assert relaxed == pytest.approx(free._relax_isolated(substrate))

@@ -70,33 +70,21 @@ filter chain and budget. Generated `run.yaml` files are ignored by git.
 GENERATE_CASES=0 ./run_all.sh   # reuse the existing generated files
 ```
 
-### NequIP tier
+### Relaxation with a machine-learned potential
 
-[`run.nequip.template.yaml`](run.nequip.template.yaml) replaces the
-Lennard-Jones relaxation with a single-point Lennard-Jones screen and a
-`NequIPOptimizedEnergyFilter`:
-
-```text
-GeometryFilter -> LennardJonesScreenFilter -> NequIP
-```
-
-It needs NequIP and a deployed model; the default is
-`~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth`. The tiers relax the
-full structure (`fix_substrate: false`, `fix_adsorbate_bonds: false`).
-Duplicate rotamers of a flexible adsorbate are dropped when the ensemble is
-resolved (`deduplicate: true`, the default), before any candidate is built.
+The examples stop at the Lennard-Jones tier. Every case writes its accepted
+placements to `results/accepted.xyz` (`storage.xyz: true`): complete
+extended-XYZ frames, substrate atoms first, with `n_substrate` and the
+candidate index in the frame header. That file is the input of the separate
+relaxation command, which can run on another machine:
 
 ```bash
-# the default model is used automatically when it exists
-# ~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth
-./run_all.sh
-
-# force the plain LJ chain
-TEMPLATE=run.template.yaml ./run_all.sh
-
-# or point at another model; NEQUIP_MODEL selects the NequIP template
-NEQUIP_MODEL=/path/to/model.pth ./run_all.sh
+adsorption-relax run results/accepted.xyz --config ../../../relax.yaml --out relaxed
 ```
+
+[`../relax.yaml`](../relax.yaml) selects the potential and the optimizer
+settings. The potential is an optional dependency
+(`pip install 'adsorption[nequip]'`).
 
 For an in-process sweep (one scientific-stack import instead of one per
 case) use the batch driver:
@@ -107,7 +95,7 @@ BATCH_DRIVER=1 STOP=8 ./run_all.sh
 
 `parallel.chunk_factor` controls how many chunks are created per worker, and
 `parallel.threads_per_worker` limits BLAS/Torch threads in each worker
-(`0` disables the limit). NequIP examples use `chunk_factor: 2`.
+(`0` disables the limit).
 
 `START`, `STOP`, `N_JOBS` and `CONTINUE_ON_ERROR` override the generated
 configuration and the runner for a quick sweep:
@@ -132,7 +120,7 @@ SMILES strings in the manifest.
 | S6 | disordered Cu cluster, 200 atoms | 2 | O, CO, H2O, CH4, C6H6, C2H6, CH3OH, CH3CH2OH, furfural | tier0, tier1 |
 
 The original matrix has 66 tier configurations: 23 `tier0-glj` (runnable),
-23 `tier1-mlp` (needs an MLP engine; a NequIP template is provided),
+23 `tier1-mlp` (needs an MLP engine; run `adsorption-relax` on `accepted.xyz`),
 14 `tier2-emt` (runnable), and 6
 `tier3-dft-template` (VASP/POTCAR). The 33 extension configs use the same
 `GeometryFilter` + `LennardJonesEnergyFilter` chain and are not part of that

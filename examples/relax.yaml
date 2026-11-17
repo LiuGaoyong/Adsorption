@@ -1,0 +1,32 @@
+# Options of `adsorption-relax run` shared by the example families.
+#
+#   adsorption-relax run results/accepted.xyz --config examples/relax.yaml --out relaxed
+#
+# A command-line option overrides the value given here.
+calculator:
+  name: nequip            # nequip | emt | module:factory
+  options:
+    # Empty: ~/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth
+    model_path: ""
+    device: cpu
+fmax: 0.05                # eV/Angstrom
+max_steps: 300
+optimizer: LBFGS
+# Substrate layers (from the top, along z) that are free to move; the layers
+# below are fixed. null leaves the whole substrate free (use it for clusters).
+free_layers: null
+fix_substrate: false
+# Parallelism. n_jobs is the number of Ray actors or joblib workers.
+# engine: auto (serial for one job, else ray if installed, else joblib),
+# serial, joblib or ray. With ray every actor loads the potential once and
+# reserves cpus_per_actor CPUs, which is also its Torch thread budget; a
+# local Ray instance is started with n_jobs * cpus_per_actor CPUs unless
+# ray_address points at a running cluster.
+n_jobs: 1
+engine: auto
+cpus_per_actor: 1
+ray_address: null
+labels:
+  bond_scale: 1.25          # adsorbate bond: d <= scale * (r_cov_a + r_cov_b)
+  desorb_scale: 1.5         # bound: some adsorbate-substrate d <= scale * sum
+  max_substrate_shift: 1.0  # Angstrom; beyond it the surface is "reconstructed"

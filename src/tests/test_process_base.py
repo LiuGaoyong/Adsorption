@@ -13,7 +13,7 @@ from adsorption.base import (
     Verdict,
 )
 
-from _helpers import CountingGenerator
+from adsorption._helpers import CountingGenerator
 
 
 def test_abstract_processes_cannot_instantiate() -> None:

@@ -1,24 +1,21 @@
 """Contract tests of the energetic filters and their constraints."""
 
-import pickle
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from ase import Atoms
 from ase.build import fcc111, molecule
 from ase.calculators.emt import EMT
-from ase.constraints import FixAtoms, FixBondLengths
+from ase.constraints import FixAtoms
 
 from adsorption.base import Trial
+from adsorption.filters.rigid import FixRigidBody
 from adsorption.filters import (
     EnergyFilter,
     LennardJonesEnergyFilter,
-    NequIPOptimizedEnergyFilter,
     OptimizedEnergyFilter,
 )
-from adsorption.filters.nequip import DEFAULT_NEQUIP_MODEL
 
 
 def make_trial() -> Trial:
@@ -199,22 +196,20 @@ def test_adsorbate_bonds_use_the_adsorbate_count(
         for item in atoms.constraints  # type: ignore[attr-defined]
         if isinstance(item, FixAtoms)
     ]
-    bonds = [
+    rigid = [
         item
         for item in atoms.constraints  # type: ignore[attr-defined]
-        if isinstance(item, FixBondLengths)
+        if isinstance(item, FixRigidBody)
     ]
     assert len(fixed) == 1
-    assert len(bonds) == 1
+    assert len(rigid) == 1
     assert list(fixed[0].index) == list(range(trial.natoms_substrate))
-    pairs = np.asarray(bonds[0].pairs)
-    assert pairs.ndim == 2 and pairs.shape[1] == 2
-    assert pairs.min() >= trial.natoms_substrate
-    assert pairs.max() < len(trial.atoms)
-    local = {
-        tuple(sorted(row)) for row in (pairs - trial.natoms_substrate).tolist()
-    }
-    assert local == {(0, 1)}
+    # The rigid body is the whole adsorbate, with the shape it was placed in.
+    assert list(rigid[0].index) == list(
+        range(trial.natoms_substrate, len(trial.atoms))
+    )
+    placed = trial.atoms.positions[trial.natoms_substrate :]
+    assert np.allclose(rigid[0].reference, placed - placed.mean(axis=0))
 
 
 def test_single_atom_adsorbate_has_no_bonds() -> None:
@@ -280,45 +275,6 @@ def test_lennard_jones_filter_instantiates_and_signs() -> None:
     assert signature["calculator"] == (
         "Lennard-Jones Potential by OpenKIM Parameters"
     )
-
-
-def test_nequip_filter_builds_a_calculator(monkeypatch) -> None:
-    """The NequIP tier builds its calculator from the deployed model."""
-
-    class FakeNequIPCalculator(EMT):
-        @classmethod
-        def from_deployed_model(cls, **kwargs):
-            return cls()
-
-    package = ModuleType("nequip")
-    module = ModuleType("nequip.ase")
-    module.NequIPCalculator = FakeNequIPCalculator  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "nequip", package)
-    monkeypatch.setitem(sys.modules, "nequip.ase", module)
-
-    filt = NequIPOptimizedEnergyFilter(
-        "model.pth", device="cpu", e_cut=1e6, max_steps=1
-    )
-    assert filt.calculator is None
-    signature = filt.signature()
-    assert signature["kind"] == "nequip_optimized_energy"
-    assert signature["calculator"] == {
-        "model_path": "model.pth",
-        "device": "cpu",
-    }
-    assert signature["fix_substrate"] is False
-    assert signature["fix_adsorbate_bonds"] is False
-
-    default = NequIPOptimizedEnergyFilter(e_cut=1e6)
-    assert default.signature()["calculator"]["model_path"] == str(
-        DEFAULT_NEQUIP_MODEL
-    )
-
-    restored = pickle.loads(pickle.dumps(filt))
-    assert restored.signature() == signature
-    assert restored.calculator is None
-    restored.evaluate(make_trial())
-    assert restored.calculator is not None
 
 
 def test_energy_filter_does_not_move_the_trial() -> None:

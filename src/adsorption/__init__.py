@@ -25,7 +25,6 @@ from adsorption.filters import (
     GeometryFilter,
     LennardJonesEnergyFilter,
     LennardJonesScreenFilter,
-    NequIPOptimizedEnergyFilter,
     OptimizedEnergyFilter,
 )
 from adsorption.generate import (
@@ -62,7 +61,6 @@ __all__ = [
     "GraphAtomsSites",
     "LennardJonesEnergyFilter",
     "LennardJonesScreenFilter",
-    "NequIPOptimizedEnergyFilter",
     "OptimizedEnergyFilter",
     "Record",
     "ResolvedSites",

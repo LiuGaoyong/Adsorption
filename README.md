@@ -16,10 +16,13 @@ The package is organised as two processes:
   the molecular orientation on `SO(3)` (Super-Fibonacci quaternions),
   and the anchor distance `d`.
 - **B — filtering** (`AdsorptionConfigurationFilterABC`): a cheap pairwise distance floor, a
-  repulsive Lennard-Jones tier, and an optional relaxation tier.
+  single-point Lennard-Jones screen, and a rigid-body Lennard-Jones relaxation.
 
-Generation never imports an ASE calculator; the energy engine is injected
-only in process B.
+The core stops there: it places adsorbates and screens the placements with
+geometric and Lennard-Jones criteria. Relaxing the survivors with a
+machine-learned potential is a separate module with its own command,
+`adsorption-relax`; the two steps share one extended-XYZ file and can run on
+different machines (see [Relaxation](#relaxation-with-a-machine-learned-potential)).
 
 ## Installation
 
@@ -105,8 +108,38 @@ engine.
 accepted ones, see `storage.records`), `accepted.db` is an ASE database with
 one row per accepted structure (by default only the adsorbate atoms plus the
 substrate size, see `storage.structures`), and `summary.json` holds the
-campaign totals (including the resolved `engine` and `n_actors`). A run
+campaign totals (including the resolved `engine` and `n_actors`). With
+`storage.xyz: true` the accepted structures are also written to
+`accepted.xyz` as complete extended-XYZ frames. A run
 refuses to start when the candidate count exceeds `budget.max_candidates`.
+
+## Relaxation with a machine-learned potential
+
+```bash
+adsorption-run storage.xyz=true outputs=./runs/demo      # placement + LJ
+adsorption-relax run runs/demo/accepted.xyz --out runs/demo/relaxed \
+    --calculator nequip --model-path model.nequip.pth --free-layers 2 \
+    --engine ray --n-jobs 16 --cpus-per-actor 4
+adsorption-relax recall --run fibonacci/n200=runs/demo/relaxed --out runs/demo/analysis
+```
+
+`accepted.xyz` is self-contained: every frame holds the substrate atoms first
+and the adsorbate after them, and its header carries `n_substrate`, the
+candidate index, the site and the conformer. `adsorption-relax run` relaxes
+every frame (`nequip`, or any `module:factory` that
+returns an ASE calculator), writes `relaxed.xyz` and `relax.jsonl`, and
+labels each result `intact`, `dissociated`, `desorbed` or `reconstructed`;
+convergence is recorded separately. Every frame is kept, usable or not. A run
+is split with `--start/--stop` and resumes from `relax.jsonl`.
+Frames are relaxed in the calling process, by joblib workers, or by Ray
+actors behind a `ray.util.ActorPool` (`--engine ray`): `--n-jobs` is the
+actor count and `--cpus-per-actor` the CPUs each actor reserves, which is
+also its Torch thread budget; `--ray-address` joins a running cluster.
+`adsorption-relax recall` (the code is in `adsorption.analysis`) pools one or more runs, groups the relaxed
+structures into minima with a tolerance-based distance fingerprint, and
+reports the basin recall of every run and which published configurations
+(`--references reference.yaml`, geometric criteria) were recovered. NequIP
+is an optional dependency: `pip install 'adsorption[nequip]'`.
 
 ## The two processes
 
@@ -115,9 +148,9 @@ AdsorptionConfigurationGeneratorABC     AdsorptionConfigurationFilterABC
 └── AdsorptionConfigurationGenerator    ├── GeometryFilter              pairwise floor
     ├── sites: AutoSites                ├── LennardJonesScreenFilter    single-point LJ ceiling
     │           ExplicitSites           ├── LennardJonesEnergyFilter    relaxed LJ ceiling
-    │           TopLayerSites           ├── EnergyFilter / OptimizedEnergyFilter
-    │           GraphAtomsSites         │                               any ASE calculator
-    └── adsorbates: SingleAdsorbate     └── NequIPOptimizedEnergyFilter MLP relaxation
+    │           TopLayerSites           └── EnergyFilter / OptimizedEnergyFilter
+    │           GraphAtomsSites                                         bases of the LJ tiers
+    └── adsorbates: SingleAdsorbate
                     ExplicitEnsemble
                     ETKDGEnsemble       TrialDeduplicator  (stages, not filters:
                     RotamerEnsemble     BasinDeduplicator   placed / relaxed structure)
@@ -152,11 +185,18 @@ src/adsorption/
 ├── base/          # Trial, Verdict, the two ABCs, pipeline, canonical_key
 ├── generate/      # AdsorptionConfigurationGenerator, Sampling, adsorbate
 │                  # sources (Single/Explicit/ETKDG/Rotamer), orientation
-├── filters/       # GeometryFilter, Lennard-Jones tiers, EnergyFilter,
-│                  # OptimizedEnergyFilter, NequIPOptimizedEnergyFilter
+├── filters/       # GeometryFilter, Lennard-Jones tiers and their bases,
+│                  # FixRigidBody
 ├── geometry/      # sites, grids, SuperFibonacciSO3, rotations, placement
-├── dedup.py       # TrialDeduplicator
-├── runner/        # Hydra entry point, run.yaml, joblib / Ray engines
+├── dedup.py       # TrialDeduplicator, BasinDeduplicator
+├── runner/        # adsorption-run: Hydra entry point, run.yaml, engines
+├── relax/         # adsorption-relax: calculators and the relaxation of
+│                  # extxyz frames (separate from the core)
+├── analysis/      # no energy is evaluated here:
+│                  #   light   geometric diagnostics (adsorption-light)
+│                  #   labels  intact / dissociated / desorbed / reconstructed
+│                  #   basins  which relaxed structures are one minimum
+│                  #   recall  basin recall, published configurations
 └── utils/         # RDKit helpers, four-view plotting
 ```
 
@@ -174,5 +214,4 @@ flexible-adsorbate gallery (n-hexane and 1,5-hexadiene) is in
 
 ## Citation and license
 
-Code: <https://github.com/LiuGaoyong/Adsorption>, GPL-3.0-or-later. See
-`paper-1/` for the method and the pre-registered evaluation protocol.
+Code: <https://github.com/LiuGaoyong/Adsorption>, GPL-3.0-or-later.

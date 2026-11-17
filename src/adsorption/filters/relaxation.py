@@ -47,9 +47,10 @@ import numpy as np
 from arrayff.optimize import call_optimization
 from ase import Atoms
 from ase.calculators.calculator import Calculator
-from ase.constraints import FixAtoms, FixBondLengths
+from ase.constraints import FixAtoms
 
 from adsorption.base import AdsorptionConfigurationFilterABC, Trial, Verdict
+from adsorption.filters.rigid import FixRigidBody
 
 __all__ = [
     "AdsorbateReference",
@@ -234,9 +235,18 @@ class EnergyFilter(AdsorptionConfigurationFilterABC):
         return substrate, adsorbate
 
     def _substrate_energy(self, trial: Trial) -> float:
-        """Return the isolated substrate energy (cached by structure)."""
+        """Return the isolated substrate energy (cached by structure).
+
+        A tier that relaxes the substrate together with the adsorbate is
+        referenced to the substrate relaxed alone with the same optimizer
+        settings; otherwise the relaxation of a bare, as-built surface would
+        be counted as binding. A tier that keeps the substrate fixed (and the
+        single-point tier) uses the energy of the substrate as supplied.
+        """
         substrate, _ = self._fragments(trial)
-        return self._isolated_energy(substrate)
+        if getattr(self, "fix_substrate", True):
+            return self._isolated_energy(substrate)
+        return self._relax_isolated(substrate)
 
     def _adsorbate_energy(self, trial: Trial) -> float:
         """Return the isolated adsorbate energy under the reference policy."""
@@ -390,8 +400,10 @@ class OptimizedEnergyFilter(EnergyFilter):
             method: Optimization method.
             fix_substrate: Whether to fix the substrate atoms; forced on when
                 ``fix_adsorbate_bonds`` is set.
-            fix_adsorbate_bonds: Whether to constrain every intramolecular
-                distance of the adsorbate to its reference value.
+            fix_adsorbate_bonds: Whether to constrain the adsorbate to move
+                as a rigid body, so that every intramolecular distance keeps
+                its reference value (see
+                :class:`~adsorption.filters.rigid.FixRigidBody`).
             reject_on_unconverged: Whether to reject trials on unconverged
                 optimizations.
             e_bind_cut: Binding-energy offset of the ``e_cut=None`` ceiling.
@@ -464,18 +476,15 @@ class OptimizedEnergyFilter(EnergyFilter):
         if self.fix_substrate:
             ids = list(range(trial.natoms_substrate))
             atoms.constraints = [FixAtoms(indices=ids)]
-        if self.fix_adsorbate_bonds:
-            from graphatoms.system.sysGas import Gas  # noqa: PLC0415
-
-            z = atoms.numbers[-trial.natoms_adsorbate :]
-            r = atoms.positions[-trial.natoms_adsorbate :]
-            gas_atoms = Atoms(numbers=z, positions=r)
-            edges = Gas.from_ase(gas_atoms).pair
-            assert isinstance(edges, np.ndarray)
-            edges += trial.natoms_substrate
+        if self.fix_adsorbate_bonds and trial.natoms_adsorbate > 1:
+            # The adsorbate moves as a rigid body with the shape it was
+            # placed with. A bond-length constraint would leave the angles
+            # and torsions to the intramolecular terms of the model.
+            n_substrate = trial.natoms_substrate
+            body = np.arange(n_substrate, len(atoms))
             atoms.constraints = [
                 *atoms.constraints,
-                FixBondLengths(pairs=edges),
+                FixRigidBody(body, trial.atoms.positions[n_substrate:]),
             ]
         return call_optimization(
             calc=self.calculator,

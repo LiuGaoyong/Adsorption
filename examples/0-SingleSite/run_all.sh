@@ -19,24 +19,11 @@ if [[ -z "$PYTHON" ]]; then
         PYTHON="python3"
     fi
 fi
-DEFAULT_NEQUIP_MODEL="$HOME/.local/nequip-oam-0.1/NequIP-OAM-S-0.1.nequip.pth"
-if [[ -z "${NEQUIP_MODEL:-}" && -f "$DEFAULT_NEQUIP_MODEL" ]]; then
-    NEQUIP_MODEL="$DEFAULT_NEQUIP_MODEL"
-fi
-export NEQUIP_MODEL
-
 MPLCONFIGDIR="${MPLCONFIGDIR:-${TMPDIR:-/tmp}/adsorption-matplotlib}"
 export MPLCONFIGDIR
 mkdir -p "$MPLCONFIGDIR"
 
-TEMPLATE="${TEMPLATE:-}"
-if [[ -z "$TEMPLATE" ]]; then
-    if [[ -n "${NEQUIP_MODEL:-}" ]]; then
-        TEMPLATE="run.nequip.template.yaml"
-    else
-        TEMPLATE="run.template.yaml"
-    fi
-fi
+TEMPLATE="${TEMPLATE:-run.template.yaml}"
 MANIFEST="${MANIFEST:-manifest.yaml}"
 if [[ "$TEMPLATE" != /* && ! -f "$TEMPLATE" ]]; then
     TEMPLATE="$HERE/$TEMPLATE"

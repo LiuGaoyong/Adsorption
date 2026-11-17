@@ -33,6 +33,7 @@ import numpy as np
 import yaml
 from ase import Atoms
 from ase.db import connect
+from ase.io import write
 from hydra.utils import instantiate
 from joblib import Parallel, cpu_count, delayed
 
@@ -140,11 +141,17 @@ class _Storage:
             atoms and keeps the substrate size in the row data, which is what
             makes the database small: the substrate is identical for every
             row of a campaign.
+        xyz: Also write the accepted structures as ``accepted.xyz``, one
+            complete extended-XYZ frame per structure. The file is
+            self-contained (it does not need the database or the
+            configuration), which makes it the hand-over to the relaxation
+            module ``adsorption-relax``.
     """
 
     records: str = "accepted"
     compression: str = "none"
     structures: str = "adsorbate"
+    xyz: bool = False
 
     @classmethod
     def from_config(cls, cfg: Mapping[str, Any]) -> _Storage:
@@ -175,7 +182,8 @@ class _Storage:
                 raise ValueError(
                     f"Unknown {name}: {value!r}; expected one of {allowed}."
                 )
-        return cls(records, compression, structures)
+        xyz = bool(node.get("xyz", False))
+        return cls(records, compression, structures, xyz)
 
     def wants(self, first_failed: str | None) -> bool:
         """Return whether a record reaches the JSONL sidecar.
@@ -703,6 +711,63 @@ def _merge_structures(
                     target.write(row.toatoms(), key_value_pairs=pairs)
 
 
+def _write_xyz(
+    database: Path,
+    path: Path,
+    substrate: Atoms,
+    extra: Mapping[str, Any],
+) -> int:
+    """Write the accepted structures as complete extended-XYZ frames.
+
+    Every frame holds the substrate atoms first and the adsorbate after
+    them. Its ``info`` carries the row data of the database (candidate
+    index, site, conformer, grid indices, anchor distance), ``n_substrate``,
+    the energy of the last relaxation tier as ``lj_energy`` when one ran,
+    and the entries of ``extra``.
+
+    Args:
+        database: The merged accepted-structure database.
+        path: The extended-XYZ file to write.
+        substrate: The substrate of the campaign.
+        extra: Campaign-level entries added to every frame.
+
+    Returns:
+        int: The number of frames written.
+    """
+    path.unlink(missing_ok=True)
+    n_substrate = len(substrate)
+    frames: list[Atoms] = []
+    if database.exists() and database.stat().st_size > 0:
+        with connect(str(database)) as source:
+            for row in source.select():
+                stored = row.toatoms()
+                data = dict(row.key_value_pairs)
+                if "natoms_adsorbate" in data:
+                    atoms = substrate.copy()
+                    atoms.extend(stored)
+                else:
+                    atoms = stored
+                atoms.calc = None
+                atoms.constraints = []
+                info = {
+                    key: value
+                    for key, value in data.items()
+                    if key not in {"natoms_adsorbate", "relaxed_energy"}
+                }
+                info["n_substrate"] = n_substrate
+                if "relaxed_energy" in data:
+                    info["lj_energy"] = float(data["relaxed_energy"])
+                info.update(extra)
+                atoms.info = info
+                frames.append(atoms)
+    frames.sort(key=lambda atoms: int(atoms.info.get("index", 0)))
+    if frames:
+        write(str(path), frames, format="extxyz")
+    else:
+        path.touch()
+    return len(frames)
+
+
 class _GlobalDedup:
     """Driver-side deduplication across workers and actors.
 
@@ -738,11 +803,15 @@ class _GlobalDedup:
         filters: Sequence[FilterStage],
     ) -> _GlobalDedup | None:
         """Return a global pass when the chain holds a deduplicating stage."""
-        stages = [
-            filt
-            for filt in filters
-            if isinstance(filt, (TrialDeduplicator, BasinDeduplicator))
-        ]
+        # A chain may hold several stages that write the same metadata key
+        # (a basin deduplicator after each relaxation tier). The key that
+        # survives in the record is the one of the last such stage, so the
+        # global pass repeats that stage, with its tolerance.
+        latest: dict[str, Any] = {}
+        for filt in filters:
+            if isinstance(filt, (TrialDeduplicator, BasinDeduplicator)):
+                latest[filt.meta_key] = filt
+        stages = list(latest.values())
         return cls(stages) if stages else None
 
     def _repeats(
@@ -789,7 +858,7 @@ class _GlobalDedup:
             name = type(stage).__name__
             self.n_by_stage[name] += 1
             payload["first_failed"] = name
-            for verdict in payload.get("verdicts", []):
+            for verdict in reversed(payload.get("verdicts", [])):
                 if verdict.get("filter") == name:
                     verdict["accepted"] = False
                     verdict["reason"] = "duplicate"
@@ -1496,6 +1565,16 @@ def run_config(
         )
     seconds = time.perf_counter() - started
 
+    xyz_path: Path | None = None
+    if storage.xyz:
+        xyz_path = output_dir / "accepted.xyz"
+        _write_xyz(
+            accepted_path,
+            xyz_path,
+            generator.substrate,
+            {"grid": str(generator.sampling.signature().get("grid", ""))},
+        )
+
     total = sum(int(result["total"]) for result in results)
     accepted = sum(int(result["accepted"]) for result in results)
     n_duplicates_global = sum(
@@ -1511,10 +1590,12 @@ def run_config(
         "first_failed": dict(failures),
         "n_duplicates_global": n_duplicates_global,
         "accepted_db": str(accepted_path),
+        "accepted_xyz": None if xyz_path is None else str(xyz_path),
         "storage": {
             "records": storage.records,
             "compression": storage.compression,
             "structures": storage.structures,
+            "xyz": storage.xyz,
         },
         "start": first,
         "stop": last,

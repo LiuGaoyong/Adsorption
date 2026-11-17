@@ -1,8 +1,10 @@
-"""Shared helpers for the contract tests."""
+"""Small generators, filters and structures shared by the test suite."""
 
 from collections.abc import Iterator
 
+import numpy as np
 from ase import Atoms
+from ase.build import fcc111
 
 from adsorption.base import (
     AdsorptionConfigurationFilterABC,
@@ -52,3 +54,20 @@ class EvenFilter(AdsorptionConfigurationFilterABC):
     def _evaluate(self, trial: Trial) -> Verdict:
         """Accept even indices."""
         return Verdict(trial.index % 2 == 0, float(trial.index), "even")
+
+
+def slab_with_co(height: float = 1.9, shift: float = 0.0) -> tuple[Atoms, int]:
+    """Return a Cu(111) slab with an upright CO above a top site."""
+    slab = fcc111("Cu", (2, 2, 3), vacuum=8.0, orthogonal=True)
+    top = slab.positions[np.argmax(slab.positions[:, 2])]
+    adsorbate = Atoms(
+        "CO",
+        positions=[
+            top + [shift, 0.0, height],
+            top + [shift, 0.0, height + 1.15],
+        ],
+    )
+    atoms = slab.copy()
+    atoms.extend(adsorbate)
+    atoms.info = {"n_substrate": len(slab), "index": 1, "conformer": 0}
+    return atoms, len(slab)

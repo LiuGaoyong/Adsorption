@@ -8,14 +8,14 @@ before them.
 cheap screens and before the expensive relaxation tier, so a repeated
 placement costs at most one relaxation::
 
-    geometry -> Lennard-Jones screen -> deduplicator -> NequIP
+    geometry -> LJ screen -> deduplicator -> LJ relaxation
 
 :class:`BasinDeduplicator` keys the *relaxed* structure that a relaxation tier
 stored in ``trial.meta["relaxed"]`` and compares the relaxed energies, so
 several starting points that converged to one minimum collapse to a single
 record. Place it after the relaxation tier whose basins it should merge::
 
-    geometry -> Lennard-Jones screen -> NequIP -> basin deduplicator
+    geometry -> LJ screen -> LJ relaxation -> basin deduplicator
 
 Both stages are stateful, so every joblib worker or Ray actor of the campaign
 runner only sees the trials of its own chunk. The runner therefore performs a
