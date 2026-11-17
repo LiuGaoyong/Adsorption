@@ -1,0 +1,43 @@
+# Formic acid on CaO(001).
+source:
+  citation: >-
+    P. Bechthold, V. Orazi, A. Juan, J. M. Marchetti, A first-principles study
+    of formic acid adsorption on CaO (001), Appl. Surf. Sci. 583 (2022) 152296.
+  doi: 10.1016/j.apsusc.2021.152296
+  read: main text and supplementary material (Table S1, Figures S1-S3)
+dft:
+  code: VASP
+  functional: PBE + Grimme D2
+  cutoff_eV: 800
+  kpoints: [2, 2, 1]
+  force_criterion_eV_per_A: 0.01
+model:
+  surface: CaO(001), rock salt, a = 4.84 A
+  cell: 4x4 primitive surface cells (13.69 A), five layers, 80 Ca + 80 O
+  vacuum_A: 30
+  relaxed: adsorbate and the four upper layers
+  coverage: about 1/10 ML
+# How the paper placed the molecule: four sites (long bridge Ca-Ca, short
+# bridge Ca-O, top Ca, top O) times three orientations (plane parallel to the
+# surface; upright with one H down; upright with the O atoms down) times the
+# atom put over the site: 40 starting geometries (Table S1). manual.xyz
+# rebuilds them; the starting height and the in-plane azimuth are not printed
+# and were chosen here (lowest atom 2.0 A above the surface).
+manual_baseline: {file: manual.xyz, n_starts: 40}
+# Adsorption energies the 40 starts ended in (eV, Table S1). Several starts
+# share a final geometry. Only the two lowest are described geometrically in
+# the paper, so the others cannot be matched by structure.
+energy_levels: [-2.38, -2.07, -1.66, -1.18, -0.43, -0.42, -0.39, -0.38, -0.37]
+references:
+  # Sites I (-2.38 eV) and II (-2.07 eV) of the main text. Both are
+  # dissociative: the acid proton sits on a surface oxygen (O-H 0.99 A, the
+  # molecular O-H stretched from 0.97 to 1.84 A) and the two formate oxygens
+  # bind surface Ca (2.4 A at site I, 2.5 A at site II). The text gives no
+  # criterion that separates the two sites, so one reference covers both.
+  - name: dissociated-formate
+    e_ads: -2.38
+    e_ads_all: [-2.38, -2.07]
+    label: dissociated
+    contacts:
+      - {adsorbate: H, substrate: O, r_max: 1.15, n_min: 1}
+      - {adsorbate: O, substrate: Ca, r_max: 2.75, n_min: 2}

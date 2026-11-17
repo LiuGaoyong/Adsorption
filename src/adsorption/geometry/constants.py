@@ -1,8 +1,7 @@
 """Default parameters of the geometric construction.
 
-The values follow Table 1 of the manuscript in ``paper-1/``. They are
-implementation defaults, not universal constants: the protocol layer records
-every value that enters a campaign.
+They are implementation defaults, not universal constants: the protocol
+layer records every value that enters a campaign.
 """
 
 from __future__ import annotations

@@ -15,12 +15,17 @@ cluster_vertex_top/
 └── CH3OH/
 ```
 
-Every adsorbate folder is a single Hydra configuration. Running it writes
-`records.jsonl`, `accepted.xyz` (the accepted structures as an extended-XYZ
-trajectory) and `summary.json` under its `results/` directory.
+Every adsorbate folder is one case. Its `run.yaml` is rendered at run time
+from [`manifest.yaml`](manifest.yaml) and
+[`run.template.yaml`](run.template.yaml); the generated file is ignored by
+git. Running a case writes `records.jsonl`, `accepted.xyz` (the accepted
+structures as an extended-XYZ trajectory) and `summary.json` under its
+`results/` directory.
 
 ```bash
 # one example
+# from this directory: render the generated run.yaml files once
+python ../build_cases.py manifest.yaml run.template.yaml --root .
 cd cluster_vertex_top/CO
 adsorption-run --config-path "$PWD" --config-name run
 
@@ -30,6 +35,59 @@ RUNNER=adsorption-run ./run_all.sh
 # only the examples that have no results yet
 SKIP_EXISTING=1 RUNNER=adsorption-run ./run_all.sh
 ```
+
+## Batch parameters
+
+`run_all.sh` renders one `run.yaml` per case from
+[`manifest.yaml`](manifest.yaml) and [`run.template.yaml`](run.template.yaml)
+before running. The manifest stores the extxyz substrate and the core indices
+of every site folder; the template stores the shared protocol, rotamer grid,
+filter chain and budget.
+
+```bash
+./run_all.sh                    # render the cases, then run them
+GENERATE_CASES=0 ./run_all.sh   # reuse the existing generated files
+```
+
+### Relaxation with a machine-learned potential
+
+The examples stop at the Lennard-Jones tier. Every case writes its accepted
+placements to `results/accepted.xyz` (`storage.xyz: true`): complete
+extended-XYZ frames, substrate atoms first, with `n_substrate` and the
+candidate index in the frame header. That file is the input of the separate
+relaxation command, which can run on another machine:
+
+```bash
+adsorption-relax run results/accepted.xyz --config ../../../relax.yaml --out relaxed
+```
+
+[`../relax.yaml`](../relax.yaml) selects the potential and the optimizer
+settings. The potential is an optional dependency
+(`pip install 'adsorption[nequip]'`).
+
+For an in-process sweep (one scientific-stack import instead of one per
+case) use the batch driver:
+
+```bash
+BATCH_DRIVER=1 STOP=8 ./run_all.sh
+```
+
+`parallel.chunk_factor` controls how many chunks are created per worker, and
+`parallel.threads_per_worker` limits BLAS/Torch threads in each worker
+(`0` disables the limit).
+
+`START`, `STOP`, `N_JOBS` and `CONTINUE_ON_ERROR` override the generated
+configuration and the runner for a quick sweep:
+
+```bash
+START=1 STOP=8 N_JOBS=2 CONTINUE_ON_ERROR=1 ./run_all.sh
+```
+
+
+To add a case, add the site and the adsorbate SMILES to `manifest.yaml`; the
+case folders are created by `build_cases.py`. A site entry may list its own
+`adsorbates` subset. `structures/cluster.xyz` and
+`structures/slab.xyz` are the two substrates.
 
 ## Site images
 
@@ -49,5 +107,10 @@ isolated substrate and adsorbate Lennard-Jones energies. The runner resolves
 that ceiling once before the candidate loop. The examples use a short LJ
 relaxation budget (`max_steps: 10`, `fmax: 0.3`,
 `reject_on_unconverged: false`) so the gallery stays runnable; the filter
-defaults remain 100 steps and `fmax=0.01`. The adsorbates are rigid
-(`conformers: none`) and the distance bounds are size-aware.
+defaults remain 100 steps and `fmax=0.01`. The distance bounds are size-aware.
+
+The adsorbates use rigid rotamers: RDKit locates the rotatable bonds and ASE
+sets the declared dihedrals. The examples set `conformers: rotamers`,
+`dihedrals: 6` (six uniform points in `[0, 360)` per rotor) and
+`max_rotamers: 64`; a molecule with no rotatable bond keeps a single
+structure.

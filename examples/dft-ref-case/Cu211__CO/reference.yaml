@@ -1,0 +1,59 @@
+# CO on Cu(211).
+source:
+  citation: >-
+    M. O. Ozbek, A theoretical study of CO adsorption on Cu(211) surface with
+    coverage effects, Turk. J. Chem. 46 (2022) 1199-1209.
+  doi: 10.55730/1300-0527.3427
+  read: full text (PMC10395743), Tables 1 and 2
+dft:
+  code: Quantum ESPRESSO
+  functional: PBE (no dispersion correction)
+model:
+  surface: Cu(211), a = 3.643 A; a three-atom-wide (111) terrace and a (100) step
+  cell: >-
+    one terrace period times four atoms along the step, i.e. 0.25 ML with
+    one CO (the paper's lowest coverage); five layers, six at the step edge
+  vacuum_A: 15
+  relaxed: adsorbate and all but the two bottom layers
+# Substrate tags in substrate.xyz: 1 step-edge row, 2 middle terrace row,
+# 3 row at the foot of the step.
+# Energies are the paper's values at 0.25 ML converted from kJ/mol.
+# The paper names its sites but prints no starting geometry. manual.xyz puts
+# an upright CO, carbon down, along the outward normal of each of the eight
+# site cores of sites.yaml, 1.9 A clear of every Cu atom.
+manual_baseline: {file: manual.xyz, n_starts: 8}
+references:
+  - name: T1-step-edge-top          # -92 kJ/mol, C-Cu 1.838 A
+    e_ads: -0.95
+    contacts:
+      - {adsorbate: C, substrate: Cu, r_max: 2.1, n_min: 1, n_max: 1}
+      - {adsorbate: C, substrate: Cu, r_max: 2.1, n_min: 1, substrate_tag: 1}
+  - name: B-step-edge-bridge        # -95 kJ/mol, C-Cu 1.970 A (mean)
+    e_ads: -0.98
+    contacts:
+      - {adsorbate: C, substrate: Cu, r_max: 2.25, n_min: 2, n_max: 2}
+      - {adsorbate: C, substrate: Cu, r_max: 2.25, n_min: 2, substrate_tag: 1}
+  - name: T2-terrace-top            # -67 kJ/mol, C-Cu 1.850 A
+    e_ads: -0.69
+    contacts:
+      - {adsorbate: C, substrate: Cu, r_max: 2.1, n_min: 1, n_max: 1}
+      - {adsorbate: C, substrate: Cu, r_max: 2.1, n_min: 1, substrate_tag: [2, 3]}
+  # The paper names four three-fold sites: F1 (-56) and H1 (-72 kJ/mol) on
+  # the terrace, F2 (-84) and H2 (-92 kJ/mol) next to the step edge. Which
+  # hollow of the slab is which, and which is fcc or hcp, was read from the
+  # text only, not from the figure. They are therefore grouped by whether
+  # the hollow includes a step-edge atom; fcc and hcp are not told apart.
+  # Caution: a hollow at the foot of the step also touches the edge atom of
+  # the terrace above it, so the first group can include such structures.
+  - name: hollow-at-step-edge-F2-or-H2
+    e_ads: -0.95
+    e_ads_all: [-0.87, -0.95]
+    contacts:
+      - {adsorbate: C, substrate: Cu, r_max: 2.35, n_min: 3, n_max: 3}
+      - {adsorbate: C, substrate: Cu, r_max: 2.35, n_min: 1, substrate_tag: 1}
+  - name: hollow-on-terrace-F1-or-H1
+    e_ads: -0.75
+    e_ads_all: [-0.58, -0.75]
+    contacts:
+      - {adsorbate: C, substrate: Cu, r_max: 2.35, n_min: 3, n_max: 3}
+      - {adsorbate: C, substrate: Cu, r_max: 2.35, n_min: 0, n_max: 0, substrate_tag: 1}

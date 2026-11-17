@@ -1,0 +1,40 @@
+# Sampling-density tier 5 of 5 (low -> high).
+# Chain: GeometryFilter -> Lennard-Jones single-point screen. The accepted
+# placements are written to results/accepted.xyz, the input of
+#   adsorption-relax run results/accepted.xyz --config examples/relax.yaml
+# Usage (TEMPLATE wants an absolute path or a path inside the example family):
+#   TEMPLATE=$PWD/examples/density-tiers/run.tier5.yaml examples/0-SingleSite/run_all.sh
+# Grid per (site, conformer): 200000 = 100 directions x 100 orientations x 20 distances.
+adsorbate:
+  conformers: rotamers
+  dihedrals: 10
+  max_rotamers: 100
+protocol:
+  n_oa: 100
+  n_rot: 100
+  n_d: 20
+  d_min: null  # hard-sphere contact distance of each site and adsorbate
+  d_max: 3.0
+  d_min_radius_scale: 0.0
+  d_max_radius_scale: 0.0
+  anchor: com
+  orientation_kind: auto
+filters:
+- _target_: adsorption.filters.GeometryFilter
+  scale: 1.0
+# Cheap steric screen: single-point Lennard-Jones, no optimizer.
+- _target_: adsorption.filters.LennardJonesScreenFilter
+  e_cut: null
+budget:
+  max_candidates: null
+start: 1
+stop: null
+storage:
+  xyz: true  # complete extxyz frames for adsorption-relax
+outputs: ./results
+parallel:
+  backend: loky
+  engine: ray
+  n_jobs: 6
+  chunk_factor: 4
+  threads_per_worker: 1

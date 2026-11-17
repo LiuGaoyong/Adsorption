@@ -1,0 +1,54 @@
+CaO001__HCOOH
+  rung              grid  generated    det.     s1     s2     s3     s4     s5
+  g00100           5x5x2        100      21     16     18     17     26     24
+  g00300          13x6x2        300      69     61     63     60     75     53
+  g01000          20x8x3       1008     212    215    201    210    232    189
+  g03000         34x15x3       3015     696    646    630    633    653    609
+  g10000         55x30x3       9990    2131   2069   2026   2093   2135   2063
+CaO001__ethyl-formate
+  rung              grid  generated    det.     s1     s2     s3     s4     s5
+  g00100           5x5x2        100      21     17     15     17     26     21
+  g00300          13x6x2        300      67     60     53     61     64     53
+  g01000          20x8x3       1008     186    193    176    202    206    187
+  g03000         34x15x3       3015     634    570    556    570    574    583
+  g10000         55x30x3       9990    2047   1814   1833   1894   1899   1884
+Pt111__C6H6
+  rung              grid  generated    det.     s1     s2     s3     s4     s5
+  g00100           5x5x2        100      22     16     16     12     25     17
+  g00300          15x5x2        300      68     54     57     52     69     40
+  g01000          19x9x3        999     214    164    167    181    210    164
+  g03000         29x17x3       3009     582    523    507    544    544    515
+  g10000         57x29x3      10005    1923   1753   1688   1759   1802   1766
+Pd111__C6H6
+  rung              grid  generated    det.     s1     s2     s3     s4     s5
+  g00100           5x5x2        100      21     11     13     15     24     16
+  g00300          11x7x2        294      70     47     48     48     53     40
+  g01000          18x9x3        999     201    160    156    181    195    157
+  g03000         29x17x3       3009     578    503    490    535    524    502
+  g10000         60x28x3      10080    1960   1700   1670   1736   1796   1733
+Cu111__C6H6
+  rung              grid  generated    det.     s1     s2     s3     s4     s5
+  g00100           6x4x2        104      22     17     17     14     28     19
+  g00300          10x7x2        294      61     48     53     52     59     42
+  g01000          19x9x3        999     221    159    166    180    205    166
+  g03000         31x16x3       2976     604    506    504    533    529    514
+  g10000         60x28x3       9996    1981   1727   1675   1744   1809   1762
+Pd111__1-hexene
+  rung              grid  generated    det.     s1     s2     s3     s4     s5
+  g00100           4x2x2        192      48     27     32     27     30     41
+  g00300           6x4x2        576     118    100     97     96     93    108
+  g01000          14x4x3       2016     364    346    351    340    334    309
+  g03000          18x9x3       5994    1146   1047   1054   1051   1046    999
+  g10000         33x17x3      19890    4159   3482   3511   3458   3401   3474
+Cu211__CO
+  rung              grid  generated    det.     s1     s2     s3     s4     s5
+  g00100           4x3x2        102      29     25     23     23     34     24
+  g00300           8x5x2        300      89     73     69     79     90     80
+  g01000          14x6x3        990     262    263    241    254    266    241
+  g03000         23x11x3       3003     767    774    746    759    776    752
+  g10000         40x21x3      10017    2566   2586   2562   2580   2593   2592
+grid: n_oa x n_rot x n_d of the deterministic product.
+generated: candidates of every arm (equal by construction).
+det., s1..s5: placements that pass the geometric floor, i.e. the
+number of relaxations of the deterministic run and of each seed
+of the random arm.

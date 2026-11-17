@@ -1,0 +1,5 @@
+# Site cores: indices into substrate.xyz. Written by build_refs.py.
+top: [52]
+bridge: [45, 52]
+hcp: [45, 46, 52]
+fcc: [45, 51, 52]

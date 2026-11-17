@@ -1,0 +1,35 @@
+# 1-Hexene on Pd(111).
+source:
+  citation: >-
+    J. E. S. van der Hoeven, H. T. Ngan, G. Yan, J. Aizenberg, R. J. Madix,
+    P. Sautet, C. M. Friend, Unraveling 1-Hexene Hydrogenation over Dilute
+    Pd-in-Au Alloys, J. Phys. Chem. C 126 (2022) 15710-15723.
+  doi: 10.1021/acs.jpcc.2c04982
+  read: accepted manuscript (OSTI), methods and Table 2
+  caveat: >-
+    A correction to this article exists (J. Phys. Chem. C 127 (2023)
+    5640-5641, doi 10.1021/acs.jpcc.3c00557). It was not read; check whether
+    it changes the adsorption energy quoted below.
+dft:
+  code: VASP
+  functional: optPBE-vdW
+  cutoff_eV: 400
+  kpoints: [7, 7, 1]
+  force_criterion_eV_per_A: 0.03
+model:
+  surface: Pd(111)
+  lattice_constant: >-
+    not printed in the paper; substrate.xyz uses the experimental 3.89 A
+  cell: 4x4, six layers (stated for the Pd1Au(111) model; assumed for Pd)
+  relaxed: adsorbate and the two upper layers
+references:
+  # The paper reports one adsorption energy and does not describe the
+  # geometry in the text. The criterion below only asks that the C=C carbons
+  # are bound to the surface, which holds for both the di-sigma and the pi
+  # mode; di-sigma is reported as the most stable mode of linear alkenes on
+  # Pd(111) at low coverage elsewhere (Surf. Sci. 602 (2008), not checked in
+  # detail). Treat this case as an energy reference, not a structural one.
+  - name: alkene-bound
+    e_ads: -1.67
+    contacts:
+      - {adsorbate: C, substrate: Pd, r_max: 2.4, n_min: 2}

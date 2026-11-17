@@ -11,7 +11,7 @@ whatever construction is used. Quaternion algebra goes through
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from abc import ABC, abstractmethod
 
 import numpy as np
 
@@ -34,23 +34,60 @@ __all__ = [
 ]
 
 
-@runtime_checkable
-class RotationSet(Protocol):
+_ANTIPARALLEL_TOL = 1e-8
+"""``1 + u.v`` below which the closed form is ill-conditioned."""
+
+
+def _shortest_arc_quaternions(
+    axis: np.ndarray,
+    directions: np.ndarray,
+) -> np.ndarray:
+    """Return the shortest-arc quaternions mapping ``axis`` onto each row.
+
+    The closed form ``q = normalize(1 + u.v, u x v)`` is evaluated for every
+    direction at once. A direction antiparallel to the axis has no shortest
+    arc (every half-turn about a perpendicular axis works); those rows fall
+    back to :func:`shortest_arc_quaternion`, i.e. scipy's convention.
+
+    Args:
+        axis: Unit body-frame axis, shape ``(3,)``.
+        directions: Unit target directions, shape ``(n, 3)``.
+
+    Returns:
+        np.ndarray: Standardised unit quaternions, shape ``(n, 4)``.
+    """
+    u = np.asarray(axis, dtype=float)
+    v = np.asarray(directions, dtype=float)
+    w = 1.0 + v @ u
+    xyz = np.cross(np.broadcast_to(u, v.shape), v)
+    quaternions = np.column_stack((w, xyz))
+    norms = np.linalg.norm(quaternions, axis=1)
+    degenerate = w < _ANTIPARALLEL_TOL
+    norms[degenerate] = 1.0
+    quaternions = quaternions / norms[:, None]
+    for row in np.flatnonzero(degenerate):
+        quaternions[row] = shortest_arc_quaternion(u, v[row])
+    return standardize_quaternion(quaternions)
+
+
+class RotationSet(ABC):
     """A deterministic, indexed set of rotations about an anchor."""
 
-    name: str
+    name: str = ""
     """Short name used in protocol records."""
 
+    @abstractmethod
     def count(self) -> int:
         """Return the number of rotations in the set."""
-        ...
+        raise NotImplementedError
 
+    @abstractmethod
     def quaternion(self, index: int) -> np.ndarray:
         """Return the unit quaternion ``(w, x, y, z)`` at ``index``."""
-        ...
+        raise NotImplementedError
 
 
-class FixedRotation:
+class FixedRotation(RotationSet):
     """The identity rotation, used when orientation does not matter.
 
     A single-atom adsorbate has no orientation degree of freedom; this set
@@ -72,7 +109,7 @@ class FixedRotation:
         return np.array([1.0, 0.0, 0.0, 0.0], dtype=float)
 
 
-class ShortestArcSet:
+class ShortestArcSet(RotationSet):
     """The direction-only orientation set of Eqs. (9)-(10).
 
     A body-frame reference axis is mapped onto every direction of a sphere
@@ -102,9 +139,8 @@ class ShortestArcSet:
         self.axis = unit_vector(np.asarray(axis, dtype=float))
         active_grid: DirectionGrid = FibonacciGrid() if grid is None else grid
         self.directions = np.asarray(active_grid.points(n), dtype=float)
-        self._quaternions = tuple(
-            shortest_arc_quaternion(self.axis, direction)
-            for direction in self.directions
+        self._quaternions = _shortest_arc_quaternions(
+            self.axis, self.directions
         )
 
     def count(self) -> int:
@@ -113,14 +149,14 @@ class ShortestArcSet:
 
     def quaternion(self, index: int) -> np.ndarray:
         """Return the shortest-arc rotation onto direction ``index``."""
-        return np.asarray(self._quaternions[int(index)], dtype=float)
+        return np.array(self._quaternions[int(index)], dtype=float)
 
     def image(self, index: int) -> np.ndarray:
         """Return the placed reference axis at ``index``."""
         return np.asarray(self.directions[int(index)], dtype=float)
 
 
-class DirectionRollSet:
+class DirectionRollSet(RotationSet):
     """The direction-plus-roll orientation set on ``S^2 x S^1``.
 
     The reference axis is mapped onto every direction of a grid with the
@@ -173,9 +209,7 @@ class DirectionRollSet:
             for gamma in rolls:
                 roll = axis_angle_quaternion(direction, float(gamma))
                 quaternions.append(
-                    standardize_quaternion(
-                        quaternion_raw_multiply(roll, base)
-                    )
+                    standardize_quaternion(quaternion_raw_multiply(roll, base))
                 )
         self._quaternions = tuple(quaternions)
 

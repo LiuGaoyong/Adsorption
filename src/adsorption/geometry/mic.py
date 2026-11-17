@@ -64,10 +64,25 @@ def displacements_mic(
         raise ValueError(f"The last axis must be 3, got {v.shape}.")
     if not is_periodic(cell, pbc):
         return v.copy()
+    c = np.asarray(cell, dtype=float)
+    mask = _axis_mask(pbc)
+    axes = np.ones(3, dtype=bool) if mask is True else mask
+    if _is_orthorhombic(c):
+        # Exact minimum image for a diagonal cell: wrap each periodic axis
+        # independently. ASE's general path runs a Minkowski reduction per
+        # call, which dominates small evaluations such as a slab cross block.
+        lengths = np.diag(c)
+        out = v.copy()
+        for axis in np.flatnonzero(axes):
+            length = lengths[axis]
+            out[..., axis] -= length * np.round(out[..., axis] / length)
+        return out
     flat = v.reshape(-1, 3)
-    out, _ = find_mic(
-        flat,
-        np.asarray(cell, dtype=float),
-        _axis_mask(pbc),  # type: ignore
-    )
+    out, _ = find_mic(flat, c, mask)  # type: ignore
     return np.asarray(out, dtype=float).reshape(v.shape)
+
+
+def _is_orthorhombic(cell: np.ndarray, tol: float = 1e-10) -> bool:
+    """Return whether the cell matrix is diagonal with positive lengths."""
+    off = cell - np.diag(np.diag(cell))
+    return bool(np.all(np.abs(off) < tol) and np.all(np.diag(cell) > tol))

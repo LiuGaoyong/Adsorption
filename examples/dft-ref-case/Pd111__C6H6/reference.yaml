@@ -1,0 +1,53 @@
+# Benzene on Pd(111).
+source:
+  citation: >-
+    W. Liu, V. G. Ruiz, G.-X. Zhang, B. Santra, X. Ren, M. Scheffler,
+    A. Tkatchenko, Structure and energetics of benzene adsorbed on
+    transition-metal surfaces: density-functional theory with van der Waals
+    interactions including collective substrate response,
+    New J. Phys. 15 (2013) 053046.
+  doi: 10.1088/1367-2630/15/5/053046
+  read: full text (Tables 2, 4, 5 and 6)
+dft:
+  code: FHI-aims
+  functional: PBE + vdW-surf (energies below); PBE and PBE+vdW also tabulated
+  kpoints: [6, 6, 1]
+model:
+  surface: Pd(111), a = 3.949 A (the PBE+vdW-surf lattice constant)
+  cell: 3x3, six layers
+  vacuum_A: 20
+  relaxed: adsorbate and the two upper layers
+# How the paper placed the molecule: flat, ring parallel to the surface, at
+# four sites (atop, bridge, fcc, hcp) in two azimuths (0 and 30 degrees, the
+# angle of a C-C bond to the close-packed rows): eight starts, then relaxed.
+# Five of the eight starts are minima; atop30, fcc30 and hcp30 relax to
+# bri30. At bri30 the mean C-Pd distance is 2.10 A.
+# manual.xyz rebuilds those eight starts. The paper prints no starting
+# height; the ring is put 2.5 A above the top layer.
+manual_baseline: {file: manual.xyz, n_starts: 8}
+references:
+  - name: bri30
+    e_ads: -2.14
+    site: {kind: bridge, tol: 0.5}
+    azimuth: {value: 30, tol: 10}
+    tilt: {max: 15}
+  - name: hcp0
+    e_ads: -1.97
+    site: {kind: hcp, tol: 0.5}
+    azimuth: {value: 0, tol: 10}
+    tilt: {max: 15}
+  - name: fcc0
+    e_ads: -1.94
+    site: {kind: fcc, tol: 0.5}
+    azimuth: {value: 0, tol: 10}
+    tilt: {max: 15}
+  - name: bri0
+    e_ads: -1.81
+    site: {kind: bridge, tol: 0.5}
+    azimuth: {value: 0, tol: 10}
+    tilt: {max: 15}
+  - name: atop0
+    e_ads: -1.37
+    site: {kind: top, tol: 0.5}
+    azimuth: {value: 0, tol: 10}
+    tilt: {max: 15}

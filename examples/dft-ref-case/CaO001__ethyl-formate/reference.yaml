@@ -1,0 +1,39 @@
+# Ethyl formate on CaO(001).
+source:
+  citation: >-
+    P. Bechthold, J. Juan, A. Juan, J. M. Marchetti, The adsorption of ethyl
+    formate on CaO: A DFT study, J. Phys. Chem. Solids 185 (2024) 111780.
+  doi: 10.1016/j.jpcs.2023.111780
+  read: main text and supplementary material (Figures S1-S5)
+dft:
+  code: VASP
+  functional: PBE + Grimme D2
+  cutoff_eV: 800
+  kpoints: [7, 7, 1]
+  force_criterion_eV_per_A: 0.01
+model:
+  surface: CaO(001), rock salt, a = 4.84 A
+  cell: 4x4 primitive surface cells (13.69 A), five layers, 80 Ca + 80 O
+  vacuum_A: 30
+  relaxed: adsorbate and the four upper layers
+  coverage: about 1/8 ML
+# How the paper placed the molecule: four sites times three approaches
+# (parallel to the surface, P; upright with the formyl end down, V_I; upright
+# with the methyl end down, V_II): 12 starting geometries (Figures S2-S5).
+# manual.xyz rebuilds them. The paper numbers the sites 1-4 without naming
+# them; the four sites of the companion formic-acid paper are used here, and
+# the starting height is chosen (lowest atom 2.0 A above the surface).
+manual_baseline: {file: manual.xyz, n_starts: 12}
+# Adsorption energies of the 12 starts (eV): P1-P4, V_I1-4, V_II1-4.
+energy_levels: [-0.60, -0.60, -1.21, -0.60, -0.45, -0.45, -0.45, -0.45,
+                -0.21, -0.53, -0.22, -0.21]
+references:
+  # P3, the only configuration analysed in the main text: the carbonyl
+  # carbon binds a surface oxygen (C-O 1.43 A, the carbon becomes
+  # tetrahedral) and the two ester oxygens bind surface Ca (2.33 A and
+  # about 2.5 A). The molecule keeps its own bonds.
+  - name: P3-carbonyl-on-surface-oxygen
+    e_ads: -1.21
+    contacts:
+      - {adsorbate: C, substrate: O, r_max: 1.6, n_min: 1}
+      - {adsorbate: O, substrate: Ca, r_max: 2.6, n_min: 1}
