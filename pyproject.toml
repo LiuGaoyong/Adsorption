@@ -38,9 +38,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ray = ["ray[default]>=2.50"]
 nequip = ["nequip>=0.17.0"]
 docs = ["python-docx>=1.1"]
+ray = ["ray>=2.50"]
 
 [project.scripts]
 adsorption-run = "adsorption.runner:run"
@@ -55,7 +55,7 @@ dev = [
     "jupyterlab",
     "matplotlib>=3.8",
     "nequip>=0.17.0",
-    "ray[default]>=2.50"
+    "ray>=2.50"
 ]
 
 # uv config

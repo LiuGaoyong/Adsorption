@@ -11432,6 +11432,7 @@ packages:
   - rdkit>=2025
   - hydra-core
   - pyyaml>=6
-  - ray[default]>=2.50 ; extra == 'ray'
   - nequip>=0.17.0 ; extra == 'nequip'
+  - python-docx>=1.1 ; extra == 'docs'
+  - ray>=2.50 ; extra == 'ray'
   requires_python: '>=3.12,<3.14'
